@@ -271,6 +271,70 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
           },
         ),
         tool(
+          'plan_tasks',
+          'Decompose the user request into sub-tasks and dispatch them to other agents in this group. Output a complete plan in a single call; do NOT call this tool multiple times. The reasoning field should briefly explain why this decomposition makes sense. Each task must specify id (t1/t2/t3 format), agentId (from available agents), and task (self-contained instruction). Use dependsOn for ordering, expectedOutputs for artifact handoffs, acceptanceCriteria for text-only review tasks, targetPaths/expectedWorkspaceChanges/requiredCommands/requiredEvidence for code tasks.',
+          {
+            reasoning: z.string().min(1),
+            tasks: z
+              .array(
+                z.object({
+                  id: z.string().min(1),
+                  agentId: z.string().min(1),
+                  task: z.string().min(1),
+                  taskKind: z.enum(['code', 'test', 'review', 'design', 'doc', 'analysis']).optional(),
+                  dependsOn: z.array(z.string()).optional(),
+                  expectedOutputs: z
+                    .array(
+                      z.object({
+                        id: z.string().min(1),
+                        type: z.enum(['web_app', 'document', 'image', 'ppt']),
+                        required: z.boolean().optional(),
+                        description: z.string().optional(),
+                      }),
+                    )
+                    .optional(),
+                  inputs: z
+                    .array(
+                      z.object({
+                        fromTaskId: z.string().min(1),
+                        outputId: z.string().min(1),
+                        required: z.boolean().optional(),
+                        description: z.string().optional(),
+                      }),
+                    )
+                    .optional(),
+                  acceptanceCriteria: z.array(z.string().min(1)).optional(),
+                  targetPaths: z.array(z.string().min(1)).optional(),
+                  expectedWorkspaceChanges: z.array(z.string().min(1)).optional(),
+                  requiredCommands: z
+                    .array(
+                      z.object({
+                        command: z.string().min(1),
+                        description: z.string().optional(),
+                        cwd: z.string().min(1).optional(),
+                        timeoutMs: z.number().int().positive().optional(),
+                      }),
+                    )
+                    .optional(),
+                  requiredEvidence: z.array(z.string().min(1)).optional(),
+                }),
+              )
+              .min(1),
+          },
+          async (args) => {
+            const result = await toolRegistry.execute('plan_tasks', args, toolCtx)
+            if (!result.ok) {
+              return {
+                content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+                isError: true,
+              }
+            }
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
+            }
+          },
+        ),
+        tool(
           'ask_user',
           'Ask the user one or more structured multiple-choice questions with 2-4 options. Prefer this over plain text when progress depends on a finite user choice, such as scope, target platform, design direction, implementation route, destructive action, or acceptance criteria. Do not use it for open-ended discussion or non-blocking details. Returns answers keyed by question text.',
           {
@@ -387,12 +451,13 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               activeTextPartIndex = -1
               const callId = newToolCallId()
               toolCallIdByUseId.set(block.id, callId)
+              const normalizedToolName = stripMcpPrefix(block.name)
               toolNameByUseId.set(block.id, block.name)
               yield baseEvent({
                 type: 'tool.call' as const,
                 messageId,
                 callId,
-                toolName: block.name,
+                toolName: normalizedToolName,
                 args: block.input ?? {},
               }) as StreamEvent
             } else if (block.type === 'text' && activeTextPartIndex === -1 && block.text) {
@@ -757,6 +822,12 @@ async function bridgePermission(
 
   // 5. 默认放行（Read / Grep / Glob / WebFetch / WebSearch / Task / TodoWrite / ...）
   return allow()
+}
+
+/** 去掉 Claude Code SDK 给 MCP 工具加的 `mcp__<server>__` 前缀，归一化为原始工具名。 */
+function stripMcpPrefix(name: string): string {
+  const prefix = 'mcp__agenthub__'
+  return name.startsWith(prefix) ? name.slice(prefix.length) : name
 }
 
 /** 把 Write/Edit 的输入转成「应用后的完整文件内容」用于 diff viewer。 */
