@@ -75,6 +75,8 @@ const uiText = {
   preferredModel: '\u9996\u9009\u6a21\u578b',
   modelConnectionStatus: '\u8fde\u63a5\u72b6\u6001',
   modelNetworkOutlet: '\u7f51\u7edc\u51fa\u53e3',
+  addNetworkOutlet: '\u6dfb\u52a0\u51fa\u53e3',
+  addNetworkOutletDialog: '\u6dfb\u52a0\u7f51\u7edc\u51fa\u53e3',
   modelFailureReason: '\u5931\u8d25\u539f\u56e0',
   oneClickTest: '\u4e00\u952e\u68c0\u6d4b',
   setPreferredModel: '\u8bbe\u4e3a\u9996\u9009\u6a21\u578b',
@@ -498,6 +500,13 @@ async function main() {
   await smokeModelCard.getByRole('button', { name: `${uiText.deleteModel} ${smokeModelName}` }).click()
   await smokeModelCard.getByRole('button', { name: `${uiText.confirmDeleteModel} ${smokeModelName}` }).click()
   await smokeModelCard.waitFor({ state: 'hidden', timeout: 90_000 })
+  const addNetworkOutletButton = page.locator('main').getByRole('button', { name: uiText.addNetworkOutlet }).first()
+  await addNetworkOutletButton.waitFor({ timeout: 90_000 })
+  await addNetworkOutletButton.click()
+  const networkOutletDialog = page.locator('[role="dialog"]').filter({ hasText: uiText.addNetworkOutletDialog }).first()
+  await networkOutletDialog.getByText(uiText.addNetworkOutletDialog, { exact: true }).waitFor({ timeout: 90_000 })
+  await networkOutletDialog.getByRole('button', { name: '\u53d6\u6d88' }).click()
+  await networkOutletDialog.waitFor({ state: 'hidden', timeout: 10_000 })
   const modelManagementScreenshot = path.join(outDir, 'model-management-add-delete.png')
   await page.screenshot({ path: modelManagementScreenshot, fullPage: true })
   const modelManagementBodyText = await page.locator('body').innerText()
@@ -508,6 +517,7 @@ async function main() {
     preferredModel: modelManagementBodyText.includes(uiText.preferredModel),
     connectionStatus: modelManagementBodyText.includes(uiText.modelConnectionStatus),
     networkOutlet: modelManagementBodyText.includes(uiText.modelNetworkOutlet),
+    addNetworkOutletButton: await addNetworkOutletButton.isVisible(),
     failureReason: modelManagementBodyText.includes(uiText.modelFailureReason),
     oneClickTest: modelManagementBodyText.includes(uiText.oneClickTest),
     setPreferredModel: modelManagementBodyText.includes(uiText.setPreferredModel),

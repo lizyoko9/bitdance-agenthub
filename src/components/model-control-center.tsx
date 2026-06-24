@@ -95,6 +95,15 @@ type ModelDraft = {
   networkProfileId: string
 }
 
+type NetworkDraft = {
+  name: string
+  mode: NetworkMode
+  proxyUrl: string
+  bindInterface: string
+  regionLabel: string
+  appliesTo: NetworkAppliesTo
+}
+
 const providerDefaults: Record<
   ModelProfileProvider,
   Pick<ModelDraft, 'baseUrl' | 'apiKeyRef' | 'model' | 'contextWindow' | 'supportsVision' | 'supportsToolCalling' | 'supportsJsonMode'>
@@ -206,6 +215,17 @@ function modelToDraft(model: ModelProfileRow): ModelDraft {
   }
 }
 
+function defaultNetworkDraft(): NetworkDraft {
+  return {
+    name: '直连模型出口',
+    mode: 'direct',
+    proxyUrl: '',
+    bindInterface: '',
+    regionLabel: '',
+    appliesTo: 'model_only',
+  }
+}
+
 export function ModelControlCenter() {
   const [models, setModels] = useState<ModelProfileRow[]>([])
   const [networks, setNetworks] = useState<NetworkProfileRow[]>([])
@@ -220,19 +240,13 @@ export function ModelControlCenter() {
   const [routeNeedsTools, setRouteNeedsTools] = useState(true)
   const [routeNeedsJson, setRouteNeedsJson] = useState(true)
   const [addModelOpen, setAddModelOpen] = useState(false)
+  const [addNetworkOpen, setAddNetworkOpen] = useState(false)
   const [showConfigPanel, setShowConfigPanel] = useState(false)
   const [editingModel, setEditingModel] = useState<ModelProfileRow | null>(null)
   const [pendingDeleteModelId, setPendingDeleteModelId] = useState<string | null>(null)
   const [inputTokens, setInputTokens] = useState('1200')
   const [outputTokens, setOutputTokens] = useState('800')
-  const [networkDraft, setNetworkDraft] = useState({
-    name: '直连模型出口',
-    mode: 'direct' as NetworkMode,
-    proxyUrl: '',
-    bindInterface: '',
-    regionLabel: '',
-    appliesTo: 'model_only' as NetworkAppliesTo,
-  })
+  const [networkDraft, setNetworkDraft] = useState<NetworkDraft>(() => defaultNetworkDraft())
   const [modelDraft, setModelDraft] = useState<ModelDraft>(() => defaultModelDraft())
   const [secretDraft, setSecretDraft] = useState({
     enabled: true,
@@ -279,6 +293,16 @@ export function ModelControlCenter() {
   const handleModelDialogOpenChange = (open: boolean) => {
     setAddModelOpen(open)
     if (!open) setEditingModel(null)
+  }
+
+  const openAddNetworkDialog = () => {
+    setNetworkDraft(defaultNetworkDraft())
+    setAddNetworkOpen(true)
+  }
+
+  const handleNetworkDialogOpenChange = (open: boolean) => {
+    setAddNetworkOpen(open)
+    if (!open) setNetworkDraft(defaultNetworkDraft())
   }
 
   const upsertModelLocally = useCallback((model: ModelProfileRow) => {
@@ -380,6 +404,9 @@ export function ModelControlCenter() {
         regionLabel: networkDraft.regionLabel || null,
       })
       setSelectedNetworkId(network.id)
+      setNetworks((current) => [network, ...current.filter((item) => item.id !== network.id)])
+      setAddNetworkOpen(false)
+      setNetworkDraft(defaultNetworkDraft())
       setNotice('网络出口已创建')
       await reload()
     } catch (err) {
@@ -788,6 +815,100 @@ export function ModelControlCenter() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={addNetworkOpen} onOpenChange={handleNetworkDialogOpenChange}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>添加网络出口</DialogTitle>
+            <DialogDescription>
+              给模型配置代理或专用网络出口。添加后，模型配置里可以直接选择这个出口。
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-3" onSubmit={(event) => {
+            event.preventDefault()
+            void submitNetwork()
+          }}>
+            <Field label="出口名称">
+              <Input
+                value={networkDraft.name}
+                onChange={(event) => setNetworkDraft((draft) => ({ ...draft, name: event.target.value }))}
+                placeholder="例如：DeepSeek 直连出口"
+              />
+            </Field>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Field label="出口类型">
+                <select
+                  value={networkDraft.mode}
+                  onChange={(event) =>
+                    setNetworkDraft((draft) => ({ ...draft, mode: event.target.value as NetworkMode }))
+                  }
+                  className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring"
+                >
+                  {networkModes.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {networkModeLabel(mode)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="适用范围">
+                <select
+                  value={networkDraft.appliesTo}
+                  onChange={(event) =>
+                    setNetworkDraft((draft) => ({
+                      ...draft,
+                      appliesTo: event.target.value as NetworkAppliesTo,
+                    }))
+                  }
+                  className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring"
+                >
+                  {networkTargets.map((target) => (
+                    <option key={target} value={target}>
+                      {networkTargetLabel(target)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <Field label="代理地址">
+              <Input
+                value={networkDraft.proxyUrl}
+                onChange={(event) => setNetworkDraft((draft) => ({ ...draft, proxyUrl: event.target.value }))}
+                placeholder="例如：http://127.0.0.1:7890，可留空"
+              />
+            </Field>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Field label="绑定网卡">
+                <Input
+                  value={networkDraft.bindInterface}
+                  onChange={(event) =>
+                    setNetworkDraft((draft) => ({ ...draft, bindInterface: event.target.value }))
+                  }
+                  placeholder="可留空"
+                />
+              </Field>
+              <Field label="地区备注">
+                <Input
+                  value={networkDraft.regionLabel}
+                  onChange={(event) =>
+                    setNetworkDraft((draft) => ({ ...draft, regionLabel: event.target.value }))
+                  }
+                  placeholder="例如：直连 / 香港 / 美国"
+                />
+              </Field>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setAddNetworkOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit" className="gap-1" disabled={saving !== null || !networkDraft.name.trim()}>
+                {saving === 'network' ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                保存出口
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <div
         className={cn(
           'grid min-h-0 flex-1',
@@ -1057,28 +1178,36 @@ export function ModelControlCenter() {
               </div>
             </Section>
 
+            <Section
+              title="网络出口"
+              action={
+                <Button size="xs" variant="outline" className="gap-1" onClick={openAddNetworkDialog}>
+                  <Plus className="size-3" />
+                  添加出口
+                </Button>
+              }
+            >
+              <div className="grid gap-2 xl:grid-cols-2">
+                {networks.length === 0 ? (
+                  <EmptyState label="暂无网络出口" />
+                ) : (
+                  networks.map((network) => (
+                    <NetworkRow
+                      key={network.id}
+                      network={network}
+                      selected={network.id === selectedNetworkId}
+                      modelCount={modelsByNetwork.get(network.id) ?? 0}
+                      saving={saving === `network:${network.id}`}
+                      onSelect={() => setSelectedNetworkId(network.id)}
+                      onTest={() => void runNetworkTest(network)}
+                    />
+                  ))
+                )}
+              </div>
+            </Section>
+
             {showConfigPanel && (
               <>
-                <Section title="网络出口">
-                  <div className="grid gap-2 xl:grid-cols-2">
-                    {networks.length === 0 ? (
-                      <EmptyState label="暂无网络出口" />
-                    ) : (
-                      networks.map((network) => (
-                        <NetworkRow
-                          key={network.id}
-                          network={network}
-                          selected={network.id === selectedNetworkId}
-                          modelCount={modelsByNetwork.get(network.id) ?? 0}
-                          saving={saving === `network:${network.id}`}
-                          onSelect={() => setSelectedNetworkId(network.id)}
-                          onTest={() => void runNetworkTest(network)}
-                        />
-                      ))
-                    )}
-                  </div>
-                </Section>
-
                 <Section title="路由预览">
                   <div className="grid grid-cols-[1fr_8rem_8rem] gap-2">
                     <select
@@ -1193,11 +1322,14 @@ export function ModelControlCenter() {
   )
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
     <section className="space-y-2">
-      <div className="text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">
-        {title}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">
+          {title}
+        </div>
+        {action}
       </div>
       {children}
     </section>
