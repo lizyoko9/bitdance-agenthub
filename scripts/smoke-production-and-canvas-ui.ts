@@ -1008,6 +1008,29 @@ async function main() {
   await page.waitForTimeout(100)
   const afterMinimapBackground = await canvasSurface.evaluate((surface) => getComputedStyle(surface).backgroundPosition)
 
+  const nodesBeforeKeyboardDelete = await page.getByTestId('workflow-canvas-node').count()
+  const edgesBeforeKeyboardDelete = await page.getByTestId('workflow-canvas-edge').count()
+  const keyboardDeletePalettePoint = await findBlankCanvasPoint()
+  await openCanvasPaletteAt(keyboardDeletePalettePoint)
+  await nodePalette.waitFor({ timeout: 30_000 })
+  await nodePalette.getByRole('button', { name: /条件/ }).click()
+  await page.waitForFunction((previous) => {
+    return document.querySelectorAll('[data-testid="workflow-canvas-node"]').length > Number(previous)
+  }, nodesBeforeKeyboardDelete)
+  const keyboardDeleteTarget = page.getByTestId('workflow-canvas-node').last()
+  const keyboardDeleteNodeId = await keyboardDeleteTarget.getAttribute('data-node-id')
+  if (!keyboardDeleteNodeId) throw new Error('Canvas UI check failed: keyboardDeleteNodeId.')
+  await keyboardDeleteTarget.click()
+  await page.keyboard.press('Delete')
+  await page.waitForFunction((nodeId) => {
+    return ![...document.querySelectorAll('[data-testid="workflow-canvas-node"]')].some(
+      (node) => node.getAttribute('data-node-id') === nodeId,
+    )
+  }, keyboardDeleteNodeId)
+  const keyboardDeleteNode =
+    (await page.getByTestId('workflow-canvas-node').count()) === nodesBeforeKeyboardDelete &&
+    (await page.getByTestId('workflow-canvas-edge').count()) === edgesBeforeKeyboardDelete
+
   let runPanelVisible = await page.getByText(uiText.runMonitor).isVisible().catch(() => false)
   if (!runPanelVisible) {
     await page.locator('main button', { hasText: uiText.advancedSettings }).first().click()
@@ -1157,6 +1180,7 @@ async function main() {
     fitView: fitButtonVisible,
     minimap: await minimap.isVisible(),
     minimapFocus: beforeMinimapBackground !== afterMinimapBackground,
+    keyboardDeleteNode,
     runPanel: runPanelVisible,
   }
   for (const [key, value] of Object.entries(canvasChecks)) {

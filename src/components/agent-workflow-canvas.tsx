@@ -39,6 +39,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
@@ -737,6 +738,15 @@ export function AgentWorkflowCanvas() {
     setEdges((current) => current.filter((edge) => edge.id !== edgeId))
   }
 
+  const handleCanvasKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!selectedNodeId) return
+    if (isCanvasFormTarget(event.target)) return
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return
+    event.preventDefault()
+    event.stopPropagation()
+    removeNode(selectedNodeId)
+  }
+
   const updateNode = (nodeId: string, patch: Partial<DraftNode>) => {
     setNodes((current) =>
       current.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
@@ -1337,6 +1347,8 @@ export function AgentWorkflowCanvas() {
 
           <div
             data-testid="workflow-canvas-surface"
+            tabIndex={0}
+            onKeyDown={handleCanvasKeyDown}
             className={cn(
               'relative min-h-0 flex-1 overflow-hidden bg-background',
               pan ? 'cursor-grabbing' : 'cursor-grab',
