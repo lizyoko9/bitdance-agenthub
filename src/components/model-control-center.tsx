@@ -343,6 +343,27 @@ export function ModelControlCenter() {
     }
   }, [routeAgentId, selectedModelId])
 
+  const refreshModelsUntil = useCallback(
+    async (isReady: (modelsNext: ModelProfileRow[]) => boolean, optimisticModel?: ModelProfileRow) => {
+      const withOptimisticModel = (modelsNext: ModelProfileRow[]) =>
+        optimisticModel
+          ? [optimisticModel, ...modelsNext.filter((model) => model.id !== optimisticModel.id)]
+          : modelsNext
+
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const modelsNext = withOptimisticModel(await fetchModelProfiles())
+        setModels(modelsNext)
+        if (isReady(modelsNext)) return modelsNext
+        await new Promise((resolve) => window.setTimeout(resolve, 250))
+      }
+
+      const modelsNext = withOptimisticModel(await fetchModelProfiles())
+      setModels(modelsNext)
+      return modelsNext
+    },
+    [],
+  )
+
   useEffect(() => {
     void reload()
   }, [reload])
@@ -413,8 +434,7 @@ export function ModelControlCenter() {
       }
       setSelectedModelId(model.id)
       setNotice(secret ? '模型配置已创建，密钥已自动绑定' : '模型配置已创建')
-      await reload()
-      upsertModelLocally(model)
+      await refreshModelsUntil((modelsNext) => modelsNext.some((item) => item.id === model.id), model)
     } catch (err) {
       setError(formatError(err))
     } finally {
@@ -448,8 +468,7 @@ export function ModelControlCenter() {
       setAddModelOpen(false)
       setEditingModel(null)
       setNotice(editingModel ? '模型已保存，请重新检测连接状态' : '模型已添加，可以直接在智能体或普通对话里选择使用')
-      await reload()
-      upsertModelLocally(model)
+      await refreshModelsUntil((modelsNext) => modelsNext.some((item) => item.id === model.id), model)
     } catch (err) {
       setError(formatError(err))
     } finally {
@@ -480,8 +499,7 @@ export function ModelControlCenter() {
         }
       }
       setNotice(`已删除模型：${model.name}`)
-      await reload()
-      removeModelLocally(model.id)
+      await refreshModelsUntil((modelsNext) => modelsNext.every((item) => item.id !== model.id))
     } catch (err) {
       setError(formatError(err))
     } finally {

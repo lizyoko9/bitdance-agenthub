@@ -707,51 +707,6 @@ async function main() {
     if (!value) throw new Error(`Tools to Agent assignment check failed: ${key}.`)
   }
 
-  await page.route('**/api/skills/skillsmp-cli', async (route) => {
-    if (route.request().method() !== 'POST') {
-      await route.continue()
-      return
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        result: {
-          ok: true,
-          cli: 'skillsmp',
-          command: 'search',
-          source: 'fixture',
-          baseUrl: 'https://skillsmp.com',
-          query: 'code review',
-          page: 1,
-          limit: 12,
-          sortBy: 'recent',
-          category: null,
-          occupation: null,
-          total: 1,
-          rateLimit: null,
-          items: [
-            {
-              id: 'smoke-research-plus',
-              name: 'smoke-research-plus',
-              description: 'Smoke SkillsMP result for UI rendering.',
-              repository: 'example/smoke-research-plus',
-              creator: 'smoke',
-              sourceUrl: 'https://github.com/example/smoke-research-plus',
-              skillUrl: 'https://skillsmp.com/skills/smoke-research-plus',
-              stars: 42,
-              downloads: 128,
-              category: 'research',
-              occupation: 'operator',
-              updatedAt: null,
-              tags: ['web_research', 'source_summarization'],
-              manifest: { name: 'smoke-research-plus' },
-            },
-          ],
-        },
-      }),
-    })
-  })
   await clickSidebarButton(sidebar, uiText.skillsNav)
   await page.getByText(uiText.skillsMarket, { exact: true }).waitFor({ timeout: 90_000 })
   await page.getByTestId('skillsmp-featured-market').getByText(uiText.skillsFeatured, { exact: true }).waitFor({
