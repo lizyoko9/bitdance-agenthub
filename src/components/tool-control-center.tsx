@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  ArrowLeft,
   Blocks,
   Bot,
   CheckCircle2,
@@ -733,6 +734,7 @@ export function ToolControlCenter() {
   const [storeCategory, setStoreCategory] = useState<SoftwareStoreCategory>('全部')
   const [selectedStoreItemKey, setSelectedStoreItemKey] = useState('codex')
   const [selectedStoreDetailMode, setSelectedStoreDetailMode] = useState<StoreDetailMode>('overview')
+  const [storeDetailOpen, setStoreDetailOpen] = useState(false)
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
@@ -1216,8 +1218,13 @@ export function ToolControlCenter() {
         </header>
 
         <div className="min-h-0 flex-1 overflow-auto p-5">
-          <div className="mx-auto grid max-w-7xl gap-4 xl:grid-cols-[minmax(0,1fr)_30rem]">
-            <section className="min-w-0 space-y-4">
+          <div
+            className={cn(
+              'mx-auto grid max-w-7xl gap-4',
+              storeDetailOpen ? 'grid-cols-1' : 'xl:grid-cols-[minmax(0,1fr)_30rem]',
+            )}
+          >
+            <section className={cn('min-w-0 space-y-4', storeDetailOpen && 'hidden')}>
               <SoftwareAccessAssistant
                 selectedItem={selectedStoreItem}
                 connectedSoftwareCount={connectedSoftwareCount}
@@ -1277,10 +1284,12 @@ export function ToolControlCenter() {
                       onSelect={() => {
                         setSelectedStoreItemKey(item.key)
                         setSelectedStoreDetailMode('overview')
+                        setStoreDetailOpen(true)
                       }}
                       onOpenMode={(mode) => {
                         setSelectedStoreItemKey(item.key)
                         setSelectedStoreDetailMode(mode)
+                        setStoreDetailOpen(true)
                       }}
                     />
                   ))}
@@ -1288,7 +1297,20 @@ export function ToolControlCenter() {
               )}
             </section>
 
-            <aside className="min-w-0 xl:sticky xl:top-5 xl:self-start">
+            <aside className={cn('min-w-0', !storeDetailOpen && 'xl:sticky xl:top-5 xl:self-start')}>
+              {storeDetailOpen && (
+                <div className="mb-3">
+                  <Button
+                    variant="outline"
+                    className="gap-2"
+                    data-testid="software-store-back"
+                    onClick={() => setStoreDetailOpen(false)}
+                  >
+                    <ArrowLeft className="size-4" />
+                    返回软件列表
+                  </Button>
+                </div>
+              )}
               <div className="rounded-lg border bg-background shadow-sm">
                 {selectedStoreItem ? (
                   <div

@@ -124,6 +124,7 @@ const uiText = {
   toolsNav: '\u5de5\u5177\u8fde\u63a5',
   toolsTitle: '\u8f6f\u4ef6\u80fd\u529b\u5546\u5e97',
   advancedTools: '\u9ad8\u7ea7\u914d\u7f6e',
+  toolsBackToList: '\u8fd4\u56de\u8f6f\u4ef6\u5217\u8868',
   toolsSearchPlaceholder: '\u641c\u7d22\u8f6f\u4ef6\u3001CLI\u3001MCP',
   toolsCategory: '\u5f00\u53d1\u5de5\u5177',
   toolsSoftwareCard: 'Codex CLI',
@@ -632,38 +633,51 @@ async function main() {
 
   await clickSidebarButton(sidebar, uiText.toolsNav)
   await page.getByText(uiText.toolsTitle).waitFor({ timeout: 90_000 })
+  const toolsListBodyText = await page.locator('body').innerText()
+  const toolsListSearchInputVisible = await page.getByPlaceholder(uiText.toolsSearchPlaceholder).isVisible()
+  const toolsListAccessAssistantVisible = await page.getByTestId('software-access-assistant').isVisible()
+  const toolsListUsePathVisible = await page.getByTestId('software-store-use-path').isVisible()
   await page.getByTestId('software-store-card-codex').click()
+  await page.getByTestId('software-store-back').getByText(uiText.toolsBackToList, { exact: true }).waitFor({
+    timeout: 90_000,
+  })
   await page.getByTestId('software-store-detail').getByText(uiText.toolsIntro, { exact: true }).waitFor({
     timeout: 90_000,
   })
+  await page.getByTestId('software-store-back').click()
+  await page.getByTestId('software-store-card-codex').waitFor({ timeout: 90_000 })
   await page.getByTestId('software-store-card-codex-cli').click()
+  await page.getByTestId('software-store-back').getByText(uiText.toolsBackToList, { exact: true }).waitFor({
+    timeout: 90_000,
+  })
   await page
     .getByTestId('software-store-detail')
     .getByText(uiText.toolsCliAccess, { exact: true })
     .waitFor({ timeout: 90_000 })
-  await page.getByTestId('software-store-card-codex').click()
   const toolsScreenshot = path.join(outDir, 'tools-simple-workbench.png')
   await page.screenshot({ path: toolsScreenshot, fullPage: true })
   const toolsBodyText = await page.locator('body').innerText()
   const toolsChecks = {
-    title: toolsBodyText.includes(uiText.toolsTitle),
-    advancedButton: toolsBodyText.includes(uiText.advancedTools),
-    searchInput: await page.getByPlaceholder(uiText.toolsSearchPlaceholder).isVisible(),
-    category: toolsBodyText.includes(uiText.toolsCategory),
-    softwareCard: toolsBodyText.includes(uiText.toolsSoftwareCard),
-    modeStat: toolsBodyText.includes(uiText.toolsModeStat),
-    accessAssistantNode: await page.getByTestId('software-access-assistant').isVisible(),
-    accessAssistantText: toolsBodyText.includes(uiText.toolsAccessAssistant),
-    currentSoftware: toolsBodyText.includes(uiText.toolsCurrentSoftware),
-    recommendedAccess: toolsBodyText.includes(uiText.toolsRecommendedAccess),
-    viewCliOrMcp: toolsBodyText.includes(uiText.toolsViewCliOrMcp),
-    oneClickFindSoftware: toolsBodyText.includes(uiText.toolsOneClickFindSoftware),
-    nextStep: toolsBodyText.includes(uiText.toolsNextStep),
-    usePathNode: await page.getByTestId('software-store-use-path').isVisible(),
-    usePathText: toolsBodyText.includes(uiText.toolsUsePath),
-    usePathChoose: toolsBodyText.includes(uiText.toolsStepChoose),
-    usePathCheck: toolsBodyText.includes(uiText.toolsStepCheck),
-    usePathAssign: toolsBodyText.includes(uiText.toolsStepAssign),
+    title: toolsListBodyText.includes(uiText.toolsTitle),
+    advancedButton: toolsListBodyText.includes(uiText.advancedTools),
+    searchInput: toolsListSearchInputVisible,
+    category: toolsListBodyText.includes(uiText.toolsCategory),
+    softwareCard: toolsListBodyText.includes(uiText.toolsSoftwareCard),
+    modeStat: toolsListBodyText.includes(uiText.toolsModeStat),
+    detailBackButton: await page.getByTestId('software-store-back').isVisible(),
+    detailBackText: toolsBodyText.includes(uiText.toolsBackToList),
+    accessAssistantNode: toolsListAccessAssistantVisible,
+    accessAssistantText: toolsListBodyText.includes(uiText.toolsAccessAssistant),
+    currentSoftware: toolsListBodyText.includes(uiText.toolsCurrentSoftware),
+    recommendedAccess: toolsListBodyText.includes(uiText.toolsRecommendedAccess),
+    viewCliOrMcp: toolsListBodyText.includes(uiText.toolsViewCliOrMcp),
+    oneClickFindSoftware: toolsListBodyText.includes(uiText.toolsOneClickFindSoftware),
+    nextStep: toolsListBodyText.includes(uiText.toolsNextStep) || toolsBodyText.includes(uiText.toolsNextStep),
+    usePathNode: toolsListUsePathVisible,
+    usePathText: toolsListBodyText.includes(uiText.toolsUsePath),
+    usePathChoose: toolsListBodyText.includes(uiText.toolsStepChoose),
+    usePathCheck: toolsListBodyText.includes(uiText.toolsStepCheck),
+    usePathAssign: toolsListBodyText.includes(uiText.toolsStepAssign),
     detailHeroNode: await page.getByTestId('software-store-detail-hero').isVisible(),
     detailHeroText: toolsBodyText.includes(uiText.toolsSoftwareCardHero),
     connectionOverviewNode: await page.getByTestId('software-store-connection-overview').isVisible(),
