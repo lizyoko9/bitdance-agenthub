@@ -173,7 +173,10 @@ export async function getWorkflowCanvasReport(workflowId: string): Promise<Workf
     mappingKeys: Object.keys(edge.mapping ?? {}),
     sourceExists: nodeIds.has(edge.sourceNodeId),
     targetExists: nodeIds.has(edge.targetNodeId),
-    artifactType: outputContractByNodeId.get(edge.sourceNodeId)?.artifactType ?? null,
+    artifactType:
+      readString(edge.mapping?.artifactType) ??
+      outputContractByNodeId.get(edge.sourceNodeId)?.artifactType ??
+      null,
   }))
   const workflowGaps = buildWorkflowGaps({ nodes, graph, nodeReports, edgeReports })
   const workflowWarnings = buildWorkflowWarnings({ workflow, nodes, graph, nodeReports })

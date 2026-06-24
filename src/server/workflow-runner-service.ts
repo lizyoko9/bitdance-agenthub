@@ -75,7 +75,8 @@ export async function executeWorkflowRun(
       error: null,
     })
 
-    const result = await executeNodeSafely(run, node, nodeRun, outputsByNodeId)
+    const upstreamOutputs = routedUpstreamOutputsForNode(node.id, edges, outputsByNodeId)
+    const result = await executeNodeSafely(run, node, nodeRun, upstreamOutputs)
     if (result.status === 'paused') {
       const approval = await createWorkflowApprovalRequest(run, node, nodeRun, result)
       result.output = {
@@ -583,6 +584,72 @@ function getString(obj: JsonObject, key: string): string | null {
 
 function cloneJsonObject(value: Record<string, JsonObject>): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject
+}
+
+function routedUpstreamOutputsForNode(
+  targetNodeId: string,
+  edges: WorkflowEdgeRow[],
+  outputsByNodeId: Record<string, JsonObject>,
+): Record<string, JsonObject> {
+  const routed: Record<string, JsonObject> = {}
+  for (const edge of edges) {
+    if (edge.targetNodeId !== targetNodeId) continue
+    const sourceOutput = outputsByNodeId[edge.sourceNodeId]
+    if (!sourceOutput) continue
+    const outputKey = getString(edge.mapping, 'outputKey')
+    const artifactType = getString(edge.mapping, 'artifactType')
+    const targetInputKey = getString(edge.mapping, 'targetInputKey') ?? outputKey ?? 'upstreamOutput'
+    if (!outputKey) {
+      routed[edge.sourceNodeId] = JSON.parse(JSON.stringify(sourceOutput)) as JsonObject
+      continue
+    }
+    routed[edge.sourceNodeId] = {
+      sourceNodeId: edge.sourceNodeId,
+      edgeId: edge.id,
+      outputKey,
+      artifactType,
+      targetInputKey,
+      artifactOnly: true,
+      selectedArtifact: selectOutputArtifact(sourceOutput, outputKey, artifactType),
+      mapping: edge.mapping,
+    }
+  }
+  return routed
+}
+
+function selectOutputArtifact(
+  sourceOutput: JsonObject,
+  outputKey: string,
+  artifactType: string | null,
+): JsonObject {
+  const directOutput = asRecord(sourceOutput[outputKey])
+  const employeeOutput = asRecord(sourceOutput.employeeRunOutput)
+  const softwareOutput = asRecord(sourceOutput.softwareCommandOutput)
+  const outputArtifacts = {
+    ...asStringRecord(sourceOutput.outputArtifacts),
+    ...asStringRecord(employeeOutput.outputArtifacts),
+    ...asStringRecord(softwareOutput.outputArtifacts),
+  }
+  const artifactId = outputArtifacts[outputKey] ?? null
+  return {
+    outputKey,
+    artifactType,
+    artifactId,
+    value: Object.keys(directOutput).length > 0 ? directOutput : null,
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function asStringRecord(value: unknown): Record<string, string> {
+  const record = asRecord(value)
+  return Object.fromEntries(
+    Object.entries(record).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  )
 }
 
 function getBooleanPath(obj: JsonObject, path: string[]): boolean | null {

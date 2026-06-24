@@ -839,6 +839,20 @@ async function main() {
   await page.getByTestId('canvas-customer-delivery-dock').getByText(uiText.videoArtifact).first().waitFor({
     timeout: 30_000,
   })
+  await quickEditor
+    .getByTestId('node-artifact-outputs-editor')
+    .locator('[data-testid="node-artifact-output-add"][data-output-type="code"]')
+    .evaluate((element) => (element as HTMLButtonElement).click())
+  await page
+    .getByTestId('canvas-artifact-output-port')
+    .filter({ hasText: '代码' })
+    .first()
+    .waitFor({ timeout: 30_000 })
+  const multiArtifactOutputPort = await page
+    .getByTestId('canvas-artifact-output-port')
+    .filter({ hasText: '代码' })
+    .first()
+    .isVisible()
   const collapseQuickEditorButton = page.getByTestId('canvas-quick-editor-collapse')
   await collapseQuickEditorButton.waitFor({ timeout: 30_000 })
   const quickEditorCollapsed = page.getByTestId('canvas-quick-editor-collapsed')
@@ -914,6 +928,27 @@ async function main() {
   }, edgesBeforePalette)
   const paletteConnectedEdge =
     (await page.getByTestId('workflow-canvas-edge').count()) > edgesBeforePalette
+
+  const edgesBeforeSpecificArtifactConnect = await page.getByTestId('workflow-canvas-edge').count()
+  const firstNodeCodeOutputPort = page
+    .locator('[data-testid="canvas-artifact-output-port"][data-output-type="code"]')
+    .first()
+  await firstNodeCodeOutputPort.waitFor({ timeout: 30_000 })
+  const codeSourceNodeId = await firstNodeCodeOutputPort.evaluate((element) => {
+    return element.closest('[data-testid="workflow-canvas-node"]')?.getAttribute('data-node-id') ?? ''
+  })
+  if (!codeSourceNodeId) throw new Error('Canvas UI check failed: codeSourceNodeId.')
+  const specificArtifactTargetPort = page
+    .locator(`[data-testid="workflow-canvas-node"]:not([data-node-id="${codeSourceNodeId}"])`)
+    .last()
+    .getByTestId('canvas-node-input-port')
+  await firstNodeCodeOutputPort.evaluate((element) => (element as HTMLButtonElement).click())
+  await specificArtifactTargetPort.evaluate((element) => (element as HTMLButtonElement).click())
+  await page.waitForFunction((previous) => {
+    return document.querySelectorAll('[data-testid="workflow-canvas-edge"]').length > Number(previous)
+  }, edgesBeforeSpecificArtifactConnect)
+  const artifactSpecificEdge =
+    (await page.locator('[data-testid="workflow-canvas-edge"][data-edge-artifact-type="code"]').count()) > 0
 
   const edgesBeforeDragConnect = await page.getByTestId('workflow-canvas-edge').count()
   const newestCanvasNodeForDrag = page.getByTestId('workflow-canvas-node').last()
@@ -1130,6 +1165,8 @@ async function main() {
     quickEditorExpandedAgain,
     nodePaletteCreatedNode: paletteCreatedNode,
     nodePaletteConnectedEdge: paletteConnectedEdge,
+    multiArtifactOutputPort,
+    artifactSpecificEdge,
     connectingPaletteHint: connectedPaletteHint,
     connectionDragPreview: dragPreviewVisible,
     connectionDragEdge: dragConnectedEdge,
@@ -1154,7 +1191,12 @@ async function main() {
       .isVisible(),
     customerVisible: canvasBodyText.includes(uiText.customerVisible),
     videoArtifact: canvasBodyText.includes(uiText.videoArtifact),
-    videoFileHint: canvasBodyText.includes(uiText.canvasVideoFileHint),
+    videoFileHint:
+      canvasBodyText.includes(uiText.canvasVideoFileHint) ||
+      (await page
+        .locator('[data-testid="canvas-artifact-output-port"][data-output-type="video"]')
+        .first()
+        .isVisible()),
     nodeProgressText: canvasBodyText.includes(uiText.canvasNodeProgress),
     nodeDeliveryText: canvasBodyText.includes(uiText.canvasNodeDelivery),
     nodeCompleteText: canvasBodyText.includes(uiText.canvasNodeComplete),

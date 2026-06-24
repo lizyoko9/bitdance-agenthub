@@ -188,7 +188,17 @@ interface DraftEdge {
   id: string
   sourceNodeId: string
   targetNodeId: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
   mapping: JsonObject
+}
+
+interface CanvasArtifactOutput {
+  key: string
+  type: string
+  label: string
+  description: string
+  customerVisible: boolean
 }
 
 interface DragState {
@@ -209,6 +219,8 @@ interface CanvasPanState {
 interface ConnectionDragState {
   pointerId: number
   sourceNodeId: string
+  outputKey: string
+  artifactType: string
   x: number
   y: number
 }
@@ -259,6 +271,7 @@ export function AgentWorkflowCanvas() {
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 })
   const [pan, setPan] = useState<CanvasPanState | null>(null)
   const [connectionDrag, setConnectionDrag] = useState<ConnectionDragState | null>(null)
+  const [connectingOutputKey, setConnectingOutputKey] = useState('')
   const [nodePalette, setNodePalette] = useState<CanvasNodePaletteState | null>(null)
   const [showAdvancedPanel, setShowAdvancedPanel] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -387,10 +400,13 @@ export function AgentWorkflowCanvas() {
             id: edge.id,
             sourceNodeId: edge.sourceNodeId,
             targetNodeId: edge.targetNodeId,
+            sourceHandle: edge.sourceHandle,
+            targetHandle: edge.targetHandle,
             mapping: edge.mapping,
           })),
         )
         setConnectingFromNodeId('')
+        setConnectingOutputKey('')
         setConnectionDrag(null)
       } catch (err) {
         if (alive) setError(formatError(err))
@@ -408,6 +424,7 @@ export function AgentWorkflowCanvas() {
     }
     if (connectingFromNodeId && !nodes.some((node) => node.id === connectingFromNodeId)) {
       setConnectingFromNodeId('')
+      setConnectingOutputKey('')
     }
     if (connectionDrag && !nodes.some((node) => node.id === connectionDrag.sourceNodeId)) {
       setConnectionDrag(null)
@@ -502,6 +519,7 @@ export function AgentWorkflowCanvas() {
     setEdges([])
     setSelectedNodeId('')
     setConnectingFromNodeId('')
+    setConnectingOutputKey('')
     setConnectionDrag(null)
   }
 
@@ -515,6 +533,7 @@ export function AgentWorkflowCanvas() {
     setEdges(canvasDraft.edges)
     setSelectedNodeId(canvasDraft.nodes[0]?.id ?? '')
     setConnectingFromNodeId('')
+    setConnectingOutputKey('')
     setConnectionDrag(null)
   }
 
@@ -585,10 +604,13 @@ export function AgentWorkflowCanvas() {
           id: edge.id,
           sourceNodeId: edge.sourceNodeId,
           targetNodeId: edge.targetNodeId,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
           mapping: edge.mapping,
         })),
       )
       setConnectingFromNodeId('')
+      setConnectingOutputKey('')
       setConnectionDrag(null)
     })
 
@@ -597,11 +619,17 @@ export function AgentWorkflowCanvas() {
       connectingFromNodeId && nodes.some((item) => item.id === connectingFromNodeId)
         ? connectingFromNodeId
         : nodes[nodes.length - 1]?.id ?? ''
+    const sourceNode = nodes.find((item) => item.id === sourceNodeId) ?? null
+    const sourceOutput = sourceNode
+      ? artifactOutputsOf(sourceNode).find((item) => item.key === connectingOutputKey) ??
+        primaryArtifactOutput(sourceNode)
+      : null
     setNodes((current) => [...current, node])
     setSelectedNodeId(node.id)
     setNodePalette(null)
     setConnectionDrag(null)
     setConnectingFromNodeId('')
+    setConnectingOutputKey('')
     if (!sourceNodeId || sourceNodeId === node.id) return
     setEdges((current) => {
       const exists = current.some(
@@ -614,7 +642,9 @@ export function AgentWorkflowCanvas() {
           id: newDraftId('edge'),
           sourceNodeId,
           targetNodeId: node.id,
-          mapping: {},
+          sourceHandle: sourceOutput ? artifactOutputHandle(sourceOutput) : null,
+          targetHandle: 'input',
+          mapping: sourceOutput ? artifactEdgeMapping(sourceOutput) : {},
         },
       ]
     })
@@ -711,15 +741,37 @@ export function AgentWorkflowCanvas() {
     appendNodeToCanvas(node)
   }
 
-  const createEdgeBetween = (sourceId: string, targetId: string) => {
+  const createEdgeBetween = (
+    sourceId: string,
+    targetId: string,
+    sourceOutput?: CanvasArtifactOutput | null,
+  ) => {
     if (!sourceId || !targetId || sourceId === targetId) return false
+    const sourceNode = nodes.find((node) => node.id === sourceId) ?? null
+    const output =
+      sourceOutput ??
+      (sourceNode
+        ? artifactOutputsOf(sourceNode).find((item) => item.key === connectingOutputKey) ??
+          primaryArtifactOutput(sourceNode)
+        : null)
+    const outputKey = output?.key ?? 'artifact'
     const exists = edges.some(
-      (edge) => edge.sourceNodeId === sourceId && edge.targetNodeId === targetId,
+      (edge) =>
+        edge.sourceNodeId === sourceId &&
+        edge.targetNodeId === targetId &&
+        edgeOutputKey(edge) === outputKey,
     )
     if (exists) return false
     setEdges((current) => [
       ...current,
-      { id: newDraftId('edge'), sourceNodeId: sourceId, targetNodeId: targetId, mapping: {} },
+      {
+        id: newDraftId('edge'),
+        sourceNodeId: sourceId,
+        targetNodeId: targetId,
+        sourceHandle: output ? artifactOutputHandle(output) : null,
+        targetHandle: 'input',
+        mapping: output ? artifactEdgeMapping(output) : {},
+      },
     ])
     return true
   }
@@ -730,7 +782,10 @@ export function AgentWorkflowCanvas() {
       current.filter((edge) => edge.sourceNodeId !== nodeId && edge.targetNodeId !== nodeId),
     )
     if (selectedNodeId === nodeId) setSelectedNodeId('')
-    if (connectingFromNodeId === nodeId) setConnectingFromNodeId('')
+    if (connectingFromNodeId === nodeId) {
+      setConnectingFromNodeId('')
+      setConnectingOutputKey('')
+    }
     if (connectionDrag?.sourceNodeId === nodeId) setConnectionDrag(null)
   }
 
@@ -753,10 +808,17 @@ export function AgentWorkflowCanvas() {
     )
   }
 
+  const startConnectFromNode = (nodeId: string) => {
+    const node = nodes.find((item) => item.id === nodeId) ?? null
+    setConnectingFromNodeId(nodeId)
+    setConnectingOutputKey(node ? primaryArtifactOutput(node).key : '')
+  }
+
   const handleNodeClick = (node: DraftNode) => {
     if (connectingFromNodeId && connectingFromNodeId !== node.id) {
       createEdgeBetween(connectingFromNodeId, node.id)
       setConnectingFromNodeId('')
+      setConnectingOutputKey('')
       setSelectedNodeId(node.id)
       return
     }
@@ -791,6 +853,8 @@ export function AgentWorkflowCanvas() {
           id: edge.id,
           sourceNodeId: edge.sourceNodeId,
           targetNodeId: edge.targetNodeId,
+          sourceHandle: edge.sourceHandle ?? null,
+          targetHandle: edge.targetHandle ?? null,
           mapping: edge.mapping,
         })),
       }
@@ -835,6 +899,8 @@ export function AgentWorkflowCanvas() {
           id: edge.id,
           sourceNodeId: edge.sourceNodeId,
           targetNodeId: edge.targetNodeId,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
           mapping: edge.mapping,
         })),
       )
@@ -1023,15 +1089,22 @@ export function AgentWorkflowCanvas() {
     [viewport.scale, viewport.x, viewport.y],
   )
 
-  const startConnectionDrag = (event: PointerEvent<HTMLButtonElement>, node: DraftNode) => {
+  const startConnectionDrag = (
+    event: PointerEvent<HTMLButtonElement>,
+    node: DraftNode,
+    output: CanvasArtifactOutput = primaryArtifactOutput(node),
+  ) => {
     event.stopPropagation()
     const point = clientPointToCanvas(event.clientX, event.clientY)
     setNodePalette(null)
     setSelectedNodeId(node.id)
     setConnectingFromNodeId(node.id)
+    setConnectingOutputKey(output.key)
     setConnectionDrag({
       pointerId: event.pointerId,
       sourceNodeId: node.id,
+      outputKey: output.key,
+      artifactType: output.type,
       x: point.x,
       y: point.y,
     })
@@ -1040,9 +1113,16 @@ export function AgentWorkflowCanvas() {
   const completeConnectionDrag = (event: PointerEvent<HTMLButtonElement>, targetNode: DraftNode) => {
     if (!connectionDrag || connectionDrag.sourceNodeId === targetNode.id) return
     event.stopPropagation()
-    createEdgeBetween(connectionDrag.sourceNodeId, targetNode.id)
+    const sourceNode = nodes.find((node) => node.id === connectionDrag.sourceNodeId) ?? null
+    const sourceOutput =
+      sourceNode
+        ? artifactOutputsOf(sourceNode).find((output) => output.key === connectionDrag.outputKey) ??
+          primaryArtifactOutput(sourceNode)
+        : null
+    createEdgeBetween(connectionDrag.sourceNodeId, targetNode.id, sourceOutput)
     setConnectionDrag(null)
     setConnectingFromNodeId('')
+    setConnectingOutputKey('')
     setSelectedNodeId(targetNode.id)
   }
 
@@ -1064,6 +1144,7 @@ export function AgentWorkflowCanvas() {
     event.preventDefault()
     setNodePalette(null)
     setConnectingFromNodeId('')
+    setConnectingOutputKey('')
     setSelectedNodeId('')
     event.currentTarget.setPointerCapture(event.pointerId)
     setPan({
@@ -1116,6 +1197,7 @@ export function AgentWorkflowCanvas() {
     if (connectionDrag?.pointerId === event.pointerId) {
       setConnectionDrag(null)
       setConnectingFromNodeId('')
+      setConnectingOutputKey('')
     }
     if (pan?.pointerId === event.pointerId) {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -1397,7 +1479,10 @@ export function AgentWorkflowCanvas() {
                   size="sm"
                   variant="ghost"
                   className="ml-2 h-6 px-2 text-xs"
-                  onClick={() => setConnectingFromNodeId('')}
+                  onClick={() => {
+                    setConnectingFromNodeId('')
+                    setConnectingOutputKey('')
+                  }}
                 >
                   取消
                 </Button>
@@ -1453,6 +1538,7 @@ export function AgentWorkflowCanvas() {
                   const displayDescription =
                     agent?.role ?? softwareCommand?.description ?? nodeDescription(node)
                   const artifactType = artifactTypeOf(node)
+                  const artifactOutputs = artifactOutputsOf(node)
                   const selected = selectedNodeId === node.id
                   const connecting = connectingFromNodeId === node.id
                   const canReceiveConnection =
@@ -1496,6 +1582,7 @@ export function AgentWorkflowCanvas() {
                         if (connectingFromNodeId && connectingFromNodeId !== node.id) {
                           createEdgeBetween(connectingFromNodeId, node.id)
                           setConnectingFromNodeId('')
+                          setConnectingOutputKey('')
                         }
                         setSelectedNodeId(node.id)
                       }}
@@ -1577,8 +1664,37 @@ export function AgentWorkflowCanvas() {
                       {displayDescription}
                     </div>
                     <CanvasNodeStatusStrip nodeRun={nodeRun ?? null} />
-                    <div className="mt-1 flex min-w-0 items-center gap-1">
-                      <ArtifactChip type={artifactType} compact />
+                    <div
+                      data-testid="canvas-artifact-output-list"
+                      className="relative z-30 mt-1 flex min-h-7 min-w-0 items-center gap-1 overflow-visible rounded-md bg-card/80 p-0.5"
+                    >
+                      {artifactOutputs.slice(0, 3).map((output) => (
+                        <button
+                          key={output.key}
+                          type="button"
+                          data-testid="canvas-artifact-output-port"
+                          data-output-key={output.key}
+                          data-output-type={output.type}
+                          className="pointer-events-auto relative z-40 flex h-6 min-w-12 shrink-0 items-center justify-center gap-1 rounded-full border bg-background px-2 text-[10px] font-medium shadow-sm transition hover:border-primary hover:bg-primary/5"
+                          title={`输出 ${artifactTypeLabel(output.type)}：只把这个产物传给下游`}
+                          onPointerDown={(event) => startConnectionDrag(event, node, output)}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setConnectionDrag(null)
+                            setConnectingFromNodeId(node.id)
+                            setConnectingOutputKey(output.key)
+                            setSelectedNodeId(node.id)
+                          }}
+                        >
+                          {artifactTypeIcon(output.type, 'size-2.5 shrink-0 text-primary')}
+                          <span className="max-w-[4.5rem] truncate">{artifactTypeLabel(output.type)}</span>
+                        </button>
+                      ))}
+                      {artifactOutputs.length > 3 && (
+                        <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
+                          +{artifactOutputs.length - 3}
+                        </Badge>
+                      )}
                       {customerVisibleOf(node) && (
                         <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
                           客户可见
@@ -1602,7 +1718,11 @@ export function AgentWorkflowCanvas() {
                           onPointerDown={(event) => event.stopPropagation()}
                           onClick={(event) => {
                             event.stopPropagation()
-                            setConnectingFromNodeId((current) => (current === node.id ? '' : node.id))
+                            setConnectingFromNodeId((current) => {
+                              const next = current === node.id ? '' : node.id
+                              setConnectingOutputKey(next ? primaryArtifactOutput(node).key : '')
+                              return next
+                            })
                             setSelectedNodeId(node.id)
                           }}
                           className={cn(
@@ -1626,7 +1746,7 @@ export function AgentWorkflowCanvas() {
               softwareCommands={softwareCommands}
               onUpdateNode={updateNode}
               onRemoveNode={removeNode}
-              onStartConnect={setConnectingFromNodeId}
+              onStartConnect={startConnectFromNode}
             />
             <CustomerDeliveryDock
               nodes={customerDeliverableNodes}
@@ -1774,7 +1894,7 @@ export function AgentWorkflowCanvas() {
             onUpdateNode={updateNode}
             onRemoveNode={removeNode}
             onRemoveEdge={removeEdge}
-            onStartConnect={setConnectingFromNodeId}
+            onStartConnect={startConnectFromNode}
           />
 
           <Section icon={<Play className="size-3.5" />} title="运行与监控">
@@ -2064,15 +2184,35 @@ function CanvasEdges({ nodes, edges }: { nodes: DraftNode[]; edges: DraftEdge[] 
         const x2 = target.position.x
         const y2 = target.position.y + NODE_HEIGHT / 2
         const mid = Math.max(36, Math.abs(x2 - x1) / 2)
+        const artifactType = edgeArtifactType(edge, source)
+        const labelX = (x1 + x2) / 2
+        const labelY = (y1 + y2) / 2 - 8
         return (
-          <path
-            key={edge.id}
-            data-testid="workflow-canvas-edge"
-            d={`M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}`}
-            className="fill-none stroke-muted-foreground/70"
-            strokeWidth="1.5"
-            markerEnd="url(#agent-canvas-arrow)"
-          />
+          <g key={edge.id} data-testid="workflow-canvas-edge" data-edge-artifact-type={artifactType}>
+            <path
+              d={`M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}`}
+              className="fill-none stroke-muted-foreground/70"
+              strokeWidth="1.5"
+              markerEnd="url(#agent-canvas-arrow)"
+            />
+            <g transform={`translate(${labelX} ${labelY})`}>
+              <rect
+                x="-28"
+                y="-10"
+                width="56"
+                height="20"
+                rx="6"
+                className="fill-background stroke-border"
+              />
+              <text
+                textAnchor="middle"
+                dominantBaseline="middle"
+                className="fill-foreground text-[10px] font-medium"
+              >
+                {artifactTypeLabel(artifactType)}
+              </text>
+            </g>
+          </g>
         )
       })}
     </svg>
@@ -2095,6 +2235,8 @@ function CanvasConnectionPreview({
   const x2 = connectionDrag.x
   const y2 = connectionDrag.y
   const mid = Math.max(36, Math.abs(x2 - x1) / 2)
+  const labelX = (x1 + x2) / 2
+  const labelY = (y1 + y2) / 2 - 8
   return (
     <svg
       data-testid="workflow-canvas-connection-preview"
@@ -2107,6 +2249,16 @@ function CanvasConnectionPreview({
         strokeLinecap="round"
         strokeWidth="2"
       />
+      <g transform={`translate(${labelX} ${labelY})`}>
+        <rect x="-28" y="-10" width="56" height="20" rx="6" className="fill-primary" />
+        <text
+          textAnchor="middle"
+          dominantBaseline="middle"
+          className="fill-primary-foreground text-[10px] font-medium"
+        >
+          {artifactTypeLabel(connectionDrag.artifactType)}
+        </text>
+      </g>
       <circle cx={x2} cy={y2} r="4" className="fill-primary" />
     </svg>
   )
@@ -2469,6 +2621,84 @@ function ArtifactTypeQuickPicker({
           <span>{artifactTypeLabel(type)}</span>
         </button>
       ))}
+    </div>
+  )
+}
+
+function NodeArtifactOutputsEditor({
+  node,
+  onUpdateNode,
+  compact = false,
+}: {
+  node: DraftNode
+  onUpdateNode: (nodeId: string, patch: Partial<DraftNode>) => void
+  compact?: boolean
+}) {
+  const outputs = artifactOutputsOf(node)
+  const addOutput = (type: string) => {
+    onUpdateNode(node.id, {
+      outputContract: addOutputContractArtifactType(node.outputContract, node, type),
+    })
+  }
+  const removeOutput = (key: string) => {
+    onUpdateNode(node.id, {
+      outputContract: removeOutputContractArtifactOutput(node.outputContract, node, key),
+    })
+  }
+
+  return (
+    <div data-testid="node-artifact-outputs-editor" className="rounded-md border bg-muted/20 p-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="text-[11px] font-medium">节点产物口</div>
+        <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
+          {outputs.length} 个
+        </Badge>
+      </div>
+      <div className="space-y-1">
+        {outputs.map((output, index) => (
+          <div
+            key={output.key}
+            className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-[10px]"
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              {artifactTypeIcon(output.type, 'size-3 shrink-0 text-primary')}
+              <span className="truncate font-medium">{artifactTypeLabel(output.type)}</span>
+              {index === 0 && (
+                <Badge variant="secondary" className="h-4 px-1 text-[8px]">
+                  默认
+                </Badge>
+              )}
+            </span>
+            <button
+              type="button"
+              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+              disabled={outputs.length <= 1}
+              onClick={() => removeOutput(output.key)}
+              title="删除这个产物口"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className={cn('mt-1.5 flex flex-wrap gap-1', compact && 'max-h-14 overflow-hidden')}>
+        {CUSTOMER_ARTIFACT_QUICK_TYPES.map((type) => (
+          <button
+            key={type}
+            type="button"
+            data-testid="node-artifact-output-add"
+            data-output-type={type}
+            className="h-6 rounded-md border bg-background px-2 text-[10px] transition hover:border-primary/60 hover:bg-primary/5"
+            onClick={() => addOutput(type)}
+            title={`添加 ${artifactTypeLabel(type)} 产物口`}
+          >
+            + {artifactTypeLabel(type)}
+          </button>
+        ))}
+      </div>
+      <div className="mt-1.5 text-[10px] leading-4 text-muted-foreground">
+        从某个产物口拖线，下游就只会收到这一类产物。
+      </div>
     </div>
   )
 }
@@ -2887,6 +3117,10 @@ function CanvasQuickEditor({
         data-canvas-interactive="true"
         className="pointer-events-auto absolute right-3 top-3 z-40 flex max-w-[min(22rem,calc(100%-1.5rem))] items-center gap-2 rounded-md border bg-card/95 px-3 py-2 text-left text-xs shadow-sm backdrop-blur transition hover:border-primary/50"
         onPointerDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          event.stopPropagation()
+          setCollapsed(false)
+        }}
         onDoubleClick={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation()
@@ -2928,6 +3162,10 @@ function CanvasQuickEditor({
             variant="ghost"
             className="h-6 px-2 text-[11px]"
             data-testid="canvas-quick-editor-collapse"
+            onMouseDown={(event) => {
+              event.stopPropagation()
+              setCollapsed(true)
+            }}
             onClick={() => setCollapsed(true)}
           >
             收起
@@ -2972,6 +3210,7 @@ function CanvasQuickEditor({
             })
           }
         />
+        <NodeArtifactOutputsEditor node={node} onUpdateNode={onUpdateNode} compact />
         <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
           <input
             type="checkbox"
@@ -3245,6 +3484,7 @@ function NodeInspector({
             })
           }
         />
+        <NodeArtifactOutputsEditor node={node} onUpdateNode={onUpdateNode} />
 
         <div className="rounded-md border bg-muted/20 p-2">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -3415,14 +3655,14 @@ function NodeInspector({
               {outgoingEdges.map((edge) => (
                 <ConnectionRow
                   key={edge.id}
-                  label={`输出到：${nodeLabel(nodeById.get(edge.targetNodeId))}`}
+                  label={`输出到：${nodeLabel(nodeById.get(edge.targetNodeId))} · ${artifactTypeLabel(edgeArtifactType(edge, node))}`}
                   onRemove={() => onRemoveEdge(edge.id)}
                 />
               ))}
               {incomingEdges.map((edge) => (
                 <ConnectionRow
                   key={edge.id}
-                  label={`来自：${nodeLabel(nodeById.get(edge.sourceNodeId))}`}
+                  label={`来自：${nodeLabel(nodeById.get(edge.sourceNodeId))} · ${artifactTypeLabel(edgeArtifactType(edge, nodeById.get(edge.sourceNodeId)))}`}
                   onRemove={() => onRemoveEdge(edge.id)}
                 />
               ))}
@@ -4015,6 +4255,8 @@ function canvasDraftFromNlDraft(draft: NaturalLanguageWorkflowDraftRow): {
         id: stringValue(obj.id, `nl_edge_${index}`),
         sourceNodeId: stringValue(obj.sourceNodeId, ''),
         targetNodeId: stringValue(obj.targetNodeId, ''),
+        sourceHandle: typeof obj.sourceHandle === 'string' ? obj.sourceHandle : null,
+        targetHandle: typeof obj.targetHandle === 'string' ? obj.targetHandle : null,
         mapping: asJsonObject(obj.mapping),
       } satisfies DraftEdge
     })
@@ -4053,6 +4295,127 @@ function nodeTypeLabel(type: DraftNodeType): string {
 
 function nodeLabel(node?: DraftNode): string {
   return node?.label || (node ? nodeTypeLabel(node.type) : '未知节点')
+}
+
+function artifactOutputKey(type: string, index = 0): string {
+  return index === 0 ? 'artifact' : `${type}_${index + 1}`
+}
+
+function artifactOutputHandle(output: CanvasArtifactOutput): string {
+  return `artifact:${output.key}`
+}
+
+function normalizeArtifactOutput(value: unknown, index: number, fallbackType: string): CanvasArtifactOutput | null {
+  const obj = asRecord(value)
+  const type = stringValue(obj.type, fallbackType)
+  const key = stringValue(obj.key, artifactOutputKey(type, index))
+  if (!type || !key) return null
+  return {
+    key,
+    type,
+    label: stringValue(obj.label, artifactTypeLabel(type)),
+    description: stringValue(obj.description, artifactFileHint(type)),
+    customerVisible: typeof obj.customerVisible === 'boolean' ? obj.customerVisible : index === 0,
+  }
+}
+
+function artifactOutputsOf(node: DraftNode): CanvasArtifactOutput[] {
+  const fallbackType = artifactTypeOf(node)
+  const outputs = jsonArray(node.outputContract, 'outputs')
+    .map((value, index) => normalizeArtifactOutput(value, index, fallbackType))
+    .filter((output): output is CanvasArtifactOutput => Boolean(output))
+  if (outputs.length > 0) return dedupeArtifactOutputs(outputs)
+  return [
+    {
+      key: 'artifact',
+      type: fallbackType,
+      label: deliveryTitleOf(node) || artifactTypeLabel(fallbackType),
+      description: deliveryDescriptionOf(node) || artifactFileHint(fallbackType),
+      customerVisible: customerVisibleOf(node),
+    },
+  ]
+}
+
+function dedupeArtifactOutputs(outputs: CanvasArtifactOutput[]): CanvasArtifactOutput[] {
+  const used = new Set<string>()
+  return outputs.map((output, index) => {
+    let key = output.key || artifactOutputKey(output.type, index)
+    while (used.has(key)) key = `${output.type}_${used.size + 1}`
+    used.add(key)
+    return { ...output, key }
+  })
+}
+
+function primaryArtifactOutput(node: DraftNode): CanvasArtifactOutput {
+  return artifactOutputsOf(node)[0]
+}
+
+function normalizedArtifactOutputs(node: DraftNode): CanvasArtifactOutput[] {
+  return artifactOutputsOf(node).map((output, index) => ({
+    ...output,
+    customerVisible: index === 0 ? customerVisibleOf(node) : output.customerVisible,
+  }))
+}
+
+function updateOutputContractOutputs(base: JsonObject, outputs: CanvasArtifactOutput[]): JsonObject {
+  const normalized = dedupeArtifactOutputs(outputs)
+  const primary = normalized[0]
+  if (!primary) return base
+  return {
+    ...base,
+    artifactType: primary.type,
+    customerVisible: primary.customerVisible,
+    deliverableTitle: primary.label,
+    deliveryDescription: primary.description,
+    outputs: normalized,
+  }
+}
+
+function addOutputContractArtifactType(base: JsonObject, node: DraftNode, type: string): JsonObject {
+  const outputs = artifactOutputsOf(node)
+  const countForType = outputs.filter((output) => output.type === type).length
+  const next: CanvasArtifactOutput = {
+    key: artifactOutputKey(type, outputs.length + countForType),
+    type,
+    label: artifactTypeLabel(type),
+    description: artifactFileHint(type),
+    customerVisible: false,
+  }
+  return updateOutputContractOutputs(base, [...outputs, next])
+}
+
+function removeOutputContractArtifactOutput(base: JsonObject, node: DraftNode, key: string): JsonObject {
+  const outputs = artifactOutputsOf(node)
+  if (outputs.length <= 1) return updateOutputContractOutputs(base, outputs)
+  return updateOutputContractOutputs(base, outputs.filter((output) => output.key !== key))
+}
+
+function artifactEdgeMapping(output: CanvasArtifactOutput): JsonObject {
+  return {
+    handoffMode: 'fixed_artifact',
+    outputKey: output.key,
+    targetInputKey: output.key,
+    artifactType: output.type,
+    artifactLabel: output.label,
+    artifactOnly: true,
+  }
+}
+
+function edgeOutputKey(edge: DraftEdge): string {
+  const value = edge.mapping.outputKey
+  if (typeof value === 'string' && value) return value
+  if (typeof edge.sourceHandle === 'string' && edge.sourceHandle.startsWith('artifact:')) {
+    return edge.sourceHandle.slice('artifact:'.length)
+  }
+  return 'artifact'
+}
+
+function edgeArtifactType(edge: DraftEdge, source?: DraftNode): string {
+  const value = edge.mapping.artifactType
+  if (typeof value === 'string' && value) return value
+  const key = edgeOutputKey(edge)
+  const output = source ? artifactOutputsOf(source).find((item) => item.key === key) : null
+  return output?.type ?? (source ? artifactTypeOf(source) : 'artifact')
 }
 
 function artifactTypeOf(node: DraftNode): string {
@@ -4182,8 +4545,9 @@ function deliveryStateLabel(nodeRun: WorkflowNodeRunRow | null): string {
 function countDeliverablesByType(nodes: DraftNode[]): Array<{ type: string; count: number }> {
   const counts = new Map<string, number>()
   for (const node of nodes) {
-    const type = artifactTypeOf(node)
-    counts.set(type, (counts.get(type) ?? 0) + 1)
+    for (const output of artifactOutputsOf(node)) {
+      counts.set(output.type, (counts.get(output.type) ?? 0) + 1)
+    }
   }
   return [...counts.entries()]
     .map(([type, count]) => ({ type, count }))
@@ -4203,15 +4567,27 @@ function defaultOutputContract(
     typeof base.customerVisible === 'boolean'
       ? base.customerVisible
       : nodeType === 'agent_employee' || nodeType === 'software_command' || nodeType === 'artifact_transform'
+  const deliverableTitle = stringValue(base.deliverableTitle, label || artifactTypeLabel(artifactType))
+  const deliveryDescription = stringValue(
+    base.deliveryDescription,
+    stringValue(base.description, `${artifactTypeLabel(artifactType)} 路 ${artifactFileHint(artifactType)}`),
+  )
   return {
     ...base,
     artifactType,
     customerVisible,
-    deliverableTitle: stringValue(base.deliverableTitle, label || artifactTypeLabel(artifactType)),
-    deliveryDescription: stringValue(
-      base.deliveryDescription,
-      stringValue(base.description, `${artifactTypeLabel(artifactType)} · ${artifactFileHint(artifactType)}`),
-    ),
+    deliverableTitle,
+    deliveryDescription,
+    outputs:
+      Array.isArray(base.outputs) && base.outputs.length > 0
+        ? base.outputs
+        : [{
+            key: 'artifact',
+            type: artifactType,
+            label: deliverableTitle,
+            description: deliveryDescription,
+            customerVisible,
+          }],
   }
 }
 
@@ -4223,6 +4599,7 @@ function normalizedOutputContract(node: DraftNode): JsonObject {
     customerVisible: customerVisibleOf(node),
     deliverableTitle: deliveryTitleOf(node),
     deliveryDescription: deliveryDescriptionOf(node),
+    outputs: normalizedArtifactOutputs(node),
   }
 }
 
@@ -4243,6 +4620,15 @@ function updateOutputContractArtifactType(base: JsonObject, nextType: string): J
     artifactType: nextType,
     description: shouldUpdateDescription ? nextDefault : currentDescription,
     deliveryDescription: shouldUpdateDeliveryDescription ? nextDefault : currentDeliveryDescription,
+    outputs: [
+      {
+        key: 'artifact',
+        type: nextType,
+        label: artifactTypeLabel(nextType),
+        description: shouldUpdateDeliveryDescription ? nextDefault : currentDeliveryDescription,
+        customerVisible: typeof base.customerVisible === 'boolean' ? base.customerVisible : true,
+      },
+    ],
   }
 }
 

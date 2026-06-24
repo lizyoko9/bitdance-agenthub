@@ -77,8 +77,32 @@ async function main() {
       },
     ],
     edges: [
-      { sourceNodeId: researchNodeId, targetNodeId: approvalNodeId, mapping: { report: 'artifact' } },
-      { sourceNodeId: approvalNodeId, targetNodeId: writerNodeId, mapping: { approvedReport: 'approval.output' } },
+      {
+        sourceNodeId: researchNodeId,
+        targetNodeId: approvalNodeId,
+        sourceHandle: 'artifact:artifact',
+        targetHandle: 'input',
+        mapping: {
+          report: 'artifact',
+          outputKey: 'artifact',
+          targetInputKey: 'report',
+          artifactType: 'report',
+          artifactOnly: true,
+        },
+      },
+      {
+        sourceNodeId: approvalNodeId,
+        targetNodeId: writerNodeId,
+        sourceHandle: 'artifact:artifact',
+        targetHandle: 'input',
+        mapping: {
+          approvedReport: 'approval.output',
+          outputKey: 'artifact',
+          targetInputKey: 'approvedReport',
+          artifactType: 'approval_decision',
+          artifactOnly: true,
+        },
+      },
     ],
   })
 
@@ -106,6 +130,16 @@ async function main() {
         row.artifactType === 'report',
     ),
     'Expected research artifact flow.',
+  )
+  assert(
+    canvasPayload.report.artifactFlow.some(
+      (row: { sourceNodeId: string; targetNodeId: string; mappingKeys: string[] }) =>
+        row.sourceNodeId === researchNodeId &&
+        row.targetNodeId === approvalNodeId &&
+        row.mappingKeys.includes('outputKey') &&
+        row.mappingKeys.includes('artifactType'),
+    ),
+    'Expected artifact-channel mapping keys.',
   )
   assert(
     audit.summary.implementedBaselineSections === 210 &&
