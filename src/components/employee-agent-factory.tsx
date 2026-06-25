@@ -1788,12 +1788,14 @@ function ControlPlaneForms({
   onCreateCommand: () => Promise<void>
   onCreateStyleGuide: () => Promise<void>
 }) {
+  const showAdvancedControlForms = false
+
   return (
     <>
       <Section
         icon={<Network className="size-3.5" />}
-        title="Network Profile"
-        actionLabel="Add"
+        title="代理配置"
+        actionLabel="添加"
         saving={saving === 'Network profile'}
         onAction={onCreateNetwork}
       >
@@ -1829,8 +1831,8 @@ function ControlPlaneForms({
 
       <Section
         icon={<Database className="size-3.5" />}
-        title="Model Profile"
-        actionLabel="Add"
+        title="模型配置"
+        actionLabel="添加"
         saving={saving === 'Model profile'}
         onAction={onCreateModel}
       >
@@ -1913,8 +1915,8 @@ function ControlPlaneForms({
 
       <Section
         icon={<Terminal className="size-3.5" />}
-        title="CLI Profile"
-        actionLabel="Add"
+        title="CLI 配置"
+        actionLabel="添加"
         saving={saving === 'CLI profile'}
         onAction={onCreateCli}
       >
@@ -1946,8 +1948,8 @@ function ControlPlaneForms({
 
       <Section
         icon={<Network className="size-3.5" />}
-        title="MCP Server"
-        actionLabel="Add"
+        title="MCP 配置"
+        actionLabel="添加"
         saving={saving === 'MCP server'}
         onAction={onCreateMcp}
       >
@@ -1985,8 +1987,8 @@ function ControlPlaneForms({
 
       <Section
         icon={<Package className="size-3.5" />}
-        title="Prompt Template"
-        actionLabel="Add"
+        title="提示词工程"
+        actionLabel="添加"
         saving={saving === 'Prompt template'}
         onAction={onCreatePrompt}
       >
@@ -2042,281 +2044,285 @@ function ControlPlaneForms({
         />
       </Section>
 
-      <Section
-        icon={<Palette className="size-3.5" />}
-        title="Style Guide"
-        actionLabel="Add"
-        saving={saving === 'Style guide'}
-        onAction={onCreateStyleGuide}
-      >
-        <Input
-          value={styleGuideDraft.name}
-          onChange={(event) =>
-            setStyleGuideDraft((draft) => ({ ...draft, name: event.target.value }))
-          }
-          placeholder="Name"
-        />
-        <Input
-          value={styleGuideDraft.tone}
-          onChange={(event) =>
-            setStyleGuideDraft((draft) => ({ ...draft, tone: event.target.value }))
-          }
-          placeholder="Tone"
-        />
-        <div className="grid grid-cols-2 gap-2">
-          <Select
-            value={styleGuideDraft.sentenceLength}
-            onChange={(value) =>
-              setStyleGuideDraft((draft) => ({
-                ...draft,
-                sentenceLength: value as StyleGuideDraft['sentenceLength'],
-              }))
-            }
-            options={['short', 'medium', 'varied']}
-          />
-          <Checkbox
-            checked={styleGuideDraft.useOxfordComma}
-            label="Oxford comma"
-            onChange={(checked) =>
-              setStyleGuideDraft((draft) => ({ ...draft, useOxfordComma: checked }))
-            }
-          />
-        </div>
-        <Textarea
-          className="min-h-16 text-xs"
-          value={styleGuideDraft.forbiddenWordsText}
-          onChange={(event) =>
-            setStyleGuideDraft((draft) => ({
-              ...draft,
-              forbiddenWordsText: event.target.value,
-            }))
-          }
-          placeholder="Forbidden words, one per line"
-        />
-        <Textarea
-          className="min-h-16 text-xs"
-          value={styleGuideDraft.preferredTermsText}
-          onChange={(event) =>
-            setStyleGuideDraft((draft) => ({
-              ...draft,
-              preferredTermsText: event.target.value,
-            }))
-          }
-          placeholder="Preferred terms: old=new"
-        />
-        <div className="grid grid-cols-3 gap-2">
-          <Select
-            value={styleGuideDraft.indentStyle}
-            onChange={(value) =>
-              setStyleGuideDraft((draft) => ({
-                ...draft,
-                indentStyle: value as StyleGuideDraft['indentStyle'],
-              }))
-            }
-            options={['space', 'tab']}
-          />
-          <Input
-            value={styleGuideDraft.indentSize}
-            onChange={(event) =>
-              setStyleGuideDraft((draft) => ({ ...draft, indentSize: event.target.value }))
-            }
-            placeholder="Indent"
-            type="number"
-          />
-          <Select
-            value={styleGuideDraft.quotes}
-            onChange={(value) =>
-              setStyleGuideDraft((draft) => ({
-                ...draft,
-                quotes: value as StyleGuideDraft['quotes'],
-              }))
-            }
-            options={['single', 'double']}
-          />
-        </div>
-        <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
-          <Input
-            value={styleGuideDraft.maxLineLength}
-            onChange={(event) =>
-              setStyleGuideDraft((draft) => ({
-                ...draft,
-                maxLineLength: event.target.value,
-              }))
-            }
-            placeholder="Line length"
-            type="number"
-          />
-          <Select
-            value={styleGuideDraft.namingConvention}
-            onChange={(value) =>
-              setStyleGuideDraft((draft) => ({
-                ...draft,
-                namingConvention: value as StyleGuideDraft['namingConvention'],
-              }))
-            }
-            options={['camelCase', 'PascalCase', 'snake_case']}
-          />
-          <Checkbox
-            checked={styleGuideDraft.semicolons}
-            label=";"
-            onChange={(checked) =>
-              setStyleGuideDraft((draft) => ({ ...draft, semicolons: checked }))
-            }
-          />
-        </div>
-        <Textarea
-          className="min-h-16 text-xs"
-          value={styleGuideDraft.colorPaletteText}
-          onChange={(event) =>
-            setStyleGuideDraft((draft) => ({
-              ...draft,
-              colorPaletteText: event.target.value,
-            }))
-          }
-          placeholder="Color palette"
-        />
-        <div className="grid grid-cols-[1fr_auto] gap-2">
-          <Input
-            value={styleGuideDraft.fontFamily}
-            onChange={(event) =>
-              setStyleGuideDraft((draft) => ({ ...draft, fontFamily: event.target.value }))
-            }
-            placeholder="Font family"
-          />
-          <Checkbox
-            checked={styleGuideDraft.preferDarkTheme}
-            label="Dark"
-            onChange={(checked) =>
-              setStyleGuideDraft((draft) => ({ ...draft, preferDarkTheme: checked }))
-            }
-          />
-        </div>
-        <Input
-          value={styleGuideDraft.logoUrl}
-          onChange={(event) =>
-            setStyleGuideDraft((draft) => ({ ...draft, logoUrl: event.target.value }))
-          }
-          placeholder="Logo URL"
-        />
-      </Section>
+      {showAdvancedControlForms && (
+        <>
+          <Section
+            icon={<Palette className="size-3.5" />}
+            title="Style Guide"
+            actionLabel="Add"
+            saving={saving === 'Style guide'}
+            onAction={onCreateStyleGuide}
+          >
+            <Input
+              value={styleGuideDraft.name}
+              onChange={(event) =>
+                setStyleGuideDraft((draft) => ({ ...draft, name: event.target.value }))
+              }
+              placeholder="Name"
+            />
+            <Input
+              value={styleGuideDraft.tone}
+              onChange={(event) =>
+                setStyleGuideDraft((draft) => ({ ...draft, tone: event.target.value }))
+              }
+              placeholder="Tone"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Select
+                value={styleGuideDraft.sentenceLength}
+                onChange={(value) =>
+                  setStyleGuideDraft((draft) => ({
+                    ...draft,
+                    sentenceLength: value as StyleGuideDraft['sentenceLength'],
+                  }))
+                }
+                options={['short', 'medium', 'varied']}
+              />
+              <Checkbox
+                checked={styleGuideDraft.useOxfordComma}
+                label="Oxford comma"
+                onChange={(checked) =>
+                  setStyleGuideDraft((draft) => ({ ...draft, useOxfordComma: checked }))
+                }
+              />
+            </div>
+            <Textarea
+              className="min-h-16 text-xs"
+              value={styleGuideDraft.forbiddenWordsText}
+              onChange={(event) =>
+                setStyleGuideDraft((draft) => ({
+                  ...draft,
+                  forbiddenWordsText: event.target.value,
+                }))
+              }
+              placeholder="Forbidden words, one per line"
+            />
+            <Textarea
+              className="min-h-16 text-xs"
+              value={styleGuideDraft.preferredTermsText}
+              onChange={(event) =>
+                setStyleGuideDraft((draft) => ({
+                  ...draft,
+                  preferredTermsText: event.target.value,
+                }))
+              }
+              placeholder="Preferred terms: old=new"
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <Select
+                value={styleGuideDraft.indentStyle}
+                onChange={(value) =>
+                  setStyleGuideDraft((draft) => ({
+                    ...draft,
+                    indentStyle: value as StyleGuideDraft['indentStyle'],
+                  }))
+                }
+                options={['space', 'tab']}
+              />
+              <Input
+                value={styleGuideDraft.indentSize}
+                onChange={(event) =>
+                  setStyleGuideDraft((draft) => ({ ...draft, indentSize: event.target.value }))
+                }
+                placeholder="Indent"
+                type="number"
+              />
+              <Select
+                value={styleGuideDraft.quotes}
+                onChange={(value) =>
+                  setStyleGuideDraft((draft) => ({
+                    ...draft,
+                    quotes: value as StyleGuideDraft['quotes'],
+                  }))
+                }
+                options={['single', 'double']}
+              />
+            </div>
+            <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+              <Input
+                value={styleGuideDraft.maxLineLength}
+                onChange={(event) =>
+                  setStyleGuideDraft((draft) => ({
+                    ...draft,
+                    maxLineLength: event.target.value,
+                  }))
+                }
+                placeholder="Line length"
+                type="number"
+              />
+              <Select
+                value={styleGuideDraft.namingConvention}
+                onChange={(value) =>
+                  setStyleGuideDraft((draft) => ({
+                    ...draft,
+                    namingConvention: value as StyleGuideDraft['namingConvention'],
+                  }))
+                }
+                options={['camelCase', 'PascalCase', 'snake_case']}
+              />
+              <Checkbox
+                checked={styleGuideDraft.semicolons}
+                label=";"
+                onChange={(checked) =>
+                  setStyleGuideDraft((draft) => ({ ...draft, semicolons: checked }))
+                }
+              />
+            </div>
+            <Textarea
+              className="min-h-16 text-xs"
+              value={styleGuideDraft.colorPaletteText}
+              onChange={(event) =>
+                setStyleGuideDraft((draft) => ({
+                  ...draft,
+                  colorPaletteText: event.target.value,
+                }))
+              }
+              placeholder="Color palette"
+            />
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <Input
+                value={styleGuideDraft.fontFamily}
+                onChange={(event) =>
+                  setStyleGuideDraft((draft) => ({ ...draft, fontFamily: event.target.value }))
+                }
+                placeholder="Font family"
+              />
+              <Checkbox
+                checked={styleGuideDraft.preferDarkTheme}
+                label="Dark"
+                onChange={(checked) =>
+                  setStyleGuideDraft((draft) => ({ ...draft, preferDarkTheme: checked }))
+                }
+              />
+            </div>
+            <Input
+              value={styleGuideDraft.logoUrl}
+              onChange={(event) =>
+                setStyleGuideDraft((draft) => ({ ...draft, logoUrl: event.target.value }))
+              }
+              placeholder="Logo URL"
+            />
+          </Section>
 
-      <Section
-        icon={<Activity className="size-3.5" />}
-        title="Tool Connection"
-        actionLabel="Add"
-        saving={saving === 'Tool connection'}
-        onAction={onCreateTool}
-      >
-        <Input
-          value={toolDraft.displayName}
-          onChange={(event) =>
-            setToolDraft((draft) => ({ ...draft, displayName: event.target.value }))
-          }
-          placeholder="Display name"
-        />
-        <div className="grid grid-cols-[1fr_auto] gap-2">
-          <Select
-            value={toolDraft.type}
-            onChange={(value) =>
-              setToolDraft((draft) => ({ ...draft, type: value as ToolConnectionType }))
-            }
-            options={TOOL_TYPES}
-          />
-          <Checkbox
-            checked={toolDraft.enabled}
-            label="Enabled"
-            onChange={(checked) => setToolDraft((draft) => ({ ...draft, enabled: checked }))}
-          />
-        </div>
-      </Section>
+          <Section
+            icon={<Activity className="size-3.5" />}
+            title="Tool Connection"
+            actionLabel="Add"
+            saving={saving === 'Tool connection'}
+            onAction={onCreateTool}
+          >
+            <Input
+              value={toolDraft.displayName}
+              onChange={(event) =>
+                setToolDraft((draft) => ({ ...draft, displayName: event.target.value }))
+              }
+              placeholder="Display name"
+            />
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <Select
+                value={toolDraft.type}
+                onChange={(value) =>
+                  setToolDraft((draft) => ({ ...draft, type: value as ToolConnectionType }))
+                }
+                options={TOOL_TYPES}
+              />
+              <Checkbox
+                checked={toolDraft.enabled}
+                label="Enabled"
+                onChange={(checked) => setToolDraft((draft) => ({ ...draft, enabled: checked }))}
+              />
+            </div>
+          </Section>
 
-      <Section
-        icon={<Package className="size-3.5" />}
-        title="Software Profile"
-        actionLabel="Add"
-        saving={saving === 'Software profile'}
-        onAction={onCreateSoftware}
-      >
-        <Input
-          value={softwareDraft.name}
-          onChange={(event) =>
-            setSoftwareDraft((draft) => ({ ...draft, name: event.target.value }))
-          }
-          placeholder="Name"
-        />
-        <div className="grid grid-cols-2 gap-2">
-          <Select
-            value={softwareDraft.appType}
-            onChange={(value) =>
-              setSoftwareDraft((draft) => ({ ...draft, appType: value as SoftwareAppType }))
-            }
-            options={SOFTWARE_APP_TYPES}
-          />
-          <Select
-            value={softwareDraft.adapterType}
-            onChange={(value) =>
-              setSoftwareDraft((draft) => ({
-                ...draft,
-                adapterType: value as SoftwareAdapterType,
-              }))
-            }
-            options={SOFTWARE_ADAPTERS}
-          />
-        </div>
-        <Select
-          value={softwareDraft.defaultWorkstationMode}
-          onChange={(value) =>
-            setSoftwareDraft((draft) => ({
-              ...draft,
-              defaultWorkstationMode: value as WorkstationMode,
-            }))
-          }
-          options={WORKSTATION_MODES}
-        />
-        <Input
-          value={softwareDraft.launchCommand}
-          onChange={(event) =>
-            setSoftwareDraft((draft) => ({ ...draft, launchCommand: event.target.value }))
-          }
-          placeholder="Launch command"
-        />
-      </Section>
+          <Section
+            icon={<Package className="size-3.5" />}
+            title="Software Profile"
+            actionLabel="Add"
+            saving={saving === 'Software profile'}
+            onAction={onCreateSoftware}
+          >
+            <Input
+              value={softwareDraft.name}
+              onChange={(event) =>
+                setSoftwareDraft((draft) => ({ ...draft, name: event.target.value }))
+              }
+              placeholder="Name"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Select
+                value={softwareDraft.appType}
+                onChange={(value) =>
+                  setSoftwareDraft((draft) => ({ ...draft, appType: value as SoftwareAppType }))
+                }
+                options={SOFTWARE_APP_TYPES}
+              />
+              <Select
+                value={softwareDraft.adapterType}
+                onChange={(value) =>
+                  setSoftwareDraft((draft) => ({
+                    ...draft,
+                    adapterType: value as SoftwareAdapterType,
+                  }))
+                }
+                options={SOFTWARE_ADAPTERS}
+              />
+            </div>
+            <Select
+              value={softwareDraft.defaultWorkstationMode}
+              onChange={(value) =>
+                setSoftwareDraft((draft) => ({
+                  ...draft,
+                  defaultWorkstationMode: value as WorkstationMode,
+                }))
+              }
+              options={WORKSTATION_MODES}
+            />
+            <Input
+              value={softwareDraft.launchCommand}
+              onChange={(event) =>
+                setSoftwareDraft((draft) => ({ ...draft, launchCommand: event.target.value }))
+              }
+              placeholder="Launch command"
+            />
+          </Section>
 
-      <Section
-        icon={<CheckCircle2 className="size-3.5" />}
-        title="Software Command"
-        actionLabel="Add"
-        saving={saving === 'Software command'}
-        onAction={onCreateCommand}
-      >
-        <Select
-          value={softwareCommandDraft.softwareProfileId}
-          onChange={(value) =>
-            setSoftwareCommandDraft((draft) => ({ ...draft, softwareProfileId: value }))
-          }
-          options={['', ...data.softwareProfiles.map((profile) => profile.id)]}
-          labels={Object.fromEntries(data.softwareProfiles.map((profile) => [profile.id, profile.name]))}
-          emptyLabel="Select software"
-        />
-        <Input
-          value={softwareCommandDraft.name}
-          onChange={(event) =>
-            setSoftwareCommandDraft((draft) => ({ ...draft, name: event.target.value }))
-          }
-          placeholder="Command name"
-        />
-        <Textarea
-          className="min-h-16 text-xs"
-          value={softwareCommandDraft.description}
-          onChange={(event) =>
-            setSoftwareCommandDraft((draft) => ({
-              ...draft,
-              description: event.target.value,
-            }))
-          }
-          placeholder="Description"
-        />
-      </Section>
+          <Section
+            icon={<CheckCircle2 className="size-3.5" />}
+            title="Software Command"
+            actionLabel="Add"
+            saving={saving === 'Software command'}
+            onAction={onCreateCommand}
+          >
+            <Select
+              value={softwareCommandDraft.softwareProfileId}
+              onChange={(value) =>
+                setSoftwareCommandDraft((draft) => ({ ...draft, softwareProfileId: value }))
+              }
+              options={['', ...data.softwareProfiles.map((profile) => profile.id)]}
+              labels={Object.fromEntries(data.softwareProfiles.map((profile) => [profile.id, profile.name]))}
+              emptyLabel="Select software"
+            />
+            <Input
+              value={softwareCommandDraft.name}
+              onChange={(event) =>
+                setSoftwareCommandDraft((draft) => ({ ...draft, name: event.target.value }))
+              }
+              placeholder="Command name"
+            />
+            <Textarea
+              className="min-h-16 text-xs"
+              value={softwareCommandDraft.description}
+              onChange={(event) =>
+                setSoftwareCommandDraft((draft) => ({
+                  ...draft,
+                  description: event.target.value,
+                }))
+              }
+              placeholder="Description"
+            />
+          </Section>
+        </>
+      )}
     </>
   )
 }

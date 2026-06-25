@@ -853,6 +853,26 @@ async function main() {
     .filter({ hasText: '代码' })
     .first()
     .isVisible()
+  const edgesBeforeSpecificArtifactConnect = await page.getByTestId('workflow-canvas-edge').count()
+  const firstNodeCodeOutputPort = page
+    .locator('[data-testid="canvas-artifact-output-port"][data-output-type="code"]')
+    .first()
+  await firstNodeCodeOutputPort.waitFor({ timeout: 30_000 })
+  const codeSourceNodeId = await firstNodeCodeOutputPort.evaluate((element) => {
+    return element.closest('[data-testid="workflow-canvas-node"]')?.getAttribute('data-node-id') ?? ''
+  })
+  if (!codeSourceNodeId) throw new Error('Canvas UI check failed: codeSourceNodeId.')
+  const specificArtifactTargetPort = page
+    .locator(`[data-testid="workflow-canvas-node"]:not([data-node-id="${codeSourceNodeId}"])`)
+    .last()
+    .getByTestId('canvas-node-input-port')
+  await firstNodeCodeOutputPort.evaluate((element) => (element as HTMLButtonElement).click())
+  await specificArtifactTargetPort.evaluate((element) => (element as HTMLButtonElement).click())
+  await page.waitForFunction((previous) => {
+    return document.querySelectorAll('[data-testid="workflow-canvas-edge"]').length > Number(previous)
+  }, edgesBeforeSpecificArtifactConnect)
+  const artifactSpecificEdge =
+    (await page.locator('[data-testid="workflow-canvas-edge"][data-edge-artifact-type="code"]').count()) > 0
   const collapseQuickEditorButton = page.getByTestId('canvas-quick-editor-collapse')
   await collapseQuickEditorButton.waitFor({ timeout: 30_000 })
   const quickEditorCollapsed = page.getByTestId('canvas-quick-editor-collapsed')
@@ -928,27 +948,6 @@ async function main() {
   }, edgesBeforePalette)
   const paletteConnectedEdge =
     (await page.getByTestId('workflow-canvas-edge').count()) > edgesBeforePalette
-
-  const edgesBeforeSpecificArtifactConnect = await page.getByTestId('workflow-canvas-edge').count()
-  const firstNodeCodeOutputPort = page
-    .locator('[data-testid="canvas-artifact-output-port"][data-output-type="code"]')
-    .first()
-  await firstNodeCodeOutputPort.waitFor({ timeout: 30_000 })
-  const codeSourceNodeId = await firstNodeCodeOutputPort.evaluate((element) => {
-    return element.closest('[data-testid="workflow-canvas-node"]')?.getAttribute('data-node-id') ?? ''
-  })
-  if (!codeSourceNodeId) throw new Error('Canvas UI check failed: codeSourceNodeId.')
-  const specificArtifactTargetPort = page
-    .locator(`[data-testid="workflow-canvas-node"]:not([data-node-id="${codeSourceNodeId}"])`)
-    .last()
-    .getByTestId('canvas-node-input-port')
-  await firstNodeCodeOutputPort.evaluate((element) => (element as HTMLButtonElement).click())
-  await specificArtifactTargetPort.evaluate((element) => (element as HTMLButtonElement).click())
-  await page.waitForFunction((previous) => {
-    return document.querySelectorAll('[data-testid="workflow-canvas-edge"]').length > Number(previous)
-  }, edgesBeforeSpecificArtifactConnect)
-  const artifactSpecificEdge =
-    (await page.locator('[data-testid="workflow-canvas-edge"][data-edge-artifact-type="code"]').count()) > 0
 
   const edgesBeforeDragConnect = await page.getByTestId('workflow-canvas-edge').count()
   const newestCanvasNodeForDrag = page.getByTestId('workflow-canvas-node').last()
