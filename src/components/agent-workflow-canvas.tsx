@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   Clock3,
   Eye,
+  FileAudio,
   FileImage,
   FileJson,
   FileSpreadsheet,
@@ -152,6 +153,17 @@ const CUSTOMER_ARTIFACT_QUICK_TYPES = [
   'document',
   'spreadsheet',
   'file_bundle',
+]
+
+const CANVAS_INPUT_TYPE_OPTIONS = [
+  'video',
+  'audio',
+  'image',
+  'document',
+  'code',
+  'spreadsheet',
+  'file_bundle',
+  'json',
 ]
 
 const ARTIFACT_TYPE_LABELS: Record<string, string> = {
@@ -1538,7 +1550,8 @@ export function AgentWorkflowCanvas() {
                   const displayDescription =
                     agent?.role ?? softwareCommand?.description ?? nodeDescription(node)
                   const artifactType = artifactTypeOf(node)
-                  const artifactOutputs = artifactOutputsOf(node)
+                  const primaryOutput = primaryArtifactOutput(node)
+                  const inputTypes = inputTypesForNode(node, edges, nodes)
                   const selected = selectedNodeId === node.id
                   const connecting = connectingFromNodeId === node.id
                   const canReceiveConnection =
@@ -1554,6 +1567,7 @@ export function AgentWorkflowCanvas() {
                       data-testid="workflow-canvas-node"
                       data-canvas-interactive="true"
                       data-node-id={node.id}
+                      data-selected={selected ? 'true' : 'false'}
                       data-run-state={runState}
                       onClick={() => handleNodeClick(node)}
                       onPointerDown={(event) => handlePointerDown(event, node)}
@@ -1660,15 +1674,19 @@ export function AgentWorkflowCanvas() {
                         <X className="size-3" />
                       </button>
                     </div>
-                    <div className="mt-1 line-clamp-2 text-[10px] text-muted-foreground">
-                      {displayDescription}
-                    </div>
-                    <CanvasNodeStatusStrip nodeRun={nodeRun ?? null} />
+                    <CanvasNodeAgentPicker
+                      node={node}
+                      agent={agent ?? null}
+                      agents={agents}
+                      description={displayDescription}
+                      onUpdateNode={updateNode}
+                    />
+                    <CanvasNodeInputSummary inputTypes={inputTypes} canReceiveConnection={canReceiveConnection} />
                     <div
                       data-testid="canvas-artifact-output-list"
                       className="relative z-30 mt-1 flex min-h-7 min-w-0 items-center gap-1 overflow-visible rounded-md bg-card/80 p-0.5"
                     >
-                      {artifactOutputs.slice(0, 3).map((output) => (
+                      {[primaryOutput].map((output) => (
                         <button
                           key={output.key}
                           type="button"
@@ -1690,22 +1708,12 @@ export function AgentWorkflowCanvas() {
                           <span className="max-w-[4.5rem] truncate">{artifactTypeLabel(output.type)}</span>
                         </button>
                       ))}
-                      {artifactOutputs.length > 3 && (
-                        <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
-                          +{artifactOutputs.length - 3}
-                        </Badge>
-                      )}
                       {customerVisibleOf(node) && (
                         <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
                           客户可见
                         </Badge>
                       )}
                     </div>
-                    <CanvasDeliveryPreview
-                      node={node}
-                      nodeRun={nodeRun ?? null}
-                      artifactType={artifactType}
-                    />
                     <CanvasNodeProgress nodeRun={nodeRun ?? null} artifactType={artifactType} />
                     <div className="mt-auto flex items-center justify-between gap-1">
                       <Badge variant="outline" className="h-4 px-1.5 text-[9px]">
@@ -2703,6 +2711,70 @@ function NodeArtifactOutputsEditor({
   )
 }
 
+function NodeInputTypesEditor({
+  node,
+  onUpdateNode,
+  compact = false,
+}: {
+  node: DraftNode
+  onUpdateNode: (nodeId: string, patch: Partial<DraftNode>) => void
+  compact?: boolean
+}) {
+  const selectedTypes = selectedInputTypesOf(node)
+  const toggleType = (type: string) => {
+    const nextTypes = selectedTypes.includes(type)
+      ? selectedTypes.filter((item) => item !== type)
+      : [...selectedTypes, type]
+    onUpdateNode(node.id, {
+      inputMapping: updateInputContractArtifactTypes(node.inputMapping, nextTypes),
+    })
+  }
+  const clearTypes = () => {
+    const nextMapping = { ...node.inputMapping }
+    delete nextMapping.acceptedArtifactTypes
+    onUpdateNode(node.id, { inputMapping: nextMapping })
+  }
+
+  return (
+    <div data-testid="node-input-types-editor" className="rounded-md border bg-muted/20 p-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="text-[11px] font-medium">输入类型</div>
+        <button
+          type="button"
+          className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          onClick={clearTypes}
+        >
+          自动
+        </button>
+      </div>
+      <div className={cn('flex flex-wrap gap-1', compact && 'max-h-14 overflow-hidden')}>
+        {CANVAS_INPUT_TYPE_OPTIONS.map((type) => {
+          const active = selectedTypes.includes(type)
+          return (
+            <button
+              key={type}
+              type="button"
+              data-testid="node-input-type-toggle"
+              data-input-type={type}
+              className={cn(
+                'flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] transition',
+                active ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:border-primary/60',
+              )}
+              onClick={() => toggleType(type)}
+            >
+              {artifactTypeIcon(type, 'size-3')}
+              <span>{artifactTypeLabel(type)}</span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="mt-1.5 text-[10px] leading-4 text-muted-foreground">
+        不勾选时自动接收上游产物；勾选后，这个输入口就按视频、音频或文件类型分类。
+      </div>
+    </div>
+  )
+}
+
 function CustomerDeliverableMini({
   node,
   nodeRun,
@@ -2778,6 +2850,98 @@ function CustomerDeliverableRow({
   )
 }
 
+function CanvasNodeAgentPicker({
+  node,
+  agent,
+  agents,
+  description,
+  onUpdateNode,
+}: {
+  node: DraftNode
+  agent: AgentProfileRow | null
+  agents: AgentProfileRow[]
+  description: string
+  onUpdateNode: (nodeId: string, patch: Partial<DraftNode>) => void
+}) {
+  if (node.type !== 'agent_employee') {
+    return (
+      <div className="mt-1 rounded-md border bg-muted/20 px-2 py-1.5 text-[10px]">
+        <div className="font-medium text-muted-foreground">节点类型</div>
+        <div className="mt-0.5 truncate">{description}</div>
+      </div>
+    )
+  }
+
+  const changeAgent = (agentId: string) => {
+    const nextAgent = agents.find((item) => item.id === agentId) ?? null
+    onUpdateNode(node.id, {
+      agentProfileId: nextAgent?.id ?? null,
+      label: nextAgent?.name ?? node.label,
+      config: { ...node.config, label: nextAgent?.name ?? node.label },
+      outputContract: defaultOutputContract(
+        'agent_employee',
+        nextAgent?.name ?? node.label,
+        nextAgent?.outputContract ?? node.outputContract,
+      ),
+    })
+  }
+
+  return (
+    <div data-testid="canvas-node-agent-picker" className="mt-1 rounded-md border bg-muted/20 px-2 py-1.5">
+      <div className="mb-1 flex items-center justify-between gap-2 text-[9px] text-muted-foreground">
+        <span className="font-medium">智能体选择</span>
+        <span className="truncate">{agent?.role ?? '未分配'}</span>
+      </div>
+      <select
+        value={node.agentProfileId ?? ''}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => changeAgent(event.target.value)}
+        className="h-6 w-full rounded border bg-background px-1.5 text-[10px] outline-none focus:border-primary"
+      >
+        <option value="">选择智能体</option>
+        {agents.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function CanvasNodeInputSummary({
+  inputTypes,
+  canReceiveConnection,
+}: {
+  inputTypes: string[]
+  canReceiveConnection: boolean
+}) {
+  return (
+    <div
+      data-testid="canvas-node-input-types"
+      className={cn(
+        'mt-1 rounded-md border px-2 py-1.5 text-[10px]',
+        canReceiveConnection ? 'border-primary bg-primary/5' : 'bg-background/70',
+      )}
+    >
+      <div className="mb-1 flex items-center justify-between gap-2 text-[9px] text-muted-foreground">
+        <span className="font-medium">输入类型</span>
+        <span>{inputTypes.length === 1 && inputTypes[0] === 'any_file' ? '自动接收' : '分类接收'}</span>
+      </div>
+      <div className="flex min-w-0 flex-wrap gap-1">
+        {inputTypes.map((type) => (
+          <Badge key={type} variant="outline" className="h-5 max-w-full gap-1 px-1.5 text-[9px]">
+            {artifactTypeIcon(type, 'size-2.5 shrink-0')}
+            <span className="truncate">{artifactTypeLabel(type)}</span>
+          </Badge>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function CanvasDeliveryPreview({
   node,
   nodeRun,
@@ -2825,6 +2989,7 @@ function ArtifactChip({ type, compact = false }: { type: string; compact?: boole
   )
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function CanvasNodeStatusStrip({ nodeRun }: { nodeRun: WorkflowNodeRunRow | null }) {
   const state = canvasNodeRunState(nodeRun)
   const progress = canvasNodeProgress(nodeRun)
@@ -3211,6 +3376,7 @@ function CanvasQuickEditor({
           }
         />
         <NodeArtifactOutputsEditor node={node} onUpdateNode={onUpdateNode} compact />
+        <NodeInputTypesEditor node={node} onUpdateNode={onUpdateNode} compact />
         <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
           <input
             type="checkbox"
@@ -3485,6 +3651,7 @@ function NodeInspector({
           }
         />
         <NodeArtifactOutputsEditor node={node} onUpdateNode={onUpdateNode} />
+        <NodeInputTypesEditor node={node} onUpdateNode={onUpdateNode} />
 
         <div className="rounded-md border bg-muted/20 p-2">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -4350,6 +4517,34 @@ function primaryArtifactOutput(node: DraftNode): CanvasArtifactOutput {
   return artifactOutputsOf(node)[0]
 }
 
+function selectedInputTypesOf(node: DraftNode): string[] {
+  return uniqueStrings(
+    jsonArray(node.inputMapping, 'acceptedArtifactTypes').filter(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    ),
+  )
+}
+
+function inputTypesForNode(node: DraftNode, edges: DraftEdge[], nodes: DraftNode[]): string[] {
+  const configured = selectedInputTypesOf(node)
+  if (configured.length > 0) return configured
+  const nodeById = new Map(nodes.map((item) => [item.id, item]))
+  const incoming = uniqueStrings(
+    edges
+      .filter((edge) => edge.targetNodeId === node.id)
+      .map((edge) => edgeArtifactType(edge, nodeById.get(edge.sourceNodeId)))
+      .filter((type) => type && type !== 'artifact'),
+  )
+  return incoming.length > 0 ? incoming : ['any_file']
+}
+
+function updateInputContractArtifactTypes(base: JsonObject, types: string[]): JsonObject {
+  return {
+    ...base,
+    acceptedArtifactTypes: uniqueStrings(types),
+  }
+}
+
 function normalizedArtifactOutputs(node: DraftNode): CanvasArtifactOutput[] {
   return artifactOutputsOf(node).map((output, index) => ({
     ...output,
@@ -4424,10 +4619,13 @@ function artifactTypeOf(node: DraftNode): string {
 }
 
 function artifactTypeLabel(type: string): string {
+  if (type === 'audio') return '音频'
+  if (type === 'any_file') return '任意文件'
   return ARTIFACT_TYPE_LABELS[type] ?? type
 }
 
 function artifactTypeIcon(type: string, className = 'size-3.5'): ReactNode {
+  if (type === 'audio') return <FileAudio className={className} />
   if (type === 'video') return <FileVideo className={className} />
   if (type === 'image') return <FileImage className={className} />
   if (type === 'code') return <Code2 className={className} />
@@ -4435,7 +4633,7 @@ function artifactTypeIcon(type: string, className = 'size-3.5'): ReactNode {
   if (type === 'json') return <FileJson className={className} />
   if (type === 'presentation') return <Presentation className={className} />
   if (type === 'browser_state' || type === 'desktop_result') return <MonitorCheck className={className} />
-  if (type === 'file_bundle' || type === 'software_result') return <Package className={className} />
+  if (type === 'file_bundle' || type === 'software_result' || type === 'any_file') return <Package className={className} />
   return <FileText className={className} />
 }
 
@@ -4764,6 +4962,10 @@ function asJsonObject(value: unknown): JsonObject {
 function jsonArray(obj: JsonObject, key: string): unknown[] {
   const value = obj[key]
   return Array.isArray(value) ? value : []
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
 }
 
 function positionValue(value: unknown, fallback: { x: number; y: number }): { x: number; y: number } {

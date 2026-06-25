@@ -839,40 +839,37 @@ async function main() {
   await page.getByTestId('canvas-customer-delivery-dock').getByText(uiText.videoArtifact).first().waitFor({
     timeout: 30_000,
   })
-  await quickEditor
-    .getByTestId('node-artifact-outputs-editor')
-    .locator('[data-testid="node-artifact-output-add"][data-output-type="code"]')
-    .evaluate((element) => (element as HTMLButtonElement).click())
-  await page
-    .getByTestId('canvas-artifact-output-port')
-    .filter({ hasText: '代码' })
-    .first()
+  const selectedCanvasNode = page.locator('[data-testid="workflow-canvas-node"][data-selected="true"]').first()
+  await selectedCanvasNode.getByTestId('canvas-node-agent-picker').waitFor({ timeout: 30_000 })
+  await selectedCanvasNode
+    .locator('[data-testid="canvas-artifact-output-port"][data-output-type="video"]')
     .waitFor({ timeout: 30_000 })
-  const multiArtifactOutputPort = await page
-    .getByTestId('canvas-artifact-output-port')
-    .filter({ hasText: '代码' })
-    .first()
+  const canvasAgentPickerVisible = await selectedCanvasNode.getByTestId('canvas-node-agent-picker').isVisible()
+  const canvasInputTypesVisible = await selectedCanvasNode.getByTestId('canvas-node-input-types').isVisible()
+  const inputTypesEditorVisible = await quickEditor.getByTestId('node-input-types-editor').isVisible()
+  const singleArtifactOutputPort =
+    (await selectedCanvasNode.getByTestId('canvas-artifact-output-port').count()) === 1
+  const primaryVideoOutputPort = await selectedCanvasNode
+    .locator('[data-testid="canvas-artifact-output-port"][data-output-type="video"]')
     .isVisible()
-  const edgesBeforeSpecificArtifactConnect = await page.getByTestId('workflow-canvas-edge').count()
-  const firstNodeCodeOutputPort = page
-    .locator('[data-testid="canvas-artifact-output-port"][data-output-type="code"]')
-    .first()
-  await firstNodeCodeOutputPort.waitFor({ timeout: 30_000 })
-  const codeSourceNodeId = await firstNodeCodeOutputPort.evaluate((element) => {
-    return element.closest('[data-testid="workflow-canvas-node"]')?.getAttribute('data-node-id') ?? ''
+  const ensureInputTypeEnabled = async (type: string) => {
+    const toggle = quickEditor
+      .getByTestId('node-input-types-editor')
+      .locator(`[data-testid="node-input-type-toggle"][data-input-type="${type}"]`)
+    const active = await toggle.evaluate((element) => element.className.includes('bg-primary'))
+    if (!active) await toggle.click()
+  }
+  await ensureInputTypeEnabled('video')
+  await ensureInputTypeEnabled('audio')
+  await selectedCanvasNode
+    .getByTestId('canvas-node-input-types')
+    .filter({ hasText: '视频' })
+    .filter({ hasText: '音频' })
+    .waitFor({ timeout: 30_000 })
+  const configuredInputTypes = await selectedCanvasNode.getByTestId('canvas-node-input-types').evaluate((element) => {
+    const text = element.textContent ?? ''
+    return text.includes('视频') && text.includes('音频')
   })
-  if (!codeSourceNodeId) throw new Error('Canvas UI check failed: codeSourceNodeId.')
-  const specificArtifactTargetPort = page
-    .locator(`[data-testid="workflow-canvas-node"]:not([data-node-id="${codeSourceNodeId}"])`)
-    .last()
-    .getByTestId('canvas-node-input-port')
-  await firstNodeCodeOutputPort.evaluate((element) => (element as HTMLButtonElement).click())
-  await specificArtifactTargetPort.evaluate((element) => (element as HTMLButtonElement).click())
-  await page.waitForFunction((previous) => {
-    return document.querySelectorAll('[data-testid="workflow-canvas-edge"]').length > Number(previous)
-  }, edgesBeforeSpecificArtifactConnect)
-  const artifactSpecificEdge =
-    (await page.locator('[data-testid="workflow-canvas-edge"][data-edge-artifact-type="code"]').count()) > 0
   const collapseQuickEditorButton = page.getByTestId('canvas-quick-editor-collapse')
   await collapseQuickEditorButton.waitFor({ timeout: 30_000 })
   const quickEditorCollapsed = page.getByTestId('canvas-quick-editor-collapsed')
@@ -1164,8 +1161,12 @@ async function main() {
     quickEditorExpandedAgain,
     nodePaletteCreatedNode: paletteCreatedNode,
     nodePaletteConnectedEdge: paletteConnectedEdge,
-    multiArtifactOutputPort,
-    artifactSpecificEdge,
+    canvasAgentPickerVisible,
+    canvasInputTypesVisible,
+    inputTypesEditorVisible,
+    configuredInputTypes,
+    singleArtifactOutputPort,
+    primaryVideoOutputPort,
     connectingPaletteHint: connectedPaletteHint,
     connectionDragPreview: dragPreviewVisible,
     connectionDragEdge: dragConnectedEdge,
@@ -1182,8 +1183,6 @@ async function main() {
     customerPreviewBoard: await page.getByTestId('canvas-customer-preview-board').isVisible(),
     customerPreviewCard: await page.getByTestId('canvas-customer-preview-card').first().isVisible(),
     nodeProgress: await page.getByTestId('canvas-node-progress').first().isVisible(),
-    nodeDeliveryCard: await page.getByTestId('canvas-node-delivery-card').first().isVisible(),
-    nodeStatusStrip: await page.getByTestId('canvas-node-status-strip').first().isVisible(),
     nodeStateComplete: await page
       .locator(`[data-testid="workflow-canvas-node"][data-run-state="complete"]`)
       .first()
@@ -1201,19 +1200,13 @@ async function main() {
     nodeCompleteText: canvasBodyText.includes(uiText.canvasNodeComplete),
     nodeCompleteStep: canvasBodyText.includes(uiText.canvasNodeCompleteStep),
     nodeCompletePercent: canvasBodyText.includes('100%'),
-    runStatusText: canvasBodyText.includes(uiText.canvasRunStatus),
-    nextStepText: canvasBodyText.includes(uiText.canvasNextStep),
-    nodePhaseComplete: await page.locator('[data-testid="canvas-node-status-strip"][data-node-phase="complete"]').first().isVisible(),
-    deliveryChecklist: canvasBodyText.includes(uiText.canvasDeliveryChecklist),
     currentArtifact: canvasBodyText.includes(uiText.canvasCurrentArtifact),
-    acceptanceState: canvasBodyText.includes(uiText.canvasAcceptanceState),
     producedState: canvasBodyText.includes(uiText.canvasProduced),
     pendingState: canvasBodyText.includes(uiText.canvasPendingArtifact),
     customerAcceptanceView: canvasBodyText.includes(uiText.canvasCustomerAcceptance),
     previewMode: canvasBodyText.includes(uiText.canvasPreviewMode),
     deliveryFile: canvasBodyText.includes(uiText.canvasDeliveryFile),
     ownerNode: canvasBodyText.includes(uiText.canvasOwnerNode),
-    acceptanceRule: canvasBodyText.includes(uiText.canvasAcceptanceRule),
     backgroundPan: canvasPan,
     viewportControls: await viewportControls.isVisible(),
     zoomChanged: beforeZoomText !== zoomedText,
