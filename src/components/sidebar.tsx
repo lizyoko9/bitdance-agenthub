@@ -6,7 +6,6 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  Clock3,
   GitBranch,
   GitMerge,
   Layers,
@@ -45,7 +44,6 @@ export type SidebarMode =
   | 'workflows'
   | 'agent-canvas'
   | 'skills'
-  | 'scheduler'
   | 'memory'
   | 'context'
   | 'models'
@@ -77,7 +75,6 @@ const primaryNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> =
 
 const advancedNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> = [
   { mode: 'artifacts', label: '交付物', icon: <Layers className="size-4" /> },
-  { mode: 'scheduler', label: '自动任务', icon: <Clock3 className="size-4" /> },
   { mode: 'monitor', label: '运行现场', icon: <Activity className="size-4" /> },
   { mode: 'analytics', label: '数据分析', icon: <BarChart3 className="size-4" /> },
 ]
@@ -95,7 +92,6 @@ const cleanNavLabels: Record<SidebarMode, string> = {
   workflows: '工作流',
   'agent-canvas': '编排画布',
   skills: '技能中心',
-  scheduler: '自动任务',
   memory: '记忆学习',
   context: '上下文',
   models: '模型管理',
@@ -118,7 +114,6 @@ const navDisplayLabels: Record<SidebarMode, string> = {
   workflows: '\u5de5\u4f5c\u6d41',
   'agent-canvas': '\u7f16\u6392\u753b\u5e03',
   skills: '\u6280\u80fd\u4e2d\u5fc3',
-  scheduler: '\u4efb\u52a1\u8c03\u5ea6',
   memory: '\u8bb0\u5fc6\u5b66\u4e60',
   context: '\u4e0a\u4e0b\u6587',
   models: '\u6a21\u578b\u7ba1\u7406',

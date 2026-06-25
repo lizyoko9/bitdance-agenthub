@@ -13,7 +13,6 @@ import { ObservabilityCenter } from '@/components/observability-center'
 import { ProductionIntegrationsCenter } from '@/components/production-integrations-center'
 import { Sidebar, type SidebarMode } from '@/components/sidebar'
 import { SkillsCenter } from '@/components/skills-center'
-import { TaskSchedulerCenter } from '@/components/task-scheduler-center'
 import { ToolControlCenter } from '@/components/tool-control-center'
 import { UsageDashboard } from '@/components/usage-dashboard'
 import { WorkflowLibrary } from '@/components/workflow-library'
@@ -130,8 +129,6 @@ function renderWorkspace(
       return <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />
     case 'skills':
       return <SkillsCenter />
-    case 'scheduler':
-      return <TaskSchedulerCenter />
     case 'memory':
     case 'context':
     case 'capabilities':

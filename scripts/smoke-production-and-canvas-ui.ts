@@ -277,12 +277,6 @@ const uiText = {
   appendOnlyContext: '\u8ffd\u52a0\u5f0f\u4e0a\u4e0b\u6587',
   targetCacheHit: '\u76ee\u6807\u547d\u4e2d',
   projectContext: '\u5de5\u7a0b\u6587\u4ef6\u4e0a\u4e0b\u6587',
-  schedulerNav: '\u4efb\u52a1\u8c03\u5ea6',
-  schedulerTitle: '\u4efb\u52a1\u8c03\u5ea6',
-  schedulerQueue: '\u4efb\u52a1\u961f\u5217',
-  schedulerRules: '\u5b9a\u65f6\u89c4\u5219',
-  schedulerQuickActions: '\u5feb\u901f\u64cd\u4f5c',
-  schedulerRunDue: '\u7acb\u5373\u8fd0\u884c\u5230\u671f\u4efb\u52a1',
   artifactsNav: '\u4ea4\u4ed8\u7269',
   artifactsTitle: '\u4ea4\u4ed8\u7269\u4e2d\u5fc3',
   artifactsSearch: '\u641c\u7d22\u4ea4\u4ed8\u7269',
@@ -1249,29 +1243,6 @@ async function main() {
   await page.getByTestId('workflow-library-card').first().getByRole('button', { name: uiText.workflowsOpenCanvas }).click()
   await page.getByText(uiText.canvasTitle, { exact: true }).waitFor({ timeout: 90_000 })
 
-  let schedulerNav = sidebar.locator(`button[title="${uiText.schedulerNav}"]`)
-  if ((await schedulerNav.count()) === 0) {
-    const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
-    if ((await collapsedMore.count()) > 0) await collapsedMore.first().click({ force: true })
-    schedulerNav = sidebar.locator(`button[title="${uiText.schedulerNav}"]`)
-  }
-  await schedulerNav.click({ force: true })
-  await page.locator('main').getByText(uiText.schedulerTitle, { exact: true }).waitFor({ timeout: 90_000 })
-  const schedulerScreenshot = path.join(outDir, 'scheduler-auto-tasks.png')
-  await page.screenshot({ path: schedulerScreenshot, fullPage: true })
-  const schedulerBodyText = await page.locator('main').innerText()
-  const schedulerChecks = {
-    title: schedulerBodyText.includes(uiText.schedulerTitle),
-    queue: schedulerBodyText.includes(uiText.schedulerQueue),
-    rules: schedulerBodyText.includes(uiText.schedulerRules),
-    quickActions: schedulerBodyText.includes(uiText.schedulerQuickActions),
-    runDue: schedulerBodyText.includes(uiText.schedulerRunDue),
-    noEnglishTitle: !schedulerBodyText.includes('Task Scheduler'),
-  }
-  for (const [key, value] of Object.entries(schedulerChecks)) {
-    if (!value) throw new Error(`Scheduler UI check failed: ${key}.`)
-  }
-
   let artifactsNav = sidebar.locator(`button[title="${uiText.artifactsNav}"]`)
   if ((await artifactsNav.count()) === 0) {
     const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
@@ -1287,13 +1258,11 @@ async function main() {
   const artifactsScreenshot = path.join(outDir, 'artifact-delivery-center.png')
   await page.screenshot({ path: artifactsScreenshot, fullPage: true })
   const artifactsBodyText = await page.locator('main').innerText()
-  const schedulerNavDuringArtifacts = sidebar.locator(`button[title="${uiText.schedulerNav}"]`)
+  const automaticTasksHidden = (await sidebar.getByRole('button', { name: /自动任务|任务调度/ }).count()) === 0
   const artifactsChecks = {
     title: artifactsBodyText.includes(uiText.artifactsTitle),
     navActive: await artifactsNav.evaluate((element) => element.className.includes('bg-primary')),
-    schedulerInactive:
-      (await schedulerNavDuringArtifacts.count()) === 0 ||
-      !(await schedulerNavDuringArtifacts.first().evaluate((element) => element.className.includes('bg-primary'))),
+    automaticTasksHidden,
     search: await page.locator(`input[placeholder*="${uiText.artifactsSearch}"]`).isVisible(),
     versions: artifactsBodyText.includes(uiText.artifactsVersions),
     source: artifactsBodyText.includes(uiText.artifactsSource),
@@ -1438,7 +1407,6 @@ async function main() {
     skillsChecks,
     canvasChecks,
     workflowLibraryChecks,
-    schedulerChecks,
     artifactsChecks,
     monitorChecks,
     analyticsChecks,
@@ -1453,7 +1421,6 @@ async function main() {
       skillsScreenshot,
       canvasScreenshot,
       workflowLibraryScreenshot,
-      schedulerScreenshot,
       artifactsScreenshot,
       monitorScreenshot,
       analyticsScreenshot,
