@@ -161,36 +161,18 @@ const uiText = {
   toolsMcpAccess: 'MCP \u63a5\u5165',
   toolsAvailableCommands: '\u53ef\u7528\u547d\u4ee4',
 
-  skillsNav: '\u6280\u80fd\u4e2d\u5fc3',
-  skillsMarket: 'SkillsMP \u6280\u80fd\u5e02\u573a',
-  skillsCli: 'SkillsMP CLI',
-  removedSkillsSearchPlaceholder: '\u641c\u7d22\u6280\u80fd\uff0c\u6bd4\u5982\uff1a\u5199\u4ee3\u7801\u3001\u8fd0\u8425\u3001\u6d4f\u89c8\u5668\u3001\u89c6\u9891',
-  skillsCommandBar: '\u6280\u80fd\u5e02\u573a\u5de5\u4f5c\u53f0',
-  skillsInstallAssistant: '\u6280\u80fd\u5b89\u88c5\u52a9\u624b',
-  skillsChooseRecommended: '\u9009\u62e9\u4e00\u4e2a\u63a8\u8350\u6280\u80fd',
-  skillsSelectedSkill: '\u5f53\u524d\u9009\u4e2d\u6280\u80fd',
-  skillsNextStep: '\u4e0b\u4e00\u6b65',
-  skillsCurrentSkill: '\u5f53\u524d\u6280\u80fd',
-  skillsRecommendAgent: '\u63a8\u8350\u7ed9',
-  skillsFeatured: '\u63a8\u8350\u6280\u80fd',
-  skillsUsePath: '\u6280\u80fd\u600e\u4e48\u53d8\u6210\u667a\u80fd\u4f53\u80fd\u529b',
-  skillsStepChooseRecommended: '\u9009\u62e9\u63a8\u8350\u6280\u80fd',
-  skillsStepInstall: '\u5b89\u88c5\u5230\u672c\u5730',
-  skillsStepAssign: '\u5206\u914d\u7ed9\u667a\u80fd\u4f53',
+  skillsNav: '\u6280\u80fd\u7ba1\u7406',
+  skillsManagementTitle: '\u6280\u80fd\u7ba1\u7406',
+  skillsMine: '\u6211\u7684\u6280\u80fd',
+  skillsManualInstall: '\u624b\u52a8\u5b89\u88c5\u6280\u80fd',
+  skillsInstallHistory: '\u5b89\u88c5\u8bb0\u5f55',
+  skillsInstalledSearchPlaceholder: '\u641c\u7d22\u5df2\u5b89\u88c5\u6280\u80fd',
   skillsInstalledHint: '\u5df2\u5b89\u88c5\u6280\u80fd\u4f1a\u51fa\u73b0\u5728\u667a\u80fd\u4f53\u8bbe\u7f6e\u91cc',
-  skillsAssignmentPlan: '\u5206\u914d\u5efa\u8bae',
-  skillsSmokeResult: 'code-review-plus',
-  skillsDetailHero: '\u6280\u80fd\u540d\u7247',
-  skillsMarketSignal: '\u5e02\u573a\u70ed\u5ea6',
-  skillsInstallAssignPath: '\u5b89\u88c5\u4e0e\u5206\u914d\u8def\u5f84',
-  skillsGoAssignToAgent: '\u53bb\u5206\u914d\u7ed9\u667a\u80fd\u4f53',
-  skillsAgentFit: '\u667a\u80fd\u4f53\u9002\u914d',
-  skillsSuitableRole: '\u9002\u5408\u5c97\u4f4d',
-  skillsCapabilityBoost: '\u80fd\u529b\u589e\u76ca',
-  skillsConfigLocation: '\u914d\u7f6e\u4f4d\u7f6e',
-  skillsDetailAgentUse: '\u7ed9\u667a\u80fd\u4f53\u4f7f\u7528',
-  skillsAssignToAgent: '\u6253\u5f00\u667a\u80fd\u4f53\u8bbe\u7f6e\u5e76\u5206\u914d',
-  skillsInstallLocal: '\u5b89\u88c5\u5230\u672c\u5730',
+  removedSkillsMarket: 'SkillsMP \u6280\u80fd\u5e02\u573a',
+  removedSkillsCli: 'SkillsMP CLI',
+  removedSkillsInstallAssistant: '\u6280\u80fd\u5b89\u88c5\u52a9\u624b',
+  removedSkillsFeatured: '\u63a8\u8350\u6280\u80fd',
+  removedSkillsUsePath: '\u6280\u80fd\u600e\u4e48\u53d8\u6210\u667a\u80fd\u4f53\u80fd\u529b',
 
   workflowsNav: '\u5de5\u4f5c\u6d41',
   workflowsTitle: '\u5de5\u4f5c\u6d41',
@@ -728,84 +710,35 @@ async function main() {
   }
 
   await clickSidebarButton(sidebar, uiText.skillsNav)
-  await page.getByText(uiText.skillsMarket, { exact: true }).waitFor({ timeout: 90_000 })
-  await page.getByTestId('skillsmp-featured-market').getByText(uiText.skillsFeatured, { exact: true }).waitFor({
-    timeout: 90_000,
-  })
-  const smokeSkillCard = page.getByTestId('skillsmp-result-card').filter({ hasText: uiText.skillsSmokeResult }).first()
-  await smokeSkillCard.waitFor({ timeout: 90_000 })
-  await smokeSkillCard.click()
-  await page
-    .getByTestId('skillsmp-detail-panel')
-    .filter({ hasText: uiText.skillsSmokeResult })
-    .first()
-    .waitFor({ timeout: 90_000 })
-  const skillsScreenshot = path.join(outDir, 'skillsmp-cli-market.png')
+  const skillsRoot = page.getByTestId('skills-management-center')
+  await skillsRoot.waitFor({ timeout: 90_000 })
+  await skillsRoot.getByText(uiText.skillsManagementTitle, { exact: true }).first().waitFor({ timeout: 90_000 })
+  await page.getByTestId('installed-skills-search').waitFor({ timeout: 90_000 })
+  const skillsScreenshot = path.join(outDir, 'skills-management.png')
   await page.screenshot({ path: skillsScreenshot, fullPage: true })
   const skillsBodyText = await page.locator('body').innerText()
   const skillsChecks = {
-    title: skillsBodyText.includes(uiText.skillsMarket),
-    cliBadge: skillsBodyText.includes(uiText.skillsCli),
-    noSearchInput: (await page.getByPlaceholder(uiText.removedSkillsSearchPlaceholder).count()) === 0,
-    noSearchButton: (await page.locator('main button', { hasText: '\u641c\u7d22' }).count()) === 0,
-    installAssistantNode: await page.getByTestId('skills-install-assistant').isVisible(),
-    installAssistantText: skillsBodyText.includes(uiText.skillsInstallAssistant),
-    chooseRecommended: skillsBodyText.includes(uiText.skillsChooseRecommended),
-    selectedSkillSummary: skillsBodyText.includes(uiText.skillsSelectedSkill),
-    nextStepHint: skillsBodyText.includes(uiText.skillsNextStep),
-    commandBarNode: await page.getByTestId('skills-market-command-bar').isVisible(),
-    commandBarText: skillsBodyText.includes(uiText.skillsCommandBar),
-    currentSkillText: skillsBodyText.includes(uiText.skillsCurrentSkill),
-    recommendAgentText: skillsBodyText.includes(uiText.skillsRecommendAgent),
-    noCategoryShelf: (await page.getByTestId('skills-market-category-shelf').count()) === 0,
-    usePathNode: await page.getByTestId('skills-use-path').isVisible(),
-    usePathText: skillsBodyText.includes(uiText.skillsUsePath),
-    usePathChooseRecommended: skillsBodyText.includes(uiText.skillsStepChooseRecommended),
-    usePathInstall: skillsBodyText.includes(uiText.skillsStepInstall),
-    usePathAssign: skillsBodyText.includes(uiText.skillsStepAssign),
+    title: skillsBodyText.includes(uiText.skillsManagementTitle),
+    mine: skillsBodyText.includes(uiText.skillsMine),
+    manualInstall: skillsBodyText.includes(uiText.skillsManualInstall),
+    installHistory: skillsBodyText.includes(uiText.skillsInstallHistory),
+    managementNode: await skillsRoot.isVisible(),
+    installedListNode: await page.getByTestId('installed-skills-list').isVisible(),
+    installedSearchNode: await page.getByTestId('installed-skills-search').isVisible(),
+    installedSearchPlaceholder: (await page.getByPlaceholder(uiText.skillsInstalledSearchPlaceholder).count()) > 0,
     installedAgentHint: skillsBodyText.includes(uiText.skillsInstalledHint),
     installedAgentHintNode: await page.getByTestId('installed-skills-agent-hint').isVisible(),
-    resultCard: skillsBodyText.includes(uiText.skillsSmokeResult),
-    selectedCard: await page
-      .getByTestId('skillsmp-result-card')
-      .filter({ hasText: uiText.skillsSmokeResult })
-      .first()
-      .evaluate((node) => node.getAttribute('data-selected') === 'true'),
-    detailPanel: await page.getByTestId('skillsmp-detail-panel').isVisible(),
-    detailHeroNode: await page.getByTestId('skillsmp-detail-hero').isVisible(),
-    detailHeroText: skillsBodyText.includes(uiText.skillsDetailHero),
-    marketSignalNode: await page.getByTestId('skillsmp-detail-market-signal').isVisible(),
-    marketSignalText: skillsBodyText.includes(uiText.skillsMarketSignal),
-    installAssignPathNode: await page.getByTestId('skillsmp-detail-assignment-path').isVisible(),
-    installAssignPathText: skillsBodyText.includes(uiText.skillsInstallAssignPath),
-    heroAssignAction: skillsBodyText.includes(uiText.skillsGoAssignToAgent),
-    assignmentPlanNode: await page.getByTestId('skills-agent-assignment-plan').isVisible(),
-    assignmentPlanText: skillsBodyText.includes(uiText.skillsAssignmentPlan),
-    agentFitGuide: await page.getByTestId('skillsmp-agent-fit-guide').isVisible(),
-    agentFit: skillsBodyText.includes(uiText.skillsAgentFit),
-    suitableRole: skillsBodyText.includes(uiText.skillsSuitableRole),
-    capabilityBoost: skillsBodyText.includes(uiText.skillsCapabilityBoost),
-    configLocation: skillsBodyText.includes(uiText.skillsConfigLocation),
-    agentUseCopy: skillsBodyText.includes(uiText.skillsDetailAgentUse),
-    assignToAgent: skillsBodyText.includes(uiText.skillsAssignToAgent),
-    installLocal: skillsBodyText.includes(uiText.skillsInstallLocal),
+    noMarketTitle: !skillsBodyText.includes(uiText.removedSkillsMarket),
+    noCliBadge: !skillsBodyText.includes(uiText.removedSkillsCli),
+    noInstallAssistantCopy: !skillsBodyText.includes(uiText.removedSkillsInstallAssistant),
+    noFeaturedCopy: !skillsBodyText.includes(uiText.removedSkillsFeatured),
+    noUsePathCopy: !skillsBodyText.includes(uiText.removedSkillsUsePath),
+    noMarketCards: (await page.getByTestId('skillsmp-result-card').count()) === 0,
+    noDetailPanel: (await page.getByTestId('skillsmp-detail-panel').count()) === 0,
+    noAssignButton: (await page.getByTestId('assign-skill-to-agent').count()) === 0,
   }
   for (const [key, value] of Object.entries(skillsChecks)) {
-    if (!value) throw new Error(`SkillsMP UI check failed: ${key}.`)
-  }
-  await page.getByTestId('assign-skill-to-agent').click()
-  await page.getByText(uiText.agentCurrentSummary, { exact: true }).waitFor({ timeout: 90_000 })
-  await page.getByTestId('agent-capabilities-section').waitFor({ timeout: 90_000 })
-  const skillsToAgentText = await page.locator('body').innerText()
-  const skillsToAgentChecks = {
-    openedAgentSettings: skillsToAgentText.includes(uiText.agentCurrentSummary),
-    toolboxSummary: skillsToAgentText.includes(uiText.agentToolbox),
-    toolboxCopy: skillsToAgentText.includes(uiText.agentToolboxCopy),
-    assignAbility: skillsToAgentText.includes(uiText.agentAssignAbility),
-    toolboxNode: await page.getByTestId('agent-toolbox-summary').isVisible(),
-  }
-  for (const [key, value] of Object.entries(skillsToAgentChecks)) {
-    if (!value) throw new Error(`Skills to Agent assignment check failed: ${key}.`)
+    if (!value) throw new Error(`Skills management UI check failed: ${key}.`)
   }
 
   await clickSidebarButton(sidebar, uiText.canvasNav)
