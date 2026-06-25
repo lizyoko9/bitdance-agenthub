@@ -663,6 +663,10 @@ export function ModelControlCenter() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <Button size="sm" variant="outline" className="h-8 gap-1" onClick={openAddNetworkDialog}>
+              <Globe2 className="size-3.5" />
+              新建落地 IP
+            </Button>
             <Button size="sm" className="h-8 gap-1" onClick={openAddModelDialog}>
               <Plus className="size-3.5" />
               添加模型
@@ -818,9 +822,9 @@ export function ModelControlCenter() {
       <Dialog open={addNetworkOpen} onOpenChange={handleNetworkDialogOpenChange}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>添加网络出口</DialogTitle>
+            <DialogTitle>新建落地 IP</DialogTitle>
             <DialogDescription>
-              给模型配置代理或专用网络出口。添加后，模型配置里可以直接选择这个出口。
+              给模型配置直连、HTTP/SOCKS 代理或专用网关。添加后，模型配置里可以直接选择这个落地 IP 出口。
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-3" onSubmit={(event) => {
