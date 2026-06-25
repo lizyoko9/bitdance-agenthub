@@ -9,7 +9,6 @@ import { ChatPanel } from '@/components/chat-panel'
 import { ConfigOpsCenter } from '@/components/config-ops-center'
 import { DesktopWorkbench } from '@/components/desktop-workbench'
 import { ModelControlCenter } from '@/components/model-control-center'
-import { ObservabilityCenter } from '@/components/observability-center'
 import { ProductionIntegrationsCenter } from '@/components/production-integrations-center'
 import { Sidebar, type SidebarMode } from '@/components/sidebar'
 import { SkillsCenter } from '@/components/skills-center'
@@ -139,8 +138,6 @@ function renderWorkspace(
       return <ModelControlCenter />
     case 'tools':
       return <ToolControlCenter />
-    case 'monitor':
-      return <ObservabilityCenter />
     case 'configops':
       return <ConfigOpsCenter />
     case 'production':

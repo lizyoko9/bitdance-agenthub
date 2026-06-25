@@ -6,7 +6,7 @@ const uiText = {
   workbenchNav: '\u5de5\u4f5c\u53f0',
   workbenchTitle: '\u7535\u8111\u7aef\u5de5\u4f5c\u53f0',
   workbenchStart: '\u5f00\u59cb\u5de5\u4f5c',
-  workbenchRunSite: '\u8fd0\u884c\u73b0\u573a',
+  workbenchRunSite: '\u6267\u884c\u9884\u6848',
   workbenchActivity: '\u5458\u5de5\u73b0\u573a',
   workbenchQueued: '\u6392\u961f',
   workbenchToolActions: '\u5de5\u5177\u52a8\u4f5c',
@@ -294,16 +294,6 @@ const uiText = {
   artifactsPreviewable: '\u53ef\u9884\u89c8',
   artifactsTraceable: '\u53ef\u8ffd\u6eaf',
   artifactsDeliveryCheck: '\u4ea4\u4ed8\u68c0\u67e5',
-  monitorNav: '\u8fd0\u884c\u73b0\u573a',
-  monitorTitle: '\u8fd0\u884c\u73b0\u573a',
-  monitorSceneOverview: '\u73b0\u573a\u603b\u89c8',
-  monitorCurrentRuns: '\u4efb\u52a1\u961f\u5217\u4e0e\u5f53\u524d\u6b65\u9aa4',
-  monitorRecentEvents: '\u6700\u8fd1\u4e8b\u4ef6',
-  monitorNeedHandle: '\u662f\u5426\u9700\u8981\u5904\u7406',
-  monitorDeliveryState: '\u4ea4\u4ed8\u7269\u72b6\u6001',
-  monitorNextStep: '\u4e0b\u4e00\u6b65',
-  monitorAdvanced: '\u9ad8\u7ea7\u76d1\u63a7',
-  monitorArtifacts: '\u4ea7\u7269',
   moreFeatures: '\u66f4\u591a\u529f\u80fd',
   hiddenAdvancedNav: [
     '\u8bb0\u5fc6\u5b66\u4e60',
@@ -1259,10 +1249,12 @@ async function main() {
   await page.screenshot({ path: artifactsScreenshot, fullPage: true })
   const artifactsBodyText = await page.locator('main').innerText()
   const automaticTasksHidden = (await sidebar.getByRole('button', { name: /自动任务|任务调度/ }).count()) === 0
+  const runSceneHidden = (await sidebar.getByRole('button', { name: /运行现场|运行监控/ }).count()) === 0
   const artifactsChecks = {
     title: artifactsBodyText.includes(uiText.artifactsTitle),
     navActive: await artifactsNav.evaluate((element) => element.className.includes('bg-primary')),
     automaticTasksHidden,
+    runSceneHidden,
     search: await page.locator(`input[placeholder*="${uiText.artifactsSearch}"]`).isVisible(),
     versions: artifactsBodyText.includes(uiText.artifactsVersions),
     source: artifactsBodyText.includes(uiText.artifactsSource),
@@ -1282,35 +1274,6 @@ async function main() {
   }
   for (const [key, value] of Object.entries(artifactsChecks)) {
     if (!value) throw new Error(`Artifacts UI check failed: ${key}.`)
-  }
-
-  let monitorNav = sidebar.locator(`button[title="${uiText.monitorNav}"]`)
-  if ((await monitorNav.count()) === 0) {
-    const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
-    if ((await collapsedMore.count()) > 0) await collapsedMore.first().click({ force: true })
-    monitorNav = sidebar.locator(`button[title="${uiText.monitorNav}"]`)
-  }
-  await monitorNav.click({ force: true })
-  await page.locator('main').getByText(uiText.monitorTitle, { exact: true }).waitFor({ timeout: 90_000 })
-  const monitorScreenshot = path.join(outDir, 'run-scene-monitor.png')
-  await page.screenshot({ path: monitorScreenshot, fullPage: true })
-  const monitorBodyText = await page.locator('main').innerText()
-  const monitorChecks = {
-    title: monitorBodyText.includes(uiText.monitorTitle),
-    navActive: await monitorNav.evaluate((element) => element.className.includes('bg-primary')),
-    sceneOverview: monitorBodyText.includes(uiText.monitorSceneOverview),
-    sceneOverviewNode: await page.getByTestId('run-scene-overview').isVisible(),
-    currentRuns: monitorBodyText.includes(uiText.monitorCurrentRuns),
-    recentEvents: monitorBodyText.includes(uiText.monitorRecentEvents),
-    needHandle: monitorBodyText.includes(uiText.monitorNeedHandle),
-    deliveryState: monitorBodyText.includes(uiText.monitorDeliveryState),
-    nextStep: monitorBodyText.includes(uiText.monitorNextStep),
-    advanced: monitorBodyText.includes(uiText.monitorAdvanced),
-    artifacts: monitorBodyText.includes(uiText.monitorArtifacts),
-    noEnglishTitle: !monitorBodyText.includes('Observability Center'),
-  }
-  for (const [key, value] of Object.entries(monitorChecks)) {
-    if (!value) throw new Error(`Monitor UI check failed: ${key}.`)
   }
 
   const analyticsNav = sidebar.locator(`button[title="${uiText.analyticsNav}"]`)
@@ -1408,7 +1371,6 @@ async function main() {
     canvasChecks,
     workflowLibraryChecks,
     artifactsChecks,
-    monitorChecks,
     analyticsChecks,
     screenshots: {
       agentScreenshot,
@@ -1422,7 +1384,6 @@ async function main() {
       canvasScreenshot,
       workflowLibraryScreenshot,
       artifactsScreenshot,
-      monitorScreenshot,
       analyticsScreenshot,
     },
     consoleErrors: consoleErrors.slice(0, 10),

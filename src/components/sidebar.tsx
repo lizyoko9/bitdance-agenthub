@@ -1,7 +1,6 @@
 'use client'
 
 import {
-  Activity,
   BarChart3,
   Bot,
   ChevronDown,
@@ -51,7 +50,6 @@ export type SidebarMode =
   | 'capabilities'
   | 'collaboration'
   | 'governance'
-  | 'monitor'
   | 'configops'
   | 'production'
   | 'agents'
@@ -75,7 +73,6 @@ const primaryNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> =
 
 const advancedNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> = [
   { mode: 'artifacts', label: '交付物', icon: <Layers className="size-4" /> },
-  { mode: 'monitor', label: '运行现场', icon: <Activity className="size-4" /> },
   { mode: 'analytics', label: '数据分析', icon: <BarChart3 className="size-4" /> },
 ]
 
@@ -99,7 +96,6 @@ const cleanNavLabels: Record<SidebarMode, string> = {
   capabilities: '能力图谱',
   collaboration: '团队协作',
   governance: '安全治理',
-  monitor: '运行现场',
   configops: '配置管理',
   production: '交付检查',
   agents: '智能体',
@@ -121,7 +117,6 @@ const navDisplayLabels: Record<SidebarMode, string> = {
   capabilities: '\u80fd\u529b\u56fe\u8c31',
   collaboration: '\u56e2\u961f\u534f\u4f5c',
   governance: '\u5b89\u5168\u6cbb\u7406',
-  monitor: '\u8fd0\u884c\u73b0\u573a',
   configops: '\u914d\u7f6e\u7ba1\u7406',
   production: '\u4ea4\u4ed8\u68c0\u67e5',
   agents: '\u667a\u80fd\u4f53',

@@ -108,7 +108,7 @@ const capabilityCards = [
     icon: <MonitorCog className="size-4" />,
     title: '电脑操作',
     body: '真实桌面先加锁，避免互相抢鼠标',
-    mode: 'monitor' as SidebarMode,
+    mode: 'tools' as SidebarMode,
   },
 ]
 
@@ -288,7 +288,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
         status: '已加锁',
         detail: '真实鼠标键盘默认串行执行，避免多个员工互相抢控制',
         ready: true,
-        mode: 'monitor',
+        mode: 'tools',
         icon: <ShieldCheck className="size-4" />,
       },
     ]
@@ -649,7 +649,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
             <Card>
               <CardHeader className="border-b">
                 <div className="flex items-center justify-between gap-2">
-                  <CardTitle>运行现场</CardTitle>
+                  <CardTitle>执行预案</CardTitle>
                   <Badge variant={trimmedGoal ? 'default' : 'outline'}>
                     {trimmedGoal ? '已形成预案' : '等待目标'}
                   </Badge>
@@ -755,7 +755,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
             <div className="grid grid-cols-2 gap-2">
               <MiniAction icon={<Code2 className="size-4" />} label="代码任务" onClick={() => setGoal(taskPresets[1].value)} />
               <MiniAction icon={<Film className="size-4" />} label="视频任务" onClick={() => setGoal(taskPresets[3].value)} />
-              <MiniAction icon={<ShieldCheck className="size-4" />} label="安全锁" onClick={() => onModeChange('monitor')} />
+              <MiniAction icon={<ShieldCheck className="size-4" />} label="安全锁" onClick={() => onModeChange('tools')} />
               <MiniAction icon={<Wrench className="size-4" />} label="工具商店" onClick={() => onModeChange('tools')} />
             </div>
           </aside>
