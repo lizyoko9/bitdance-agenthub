@@ -243,7 +243,7 @@ interface CanvasNodePaletteState {
   canvasPosition: { x: number; y: number }
 }
 
-export function AgentWorkflowCanvas() {
+export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?: string }) {
   const [agents, setAgents] = useState<AgentProfileRow[]>([])
   const [softwareCommands, setSoftwareCommands] = useState<SoftwareCommandRow[]>([])
   const [workflowPresets, setWorkflowPresets] = useState<WorkflowPresetDto[]>([])
@@ -372,6 +372,11 @@ export function AgentWorkflowCanvas() {
   useEffect(() => {
     void reloadLists()
   }, [reloadLists])
+
+  useEffect(() => {
+    if (!initialWorkflowId) return
+    setSelectedWorkflowId((current) => (current === initialWorkflowId ? current : initialWorkflowId))
+  }, [initialWorkflowId])
 
   useEffect(() => {
     if (!selectedWorkflowId) return

@@ -18,6 +18,7 @@ import {
   Plus,
   Search,
   Wrench,
+  Workflow,
   Zap,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -41,6 +42,7 @@ export type SidebarMode =
   | 'conversations'
   | 'artifacts'
   | 'employee-factory'
+  | 'workflows'
   | 'agent-canvas'
   | 'skills'
   | 'scheduler'
@@ -66,6 +68,7 @@ const primaryNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> =
   { mode: 'workbench', label: '工作台', icon: <MonitorCog className="size-4" /> },
   { mode: 'conversations', label: '对话', icon: <MessageSquare className="size-4" /> },
   { mode: 'agents', label: '智能体', icon: <Bot className="size-4" /> },
+  { mode: 'workflows', label: '工作流', icon: <Workflow className="size-4" /> },
   { mode: 'agent-canvas', label: '编排画布', icon: <GitBranch className="size-4" /> },
   { mode: 'skills', label: '技能中心', icon: <Package className="size-4" /> },
   { mode: 'models', label: '模型管理', icon: <Zap className="size-4" /> },
@@ -89,6 +92,7 @@ const cleanNavLabels: Record<SidebarMode, string> = {
   conversations: '对话',
   artifacts: '交付物',
   'employee-factory': '智能体设置',
+  workflows: '工作流',
   'agent-canvas': '编排画布',
   skills: '技能中心',
   scheduler: '自动任务',
@@ -111,6 +115,7 @@ const navDisplayLabels: Record<SidebarMode, string> = {
   conversations: '\u5bf9\u8bdd',
   artifacts: '\u4ea4\u4ed8\u7269',
   'employee-factory': '\u667a\u80fd\u4f53\u8bbe\u7f6e',
+  workflows: '\u5de5\u4f5c\u6d41',
   'agent-canvas': '\u7f16\u6392\u753b\u5e03',
   skills: '\u6280\u80fd\u4e2d\u5fc3',
   scheduler: '\u4efb\u52a1\u8c03\u5ea6',

@@ -191,6 +191,12 @@ const uiText = {
   skillsAssignToAgent: '\u6253\u5f00\u667a\u80fd\u4f53\u8bbe\u7f6e\u5e76\u5206\u914d',
   skillsInstallLocal: '\u5b89\u88c5\u5230\u672c\u5730',
 
+  workflowsNav: '\u5de5\u4f5c\u6d41',
+  workflowsTitle: '\u5de5\u4f5c\u6d41',
+  workflowsOpenCanvas: '\u6253\u5f00\u753b\u5e03',
+  workflowsCreateInCanvas: '\u53bb\u753b\u5e03\u65b0\u5efa',
+  workflowsSearch: '\u641c\u7d22\u5de5\u4f5c\u6d41',
+
   canvasNav: '\u7f16\u6392\u753b\u5e03',
   canvasTitle: '\u667a\u80fd\u4f53\u7f16\u6392\u753b\u5e03',
   addAgent: '\u6dfb\u52a0\u667a\u80fd\u4f53',
@@ -861,14 +867,17 @@ async function main() {
   }
   await ensureInputTypeEnabled('video')
   await ensureInputTypeEnabled('audio')
-  await selectedCanvasNode
-    .getByTestId('canvas-node-input-types')
-    .filter({ hasText: '视频' })
-    .filter({ hasText: '音频' })
-    .waitFor({ timeout: 30_000 })
-  const configuredInputTypes = await selectedCanvasNode.getByTestId('canvas-node-input-types').evaluate((element) => {
-    const text = element.textContent ?? ''
-    return text.includes('视频') && text.includes('音频')
+  await page.waitForFunction(() => {
+    return [...document.querySelectorAll('[data-testid="canvas-node-input-types"]')].some((element) => {
+      const text = element.textContent ?? ''
+      return text.includes('视频') && text.includes('音频')
+    })
+  })
+  const configuredInputTypes = await page.getByTestId('canvas-node-input-types').evaluateAll((elements) => {
+    return elements.some((element) => {
+      const text = element.textContent ?? ''
+      return text.includes('视频') && text.includes('音频')
+    })
   })
   const collapseQuickEditorButton = page.getByTestId('canvas-quick-editor-collapse')
   await collapseQuickEditorButton.waitFor({ timeout: 30_000 })
@@ -1221,6 +1230,25 @@ async function main() {
     if (!value) throw new Error(`Canvas UI check failed: ${key}.`)
   }
 
+  await clickSidebarButton(sidebar, uiText.workflowsNav)
+  await page.getByTestId('workflow-library').waitFor({ timeout: 90_000 })
+  await page.getByTestId('workflow-library-list').waitFor({ timeout: 90_000 })
+  const workflowLibraryScreenshot = path.join(outDir, 'workflow-library.png')
+  await page.screenshot({ path: workflowLibraryScreenshot, fullPage: true })
+  const workflowLibraryBodyText = await page.locator('main').innerText()
+  const workflowLibraryChecks = {
+    title: workflowLibraryBodyText.includes(uiText.workflowsTitle),
+    search: await page.locator(`input[placeholder*="${uiText.workflowsSearch}"]`).isVisible(),
+    createInCanvas: workflowLibraryBodyText.includes(uiText.workflowsCreateInCanvas),
+    card: await page.getByTestId('workflow-library-card').first().isVisible(),
+    openCanvasAction: workflowLibraryBodyText.includes(uiText.workflowsOpenCanvas),
+  }
+  for (const [key, value] of Object.entries(workflowLibraryChecks)) {
+    if (!value) throw new Error(`Workflow library UI check failed: ${key}.`)
+  }
+  await page.getByTestId('workflow-library-card').first().getByRole('button', { name: uiText.workflowsOpenCanvas }).click()
+  await page.getByText(uiText.canvasTitle, { exact: true }).waitFor({ timeout: 90_000 })
+
   let schedulerNav = sidebar.locator(`button[title="${uiText.schedulerNav}"]`)
   if ((await schedulerNav.count()) === 0) {
     const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
@@ -1409,6 +1437,7 @@ async function main() {
     toolsChecks,
     skillsChecks,
     canvasChecks,
+    workflowLibraryChecks,
     schedulerChecks,
     artifactsChecks,
     monitorChecks,
@@ -1423,6 +1452,7 @@ async function main() {
       toolsScreenshot,
       skillsScreenshot,
       canvasScreenshot,
+      workflowLibraryScreenshot,
       schedulerScreenshot,
       artifactsScreenshot,
       monitorScreenshot,

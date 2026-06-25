@@ -16,11 +16,13 @@ import { SkillsCenter } from '@/components/skills-center'
 import { TaskSchedulerCenter } from '@/components/task-scheduler-center'
 import { ToolControlCenter } from '@/components/tool-control-center'
 import { UsageDashboard } from '@/components/usage-dashboard'
+import { WorkflowLibrary } from '@/components/workflow-library'
 import { subscribeUiCommand } from '@/lib/ui-command-events'
 
 export function AppShell() {
   const [mode, setMode] = useState<SidebarMode>('workbench')
   const [agentSettingsRequestKey, setAgentSettingsRequestKey] = useState(0)
+  const [canvasWorkflowId, setCanvasWorkflowId] = useState<string | null>(null)
 
   const handleModeChange = useCallback((nextMode: SidebarMode) => {
     setMode(normalizeWorkspaceMode(nextMode))
@@ -41,6 +43,11 @@ export function AppShell() {
         mode={mode}
         onModeChange={handleModeChange}
         agentSettingsRequestKey={agentSettingsRequestKey}
+        canvasWorkflowId={canvasWorkflowId}
+        onOpenWorkflow={(workflowId) => {
+          setCanvasWorkflowId(workflowId)
+          setMode('agent-canvas')
+        }}
       />
     </div>
   )
@@ -66,10 +73,14 @@ function WorkspaceMain({
   mode,
   onModeChange,
   agentSettingsRequestKey,
+  canvasWorkflowId,
+  onOpenWorkflow,
 }: {
   mode: SidebarMode
   onModeChange: (mode: SidebarMode) => void
   agentSettingsRequestKey: number
+  canvasWorkflowId: string | null
+  onOpenWorkflow: (workflowId: string) => void
 }) {
   if (mode === 'conversations') {
     return <ChatPanel />
@@ -80,13 +91,18 @@ function WorkspaceMain({
       {mode === 'workbench' ? (
         <DesktopWorkbench onModeChange={onModeChange} />
       ) : (
-        renderWorkspace(mode, agentSettingsRequestKey)
+        renderWorkspace(mode, agentSettingsRequestKey, canvasWorkflowId, onOpenWorkflow)
       )}
     </main>
   )
 }
 
-function renderWorkspace(mode: SidebarMode, agentSettingsRequestKey: number) {
+function renderWorkspace(
+  mode: SidebarMode,
+  agentSettingsRequestKey: number,
+  canvasWorkflowId: string | null,
+  onOpenWorkflow: (workflowId: string) => void,
+) {
   switch (mode) {
     case 'workbench':
       return null
@@ -101,8 +117,17 @@ function renderWorkspace(mode: SidebarMode, agentSettingsRequestKey: number) {
       )
     case 'employee-factory':
       return <AgentLibrary defaultSettingsOpen />
+    case 'workflows':
+      return (
+        <WorkflowLibrary
+          onOpenWorkflow={onOpenWorkflow}
+          onCreateWorkflow={() => {
+            onOpenWorkflow('')
+          }}
+        />
+      )
     case 'agent-canvas':
-      return <AgentWorkflowCanvas />
+      return <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />
     case 'skills':
       return <SkillsCenter />
     case 'scheduler':
