@@ -291,10 +291,6 @@ export function AgentWorkflowCanvas() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const selectedWorkflow = useMemo(
-    () => workflows.find((workflow) => workflow.id === selectedWorkflowId) ?? null,
-    [selectedWorkflowId, workflows],
-  )
   const selectedPreset = useMemo(
     () => workflowPresets.find((preset) => preset.id === selectedPresetId) ?? null,
     [selectedPresetId, workflowPresets],
@@ -1379,60 +1375,6 @@ export function AgentWorkflowCanvas() {
         )}
       >
         <div className="flex min-h-0 min-w-0 flex-col">
-          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-card/60 px-3 py-2">
-            <div className="min-w-[12rem]">
-              <Select
-                value={selectedAgentId}
-                onChange={setSelectedAgentId}
-                options={['', ...agents.map((agent) => agent.id)]}
-                labels={Object.fromEntries(agents.map((agent) => [agent.id, agent.name]))}
-                emptyLabel="选择智能体"
-              />
-            </div>
-            <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => addAgentNode()}>
-              <Plus className="size-3.5" />
-              智能体
-            </Button>
-            <div className="min-w-[12rem]">
-              <Select
-                value={selectedSoftwareCommandId}
-                onChange={setSelectedSoftwareCommandId}
-                options={['', ...softwareCommands.map((command) => command.id)]}
-                labels={Object.fromEntries(
-                  softwareCommands.map((command) => [command.id, command.name]),
-                )}
-                emptyLabel="选择软件命令"
-              />
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1"
-              onClick={() => addSoftwareCommandNode()}
-            >
-              <Wrench className="size-3.5" />
-              软件
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => addApprovalNode()}>
-              <UserCheck className="size-3.5" />
-              审批
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => addConditionNode()}>
-              <GitBranch className="size-3.5" />
-              条件
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => addArtifactNode()}>
-              <ClipboardCheck className="size-3.5" />
-              产物
-            </Button>
-            <div className="ml-auto hidden items-center gap-2 text-[11px] text-muted-foreground xl:flex">
-              <span className="truncate">{selectedWorkflow?.name ?? workflowName}</span>
-              <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
-                {nodes.length} 节点 / {edges.length} 连线
-              </Badge>
-            </div>
-          </div>
-
           <DeliveryOverviewBar
             nodes={customerDeliverableNodes}
             nodeRunByNodeId={nodeRunByNodeId}
