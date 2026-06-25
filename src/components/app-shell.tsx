@@ -8,6 +8,7 @@ import { ArtifactLibrary } from '@/components/artifact-library'
 import { ChatPanel } from '@/components/chat-panel'
 import { ConfigOpsCenter } from '@/components/config-ops-center'
 import { DesktopWorkbench } from '@/components/desktop-workbench'
+import { MemoryManagementCenter } from '@/components/memory-management-center'
 import { ModelControlCenter } from '@/components/model-control-center'
 import { ProductionIntegrationsCenter } from '@/components/production-integrations-center'
 import { Sidebar, type SidebarMode } from '@/components/sidebar'
@@ -55,7 +56,6 @@ function normalizeWorkspaceMode(mode: SidebarMode): SidebarMode {
   if (
     [
       'employee-factory',
-      'memory',
       'context',
       'capabilities',
       'collaboration',
@@ -129,6 +129,7 @@ function renderWorkspace(
     case 'skills':
       return <SkillsCenter />
     case 'memory':
+      return <MemoryManagementCenter />
     case 'context':
     case 'capabilities':
     case 'collaboration':

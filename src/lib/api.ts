@@ -10450,6 +10450,29 @@ export async function createMemoryItem(body: CreateMemoryItemBody): Promise<Memo
   return memoryItem
 }
 
+export type UpdateMemoryItemBody = Partial<CreateMemoryItemBody>
+
+export async function updateMemoryItem(
+  id: string,
+  body: UpdateMemoryItemBody,
+): Promise<MemoryItemRow> {
+  const { memoryItem } = await json<{ memoryItem: MemoryItemRow }>(
+    fetch(`/api/memory-items/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+  return memoryItem
+}
+
+export async function deleteMemoryItem(id: string): Promise<MemoryItemRow> {
+  const { memoryItem } = await json<{ memoryItem: MemoryItemRow }>(
+    fetch(`/api/memory-items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  )
+  return memoryItem
+}
+
 export interface CreateMemoryGraphViewBody {
   name?: string
   agentProfileId?: string | null

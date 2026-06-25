@@ -3,6 +3,7 @@
 import {
   BarChart3,
   Bot,
+  Brain,
   ChevronDown,
   ChevronRight,
   GitBranch,
@@ -73,6 +74,7 @@ const primaryNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> =
 
 const advancedNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> = [
   { mode: 'artifacts', label: '交付物', icon: <Layers className="size-4" /> },
+  { mode: 'memory', label: '记忆管理', icon: <Brain className="size-4" /> },
   { mode: 'analytics', label: '数据分析', icon: <BarChart3 className="size-4" /> },
 ]
 
@@ -89,7 +91,7 @@ const cleanNavLabels: Record<SidebarMode, string> = {
   workflows: '工作流',
   'agent-canvas': '编排画布',
   skills: '技能中心',
-  memory: '记忆学习',
+  memory: '记忆管理',
   context: '上下文',
   models: '模型管理',
   tools: '工具连接',
@@ -110,7 +112,7 @@ const navDisplayLabels: Record<SidebarMode, string> = {
   workflows: '\u5de5\u4f5c\u6d41',
   'agent-canvas': '\u7f16\u6392\u753b\u5e03',
   skills: '\u6280\u80fd\u4e2d\u5fc3',
-  memory: '\u8bb0\u5fc6\u5b66\u4e60',
+  memory: '\u8bb0\u5fc6\u7ba1\u7406',
   context: '\u4e0a\u4e0b\u6587',
   models: '\u6a21\u578b\u7ba1\u7406',
   tools: '\u5de5\u5177\u8fde\u63a5',

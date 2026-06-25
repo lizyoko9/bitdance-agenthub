@@ -294,9 +294,14 @@ const uiText = {
   artifactsPreviewable: '\u53ef\u9884\u89c8',
   artifactsTraceable: '\u53ef\u8ffd\u6eaf',
   artifactsDeliveryCheck: '\u4ea4\u4ed8\u68c0\u67e5',
+  memoryNav: '\u8bb0\u5fc6\u7ba1\u7406',
+  memoryTitle: '\u8bb0\u5fc6\u7ba1\u7406',
+  memoryCreate: '\u65b0\u589e\u8bb0\u5fc6',
+  memoryList: '\u8bb0\u5fc6\u5217\u8868',
+  memoryLearningReview: '\u5b66\u4e60\u5ba1\u6838',
+  memoryPlaybook: 'Playbook \u6d41\u7a0b\u5e93',
   moreFeatures: '\u66f4\u591a\u529f\u80fd',
   hiddenAdvancedNav: [
-    '\u8bb0\u5fc6\u5b66\u4e60',
     '\u4e0a\u4e0b\u6587',
     '\u80fd\u529b\u56fe\u8c31',
     '\u56e2\u961f\u534f\u4f5c',
@@ -1009,17 +1014,17 @@ async function main() {
   await viewportControls.waitFor({ timeout: 30_000 })
   const zoomLevel = page.getByTestId('canvas-zoom-level')
   const beforeZoomText = await zoomLevel.innerText()
-  await viewportControls.getByTitle(uiText.canvasZoomIn).click()
+  await viewportControls.getByTitle(uiText.canvasZoomIn).click({ force: true })
   await page.waitForFunction((previous) => {
     return document.querySelector('[data-testid="canvas-zoom-level"]')?.textContent !== previous
   }, beforeZoomText)
   const zoomedText = await zoomLevel.innerText()
-  await zoomLevel.click()
+  await zoomLevel.click({ force: true })
   await page.waitForFunction(() => {
     return document.querySelector('[data-testid="canvas-zoom-level"]')?.textContent?.trim() === '100%'
   })
   const resetZoomText = await zoomLevel.innerText()
-  await viewportControls.getByTitle(uiText.canvasFitView).click()
+  await viewportControls.getByTitle(uiText.canvasFitView).click({ force: true })
   await page.waitForTimeout(100)
   const fitButtonVisible = await viewportControls.getByTitle(uiText.canvasFitView).isVisible()
   const minimap = page.getByTestId('canvas-minimap')
@@ -1276,6 +1281,35 @@ async function main() {
     if (!value) throw new Error(`Artifacts UI check failed: ${key}.`)
   }
 
+  let memoryNav = sidebar.locator(`button[title="${uiText.memoryNav}"]`)
+  if ((await memoryNav.count()) === 0) {
+    const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
+    if ((await collapsedMore.count()) > 0) await collapsedMore.first().click({ force: true })
+    memoryNav = sidebar.locator(`button[title="${uiText.memoryNav}"]`)
+  }
+  await memoryNav.click({ force: true })
+  await page.getByTestId('memory-management-center').waitFor({ timeout: 90_000 })
+  await page.locator('main').getByText(uiText.memoryTitle, { exact: true }).waitFor({ timeout: 90_000 })
+  const memoryScreenshot = path.join(outDir, 'memory-management-center.png')
+  await page.screenshot({ path: memoryScreenshot, fullPage: true })
+  const memoryBodyText = await page.locator('main').innerText()
+  const memoryChecks = {
+    title: memoryBodyText.includes(uiText.memoryTitle),
+    navActive: await memoryNav.evaluate((element) => element.className.includes('bg-primary')),
+    create: memoryBodyText.includes(uiText.memoryCreate),
+    list: memoryBodyText.includes(uiText.memoryList),
+    learningReview: memoryBodyText.includes(uiText.memoryLearningReview),
+    playbook: memoryBodyText.includes(uiText.memoryPlaybook),
+    centerNode: await page.getByTestId('memory-management-center').isVisible(),
+    createForm: await page.getByTestId('memory-create-form').isVisible(),
+    itemList: await page.getByTestId('memory-item-list').isVisible(),
+    learningReviewNode: await page.getByTestId('memory-learning-review').isVisible(),
+    playbookNode: await page.getByTestId('memory-playbook-list').isVisible(),
+  }
+  for (const [key, value] of Object.entries(memoryChecks)) {
+    if (!value) throw new Error(`Memory management UI check failed: ${key}.`)
+  }
+
   const analyticsNav = sidebar.locator(`button[title="${uiText.analyticsNav}"]`)
   if ((await analyticsNav.count()) === 0) {
     const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
@@ -1371,6 +1405,7 @@ async function main() {
     canvasChecks,
     workflowLibraryChecks,
     artifactsChecks,
+    memoryChecks,
     analyticsChecks,
     screenshots: {
       agentScreenshot,
@@ -1384,6 +1419,7 @@ async function main() {
       canvasScreenshot,
       workflowLibraryScreenshot,
       artifactsScreenshot,
+      memoryScreenshot,
       analyticsScreenshot,
     },
     consoleErrors: consoleErrors.slice(0, 10),

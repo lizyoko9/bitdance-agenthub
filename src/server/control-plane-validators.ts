@@ -4644,6 +4644,11 @@ export const MemoryItemBody = z.object({
     .default([]),
 })
 
+export const MemoryItemPatchBody = MemoryItemBody.partial().extend({
+  title: z.string().min(1).max(160).optional(),
+  content: z.string().min(1).optional(),
+})
+
 export const MemoryGraphViewBody = z.object({
   name: z.string().min(1).max(160).default('Memory Graph'),
   agentProfileId: z.string().nullable().optional(),

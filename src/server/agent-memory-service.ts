@@ -187,6 +187,63 @@ export async function createMemoryItem(args: {
   return row
 }
 
+export async function updateMemoryItem(
+  id: string,
+  patch: Partial<{
+    agentProfileId: string | null
+    scope: MemoryItemRow['scope']
+    type: MemoryItemRow['type']
+    title: string
+    content: string
+    sourceRunId: string | null
+    embedding: number[] | null
+    confidence: number
+    importance: number
+    expiresAt: number | null
+    readAccess: MemoryPrivacyReadAccess
+    writeAccess: MemoryPrivacyWriteAccess
+    encryption: MemoryPrivacyEncryption
+    containsDataTypes: MemoryPrivacyDataType[]
+  }>,
+): Promise<MemoryItemRow> {
+  const existing = await getRequiredMemoryItem(id)
+  const containsDataTypes = patch.containsDataTypes
+    ? normalizeDataTypes(patch.containsDataTypes)
+    : existing.containsDataTypes
+  const encryption = patch.encryption
+    ? normalizeEncryption(patch.encryption, containsDataTypes)
+    : existing.encryption
+  await db
+    .update(schema.memoryItems)
+    .set({
+      agentProfileId: patch.agentProfileId !== undefined
+        ? normalizeNullable(patch.agentProfileId)
+        : existing.agentProfileId,
+      scope: patch.scope ?? existing.scope,
+      type: patch.type ?? existing.type,
+      title: patch.title !== undefined ? patch.title.trim() : existing.title,
+      content: patch.content !== undefined ? patch.content.trim() : existing.content,
+      sourceRunId: patch.sourceRunId !== undefined ? normalizeNullable(patch.sourceRunId) : existing.sourceRunId,
+      embedding: patch.embedding !== undefined ? patch.embedding : existing.embedding,
+      confidence: patch.confidence ?? existing.confidence,
+      importance: patch.importance ?? existing.importance,
+      readAccess: patch.readAccess ?? existing.readAccess,
+      writeAccess: patch.writeAccess ?? existing.writeAccess,
+      encryption,
+      containsDataTypes,
+      expiresAt: patch.expiresAt !== undefined ? patch.expiresAt : existing.expiresAt,
+      updatedAt: Date.now(),
+    })
+    .where(eq(schema.memoryItems.id, id))
+  return getRequiredMemoryItem(id)
+}
+
+export async function deleteMemoryItem(id: string): Promise<{ deleted: true; memoryItem: MemoryItemRow }> {
+  const memoryItem = await getRequiredMemoryItem(id)
+  await db.delete(schema.memoryItems).where(eq(schema.memoryItems.id, id))
+  return { deleted: true, memoryItem }
+}
+
 export async function evaluateMemoryPrivacyAccess(args: {
   memoryItemId: string
   agentProfileId?: string | null
@@ -227,6 +284,14 @@ export async function evaluateMemoryPrivacyAccess(args: {
     encryption: item.encryption,
     containsDataTypes: item.containsDataTypes,
   }
+}
+
+async function getRequiredMemoryItem(id: string): Promise<MemoryItemRow> {
+  const row = await db.query.memoryItems.findFirst({
+    where: eq(schema.memoryItems.id, id),
+  })
+  if (!row) throw new Error(`Memory item not found: ${id}`)
+  return row
 }
 
 export async function createRunReflection(args: {
