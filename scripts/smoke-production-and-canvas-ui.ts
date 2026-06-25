@@ -125,7 +125,7 @@ const uiText = {
   toolsNav: '\u5de5\u5177\u8fde\u63a5',
   toolsTitle: '\u8f6f\u4ef6\u80fd\u529b\u5546\u5e97',
   advancedTools: '\u9ad8\u7ea7\u914d\u7f6e',
-  toolsBackToList: '\u8fd4\u56de\u8f6f\u4ef6\u5217\u8868',
+  toolsBackToList: '\u53d6\u6d88',
   toolsSearchPlaceholder: '\u641c\u7d22\u8f6f\u4ef6\u3001CLI\u3001MCP',
   toolsCategory: '\u5f00\u53d1\u5de5\u5177',
   toolsSoftwareCard: 'Codex CLI',

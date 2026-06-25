@@ -2,7 +2,6 @@
 
 import {
   Activity,
-  ArrowLeft,
   Blocks,
   Bot,
   CheckCircle2,
@@ -31,6 +30,13 @@ import { useCallback, useEffect, useMemo, useState, type MouseEventHandler, type
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
@@ -1218,13 +1224,8 @@ export function ToolControlCenter() {
         </header>
 
         <div className="min-h-0 flex-1 overflow-auto p-5">
-          <div
-            className={cn(
-              'mx-auto grid max-w-7xl gap-4',
-              storeDetailOpen ? 'grid-cols-1' : 'xl:grid-cols-[minmax(0,1fr)_30rem]',
-            )}
-          >
-            <section className={cn('min-w-0 space-y-4', storeDetailOpen && 'hidden')}>
+          <div className="mx-auto max-w-7xl space-y-4">
+            <section className="min-w-0 space-y-4">
               <SoftwareAccessAssistant
                 selectedItem={selectedStoreItem}
                 connectedSoftwareCount={connectedSoftwareCount}
@@ -1297,42 +1298,38 @@ export function ToolControlCenter() {
               )}
             </section>
 
-            <aside className={cn('min-w-0', !storeDetailOpen && 'xl:sticky xl:top-5 xl:self-start')}>
-              {storeDetailOpen && (
-                <div className="mb-3">
-                  <Button
-                    variant="outline"
-                    className="gap-2"
-                    data-testid="software-store-back"
-                    onClick={() => setStoreDetailOpen(false)}
-                  >
-                    <ArrowLeft className="size-4" />
-                    返回软件列表
-                  </Button>
-                </div>
-              )}
-              <div className="rounded-lg border bg-background shadow-sm">
+            <Dialog open={storeDetailOpen} onOpenChange={setStoreDetailOpen}>
+              <DialogContent
+                className="max-h-[88vh] overflow-hidden p-0 sm:max-w-4xl"
+                data-testid="software-settings-dialog"
+              >
                 {selectedStoreItem ? (
-                  <div
-                    className="p-4"
-                    data-selected-mode={selectedStoreDetailMode}
-                    data-testid="software-store-detail"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                        {renderSoftwareStoreIcon(selectedStoreItem.icon, 'size-5')}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-base font-semibold">{selectedStoreItem.name}</h3>
-                          <Badge variant="outline">{selectedStoreItem.category}</Badge>
+                  <>
+                    <DialogHeader className="border-b px-5 py-4 pr-12">
+                      <div className="flex items-start gap-3">
+                        <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                          {renderSoftwareStoreIcon(selectedStoreItem.icon, 'size-5')}
                         </div>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                          {selectedStoreItem.description}
-                        </p>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <DialogTitle>{selectedStoreItem.name} 设置</DialogTitle>
+                            <Badge variant="outline">{selectedStoreItem.category}</Badge>
+                            <Badge variant={getStoreModeCount(selectedStoreItem) > 0 ? 'default' : 'outline'}>
+                              {getStoreModeLabel(selectedStoreItem)}
+                            </Badge>
+                          </div>
+                          <DialogDescription className="mt-1 leading-6">
+                            设置这款软件的 CLI、MCP、封装命令，以及它要怎么交给智能体使用。
+                          </DialogDescription>
+                        </div>
                       </div>
-                    </div>
-
+                    </DialogHeader>
+                    <ScrollArea className="max-h-[calc(88vh-5.5rem)]">
+                      <div
+                        className="p-4"
+                        data-selected-mode={selectedStoreDetailMode}
+                        data-testid="software-store-detail"
+                      >
                     <SoftwareStoreDetailHero
                       item={selectedStoreItem}
                       selectedMode={selectedStoreDetailMode}
@@ -1575,12 +1572,23 @@ export function ToolControlCenter() {
                         </Button>
                       )}
                     </div>
-                  </div>
+                      </div>
+                    </ScrollArea>
+                    <div className="flex justify-end border-t bg-muted/30 px-5 py-3">
+                      <Button
+                        variant="outline"
+                        data-testid="software-store-back"
+                        onClick={() => setStoreDetailOpen(false)}
+                      >
+                        取消
+                      </Button>
+                    </div>
+                  </>
                 ) : (
                   <EmptyState label="请选择一个软件" />
                 )}
-              </div>
-            </aside>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </main>
