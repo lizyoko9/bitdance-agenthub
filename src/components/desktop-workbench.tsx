@@ -77,6 +77,38 @@ interface ReadinessItem {
   icon: ReactNode
 }
 
+interface BusinessMetric {
+  label: string
+  value: string
+  detail: string
+  icon: ReactNode
+  tone: 'blue' | 'green' | 'amber' | 'red' | 'neutral'
+}
+
+interface BusinessLane {
+  label: string
+  count: number
+  detail: string
+  runs: RunActivitySummary['recentRuns']
+  tone: 'blue' | 'green' | 'amber' | 'red' | 'neutral'
+}
+
+interface BusinessWorkbenchState {
+  name: string
+  signal: string
+  focus: string
+  nextAction: string
+  aiEditSummary: string
+  metrics: BusinessMetric[]
+  lanes: BusinessLane[]
+  modules: Array<{
+    label: string
+    value: string
+    detail: string
+    icon: ReactNode
+  }>
+}
+
 const taskPresets = [
   { label: '操作电脑', value: '帮我操作电脑完成一个具体任务，并把结果截图和日志交付给我。' },
   { label: '写代码', value: '帮我检查当前项目，完成代码修改、运行测试，并说明结果。' },
@@ -188,6 +220,173 @@ function inferWorkPackage(goal: string, workMode: 'team' | 'model') {
   return activeItems.length >= 4 ? activeItems : packageItems.slice(0, 4)
 }
 
+function buildBusinessWorkbench(args: {
+  goal: string
+  recentConversations: ConversationWithMeta[]
+  runActivity: RunActivitySummary | null
+  enabledSkillCount: number
+  softwareProfiles: SoftwareProfileRow[]
+  activeEmployeeCount: number
+  modelCount: number
+  readyModelCount: number
+  toolEntryCount: number
+}): BusinessWorkbenchState {
+  const corpus = [
+    args.goal,
+    ...args.recentConversations.map((conversation) => conversation.title),
+    ...args.softwareProfiles.map((software) => `${software.name} ${software.appType}`),
+  ].join(' ').toLowerCase()
+  const totals = args.runActivity?.totals
+  const recentRuns = args.runActivity?.recentRuns ?? []
+  const liveRuns = recentRuns.filter((run) => run.status === 'running' || run.status === 'queued')
+  const doneRuns = recentRuns.filter((run) => run.status === 'complete')
+  const blockedRuns = recentRuns.filter((run) => ['failed', 'aborted', 'paused'].includes(run.status))
+  const waitingRuns = recentRuns.filter((run) => run.status === 'queued')
+  const liveCount = (totals?.running ?? 0) + (totals?.queued ?? 0)
+  const failedToday = totals?.failedToday ?? 0
+  const completedToday = totals?.completedToday ?? 0
+  const artifactCount = totals?.artifacts ?? 0
+  const business = inferBusinessKind(corpus)
+
+  const nextAction =
+    args.readyModelCount === 0 && args.modelCount === 0
+      ? '先添加一个可用模型'
+      : args.activeEmployeeCount === 0
+        ? '先创建至少一位员工'
+        : failedToday > 0
+          ? '优先处理失败任务'
+          : liveCount > 0
+            ? '盯住正在运行的任务'
+            : '可以直接派发新任务'
+
+  return {
+    name: business.name,
+    signal: business.signal,
+    focus: business.focus,
+    nextAction,
+    aiEditSummary: liveCount > 0
+      ? '工作台已把运行现场放到前面'
+      : artifactCount > 0
+        ? '工作台已把交付结果放到前面'
+        : '工作台已按当前业务自动整理',
+    metrics: [
+      {
+        label: '当前业务',
+        value: business.name,
+        detail: business.signal,
+        icon: <Sparkles className="size-4" />,
+        tone: 'blue',
+      },
+      {
+        label: '任务流转',
+        value: `${liveCount}`,
+        detail: `${totals?.running ?? 0} 运行中 · ${totals?.queued ?? 0} 排队`,
+        icon: <Activity className="size-4" />,
+        tone: liveCount > 0 ? 'blue' : 'neutral',
+      },
+      {
+        label: '客户可见结果',
+        value: `${artifactCount}`,
+        detail: `${completedToday} 个今日完成`,
+        icon: <PackageCheck className="size-4" />,
+        tone: artifactCount > 0 ? 'green' : 'neutral',
+      },
+      {
+        label: '待处理风险',
+        value: `${failedToday}`,
+        detail: failedToday > 0 ? '需要人工查看' : '暂无明显阻塞',
+        icon: failedToday > 0 ? <AlertCircle className="size-4" /> : <ShieldCheck className="size-4" />,
+        tone: failedToday > 0 ? 'red' : 'green',
+      },
+    ],
+    lanes: [
+      {
+        label: '正在推进',
+        count: liveRuns.length,
+        detail: liveRuns.length ? '这些任务正在执行或等待执行' : '当前没有运行中的任务',
+        runs: liveRuns,
+        tone: 'blue',
+      },
+      {
+        label: '等待处理',
+        count: waitingRuns.length + blockedRuns.length,
+        detail: blockedRuns.length ? '存在失败或暂停任务' : '需要关注的排队任务',
+        runs: [...blockedRuns, ...waitingRuns],
+        tone: blockedRuns.length ? 'red' : 'amber',
+      },
+      {
+        label: '最近结果',
+        count: doneRuns.length,
+        detail: doneRuns.length ? '这些任务已经有结果' : '完成后会在这里沉淀',
+        runs: doneRuns,
+        tone: 'green',
+      },
+    ],
+    modules: [
+      {
+        label: '业务指标',
+        value: `${args.readyModelCount}/${args.modelCount || 0} 模型`,
+        detail: '按业务目标展示最关键指标',
+        icon: <Brain className="size-4" />,
+      },
+      {
+        label: '任务步骤',
+        value: `${recentRuns.length} 条记录`,
+        detail: '每个任务当前步骤和结果汇总',
+        icon: <Clock3 className="size-4" />,
+      },
+      {
+        label: '员工能力',
+        value: `${args.activeEmployeeCount} 员工`,
+        detail: `${args.enabledSkillCount} 技能 · ${args.toolEntryCount} 工具入口`,
+        icon: <Bot className="size-4" />,
+      },
+      {
+        label: '交付物',
+        value: `${artifactCount} 产物`,
+        detail: '报告、代码、视频、截图等客户可见结果',
+        icon: <FileCheck2 className="size-4" />,
+      },
+    ],
+  }
+}
+
+function inferBusinessKind(corpus: string) {
+  if (/剪映|视频|capcut|素材|脚本|剪辑|抖音|短视频|movie|film/.test(corpus)) {
+    return {
+      name: '内容生产工作台',
+      signal: '视频、素材、剪辑和交付结果优先',
+      focus: '先看素材、草稿、导出结果和卡点',
+    }
+  }
+  if (/微信|客户|销售|私域|客服|飞书|notion|消息|群|联系人/.test(corpus)) {
+    return {
+      name: '客户沟通工作台',
+      signal: '客户消息、跟进任务和人工确认优先',
+      focus: '先看沟通状态、待回复对象和交付证明',
+    }
+  }
+  if (/代码|项目|修复|bug|github|codex|claude|opencode|仓库|测试|部署|前端/.test(corpus)) {
+    return {
+      name: '项目研发工作台',
+      signal: '代码任务、测试结果和部署产物优先',
+      focus: '先看失败原因、修改进度、测试和可预览结果',
+    }
+  }
+  if (/数据|表格|报表|分析|指标|运营|订单|财务/.test(corpus)) {
+    return {
+      name: '数据运营工作台',
+      signal: '指标、表格、报告和异常提醒优先',
+      focus: '先看关键数字、异常项和下一步动作',
+    }
+  }
+  return {
+    name: '综合业务工作台',
+    signal: '根据会话、任务和运行记录自动决定展示内容',
+    focus: '先看任务状态、关键结果和下一步',
+  }
+}
+
 export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
   const upsertConversation = useAppStore((s) => s.upsertConversation)
   const setActiveConversation = useAppStore((s) => s.setActiveConversation)
@@ -238,8 +437,32 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
     () => toolConnections.filter((connection) => connection.enabled),
     [toolConnections],
   )
+  const toolEntryCount = cliProfiles.length + usableToolConnections.length + softwareProfiles.length
+  const businessWorkbench = useMemo(
+    () => buildBusinessWorkbench({
+      goal: trimmedGoal,
+      recentConversations,
+      runActivity,
+      enabledSkillCount: enabledSkills.length,
+      softwareProfiles,
+      activeEmployeeCount: activeEmployeeProfiles.length,
+      modelCount: models.length,
+      readyModelCount: readyModels.length,
+      toolEntryCount,
+    }),
+    [
+      activeEmployeeProfiles.length,
+      enabledSkills.length,
+      models.length,
+      readyModels.length,
+      recentConversations,
+      runActivity,
+      softwareProfiles,
+      toolEntryCount,
+      trimmedGoal,
+    ],
+  )
   const readinessItems = useMemo<ReadinessItem[]>(() => {
-    const toolCount = cliProfiles.length + usableToolConnections.length + softwareProfiles.length
     return [
       {
         label: '模型可用',
@@ -275,11 +498,11 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
       },
       {
         label: '工具已接入',
-        status: toolCount ? `${toolCount} 个入口` : '未接入',
-        detail: toolCount
+        status: toolEntryCount ? `${toolEntryCount} 个入口` : '未接入',
+        detail: toolEntryCount
           ? 'CLI、MCP 或软件能力可以分配给员工'
           : '先接入 CLI、MCP 或软件能力',
-        ready: toolCount > 0,
+        ready: toolEntryCount > 0,
         mode: 'tools',
         icon: <Wrench className="size-4" />,
       },
@@ -294,12 +517,10 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
     ]
   }, [
     activeEmployeeProfiles.length,
-    cliProfiles.length,
     enabledSkills.length,
     models.length,
     readyModels.length,
-    softwareProfiles.length,
-    usableToolConnections.length,
+    toolEntryCount,
   ])
   const assigneeLabel = workMode === 'team'
     ? selectedEmployeeProfiles.length
@@ -463,9 +684,9 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
               <Sparkles className="size-4" />
               电脑端工作台
             </div>
-            <h2 className="mt-1 text-2xl font-semibold tracking-normal">让 AI 员工直接开工</h2>
+            <h2 className="mt-1 text-2xl font-semibold tracking-normal">业务动态工作台</h2>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              一句话说清目标，系统会把智能体、模型、技能、CLI 和桌面能力串起来执行。
+              按用户真实业务自动整理数据、任务进度、运行结果和下一步动作。
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -483,12 +704,13 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
           </div>
         </header>
 
-        <section className="grid gap-3 md:grid-cols-4">
-          <StatCard label="员工配置" value={employeeProfiles.length} detail="可直接运行" icon={<Bot className="size-4" />} />
-          <StatCard label="模型" value={models.length} detail={`${readyModels.length} 个已连接`} icon={<Brain className="size-4" />} />
-          <StatCard label="桌面能力" value={capabilityCards.length} detail="浏览器 / CLI / 文件 / 桌面" icon={<MonitorCog className="size-4" />} />
-          <StatCard label="最近会话" value={recentConversations.length} detail="可继续执行" icon={<Send className="size-4" />} />
-        </section>
+        <BusinessDynamicWorkbench
+          state={businessWorkbench}
+          loading={loading}
+          onRefresh={() => void load()}
+          onOpenCanvas={() => onModeChange('agent-canvas')}
+          onOpenRuns={() => onModeChange('conversations')}
+        />
 
         <ReadinessChecklist
           items={readinessItems}
@@ -760,6 +982,157 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
             </div>
           </aside>
         </section>
+      </div>
+    </div>
+  )
+}
+
+function BusinessDynamicWorkbench({
+  state,
+  loading,
+  onRefresh,
+  onOpenCanvas,
+  onOpenRuns,
+}: {
+  state: BusinessWorkbenchState
+  loading: boolean
+  onRefresh: () => void
+  onOpenCanvas: () => void
+  onOpenRuns: () => void
+}) {
+  return (
+    <Card data-testid="business-dynamic-workbench" className="overflow-hidden">
+      <CardHeader className="border-b">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle>{state.name}</CardTitle>
+              <Badge variant="secondary">AI 自编辑</Badge>
+            </div>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              {state.focus}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
+              <Sparkles className="size-4" />
+              AI 整理
+            </Button>
+            <Button variant="outline" size="sm" onClick={onOpenCanvas}>
+              <GitBranch className="size-4" />
+              工作流
+            </Button>
+            <Button variant="outline" size="sm" onClick={onOpenRuns}>
+              <Activity className="size-4" />
+              运行结果
+            </Button>
+            <Button variant="ghost" size="icon" onClick={onRefresh} disabled={loading}>
+              <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-4">
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {state.metrics.map((metric) => (
+            <BusinessMetricCard key={metric.label} metric={metric} />
+          ))}
+        </section>
+
+        <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold">任务流转</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">{state.signal}</div>
+              </div>
+              <Badge variant="outline">下一步：{state.nextAction}</Badge>
+            </div>
+            <div className="mt-3 grid gap-2 lg:grid-cols-3">
+              {state.lanes.map((lane) => (
+                <BusinessLaneCard key={lane.label} lane={lane} />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold">AI 自编辑区域</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">{state.aiEditSummary}</div>
+              </div>
+              <Badge variant="outline">动态布局</Badge>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              {state.modules.map((module) => (
+                <div key={module.label} className="flex min-w-0 items-start gap-2 rounded-md bg-background px-2.5 py-2">
+                  <span className="mt-0.5 rounded-md bg-primary/10 p-1.5 text-primary">{module.icon}</span>
+                  <span className="min-w-0">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-xs font-semibold">{module.label}</span>
+                      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        {module.value}
+                      </span>
+                    </span>
+                    <span className="block line-clamp-2 text-[11px] leading-4 text-muted-foreground">{module.detail}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </CardContent>
+    </Card>
+  )
+}
+
+function BusinessMetricCard({ metric }: { metric: BusinessMetric }) {
+  const tone = businessToneClass(metric.tone)
+  return (
+    <div className={cn('rounded-lg border px-3 py-3', tone.surface)}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs text-muted-foreground">{metric.label}</div>
+          <div className="mt-1 truncate text-xl font-semibold">{metric.value}</div>
+          <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{metric.detail}</div>
+        </div>
+        <span className={cn('rounded-lg p-2', tone.icon)}>{metric.icon}</span>
+      </div>
+    </div>
+  )
+}
+
+function BusinessLaneCard({ lane }: { lane: BusinessLane }) {
+  const tone = businessToneClass(lane.tone)
+  return (
+    <div className="min-w-0 rounded-lg border bg-background p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{lane.label}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{lane.detail}</div>
+        </div>
+        <span className={cn('rounded-full px-2 py-1 text-xs font-semibold', tone.badge)}>
+          {lane.count}
+        </span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {lane.runs.slice(0, 2).map((run) => (
+          <div key={run.id} className="rounded-md bg-muted/40 px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-xs font-medium">{safeDisplayText(run.title, '未命名任务')}</span>
+              <Badge variant={statusBadgeVariant(run.status)}>{statusToLabel(run.status)}</Badge>
+            </div>
+            <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span className="min-w-0 truncate">{phaseToLabel(run.phase)} · {safeDisplayText(run.currentStep, '等待更新')}</span>
+              <span className="shrink-0">{formatRelativeTime(run.updatedAt)}</span>
+            </div>
+          </div>
+        ))}
+        {lane.runs.length === 0 && (
+          <div className="rounded-md border border-dashed px-2.5 py-3 text-center text-xs text-muted-foreground">
+            暂无任务
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1317,29 +1690,47 @@ function ReadinessChecklist({
   )
 }
 
-function StatCard({
-  label,
-  value,
-  detail,
-  icon,
-}: {
-  label: string
-  value: number
-  detail: string
-  icon: ReactNode
-}) {
-  return (
-    <Card size="sm">
-      <CardContent className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs text-muted-foreground">{label}</div>
-          <div className="mt-1 text-2xl font-semibold">{value}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
-        </div>
-        <div className="rounded-lg bg-primary/10 p-2 text-primary">{icon}</div>
-      </CardContent>
-    </Card>
-  )
+function businessToneClass(tone: BusinessMetric['tone']) {
+  const table: Record<BusinessMetric['tone'], { surface: string; icon: string; badge: string }> = {
+    blue: {
+      surface: 'bg-primary/5',
+      icon: 'bg-primary/10 text-primary',
+      badge: 'bg-primary/10 text-primary',
+    },
+    green: {
+      surface: 'bg-emerald-500/5',
+      icon: 'bg-emerald-500/10 text-emerald-600',
+      badge: 'bg-emerald-500/10 text-emerald-600',
+    },
+    amber: {
+      surface: 'bg-amber-500/5',
+      icon: 'bg-amber-500/10 text-amber-600',
+      badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    },
+    red: {
+      surface: 'bg-red-500/5',
+      icon: 'bg-red-500/10 text-red-600',
+      badge: 'bg-red-500/10 text-red-600',
+    },
+    neutral: {
+      surface: 'bg-muted/20',
+      icon: 'bg-muted text-muted-foreground',
+      badge: 'bg-muted text-muted-foreground',
+    },
+  }
+  return table[tone]
+}
+
+function formatRelativeTime(timestamp: number) {
+  if (!timestamp) return '刚刚'
+  const diff = Math.max(0, Date.now() - timestamp)
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const days = Math.floor(hours / 24)
+  return `${days} 天前`
 }
 
 function safeDisplayText(value: string | null | undefined, fallback: string) {
