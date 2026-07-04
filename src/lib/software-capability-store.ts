@@ -6,6 +6,7 @@ import type {
   SoftwareCommandRow,
   SoftwareProfileRow,
 } from '@/db/schema'
+import { AGENTHUB_FREE_PRODUCT_NOTICE } from '@/lib/free-product-policy'
 
 export type StoreSoftwareCategory =
   | '开发工具'
@@ -145,7 +146,7 @@ const BUILT_IN_CATALOG: CatalogItem[] = [
 ]
 
 export function getFreeProductNotice(): string {
-  return 'AgentHub 本体永久免费；模型、API 或第三方 CLI 的费用只来自用户自己的服务商。'
+  return AGENTHUB_FREE_PRODUCT_NOTICE
 }
 
 export function buildSoftwareCapabilityStore(
