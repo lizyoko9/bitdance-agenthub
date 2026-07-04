@@ -55,6 +55,7 @@ import {
   testNetworkProfile,
   updateModelProfile,
 } from '@/lib/api'
+import { redactSecretReference } from '@/lib/secret-redaction'
 import { cn } from '@/lib/utils'
 
 const modelProviders: ModelProfileProvider[] = [
@@ -1472,7 +1473,7 @@ function ModelConnectionWorkbench({
             <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
               <WorkbenchInfo label="服务商" value={providerLabel(model.provider)} />
               <WorkbenchInfo label="上下文" value={`${model.contextWindow ?? 0}`} />
-              <WorkbenchInfo label="密钥" value={model.apiKeyRef || '未设置'} />
+              <WorkbenchInfo label="密钥" value={redactSecretReference(model.apiKeyRef)} />
             </div>
 
             <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
