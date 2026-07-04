@@ -8,7 +8,6 @@ import {
   Package,
   Power,
   RefreshCw,
-  Search,
   Settings2,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -47,7 +46,6 @@ export function SkillsCenter() {
     name: '',
     description: '',
   })
-  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -72,17 +70,6 @@ export function SkillsCenter() {
   }, [reload])
 
   const visibleSkills = useMemo(() => dedupeSkills(data.skills), [data.skills])
-  const filteredSkills = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
-    if (!keyword) return visibleSkills
-    return visibleSkills.filter((skill) =>
-      [skill.name, skill.description, skill.source, skill.status, skill.sourceUrl]
-        .join(' ')
-        .toLowerCase()
-        .includes(keyword),
-    )
-  }, [search, visibleSkills])
-
   const enabledCount = visibleSkills.filter((skill) => skill.enabled).length
   const disabledCount = Math.max(0, visibleSkills.length - enabledCount)
   const duplicateSkillCount = Math.max(0, data.skills.length - visibleSkills.length)
@@ -178,16 +165,6 @@ export function SkillsCenter() {
                     )}
                   </div>
                 </div>
-                <div className="relative min-w-60 flex-1 sm:max-w-sm">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    data-testid="installed-skills-search"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="搜索已安装技能"
-                    className="pl-9"
-                  />
-                </div>
               </div>
               <div className="p-4">
                 <div
@@ -196,7 +173,7 @@ export function SkillsCenter() {
                 >
                   已安装技能会出现在智能体设置里。给某个智能体勾选后，这个技能才会进入它的工具包。
                 </div>
-                <SkillList skills={filteredSkills} saving={saving} onToggle={toggleSkill} />
+                <SkillList skills={visibleSkills} saving={saving} onToggle={toggleSkill} />
               </div>
             </section>
           </main>
