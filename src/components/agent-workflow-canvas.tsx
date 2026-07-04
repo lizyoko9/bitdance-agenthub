@@ -93,6 +93,16 @@ import {
   updateWorkflow,
   type WorkflowPresetDto,
 } from '@/lib/api'
+import {
+  createArtifactEdgeMapping as createCanvasArtifactEdgeMapping,
+  deleteNodeAndConnectedEdges as deleteCanvasNodeAndConnectedEdges,
+  getEdgeArtifactType as getCanvasEdgeArtifactType,
+  getEdgeOutputKey as getCanvasEdgeOutputKey,
+  getIncomingArtifactTypes as getCanvasIncomingArtifactTypes,
+  getNodeAcceptedInputTypes as getCanvasNodeAcceptedInputTypes,
+  getNodeOutputPorts as getCanvasNodeOutputPorts,
+  type CanvasArtifactPort,
+} from '@/lib/agent-canvas-artifacts'
 import { cn } from '@/lib/utils'
 
 const NODE_WIDTH = 212
@@ -121,29 +131,13 @@ const NODE_TYPE_OPTIONS: DraftNodeType[] = [
 ]
 
 const NODE_TYPE_LABELS: Record<DraftNodeType, string> = {
-  agent_employee: '智能体节点',
+  agent_employee: '智能体',
   software_command: '软件命令',
-  human_approval: '人工审批',
+  human_approval: '人工确认',
   artifact_transform: '产物处理',
   webhook_trigger: '触发器',
   condition: '条件判断',
 }
-
-const ARTIFACT_TYPE_OPTIONS = [
-  'report',
-  'json',
-  'document',
-  'code',
-  'spreadsheet',
-  'image',
-  'video',
-  'presentation',
-  'browser_state',
-  'desktop_result',
-  'file_bundle',
-  'approval_decision',
-  'software_result',
-]
 
 const CUSTOMER_ARTIFACT_QUICK_TYPES = [
   'report',
@@ -353,7 +347,9 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
       }
       if (!selectedPresetId && nextPresets[0]) setSelectedPresetId(nextPresets[0].id)
       if (!selectedNlDraftId && nextNlDrafts[0]) setSelectedNlDraftId(nextNlDrafts[0].id)
-      if (!selectedWorkflowId && nextWorkflows[0]) setSelectedWorkflowId(nextWorkflows[0].id)
+      if (!nextWorkflows.some((workflow) => workflow.id === selectedWorkflowId)) {
+        setSelectedWorkflowId(nextWorkflows[0]?.id ?? '')
+      }
       if (!selectedRunId && nextRuns[0]) setSelectedRunId(nextRuns[0].id)
     } catch (err) {
       setError(formatError(err))
@@ -379,7 +375,17 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
   }, [initialWorkflowId])
 
   useEffect(() => {
-    if (!selectedWorkflowId) return
+    if (!selectedWorkflowId) {
+      setWorkflowName('智能体交付流程')
+      setWorkflowDescription('从空白画布开始，新建节点后保存为工作流。')
+      setNodes([])
+      setEdges([])
+      setSelectedNodeId('')
+      setConnectingFromNodeId('')
+      setConnectingOutputKey('')
+      setConnectionDrag(null)
+      return
+    }
     let alive = true
     async function loadGraph() {
       setError(null)
@@ -790,10 +796,8 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
   }
 
   const removeNode = (nodeId: string) => {
-    setNodes((current) => current.filter((node) => node.id !== nodeId))
-    setEdges((current) =>
-      current.filter((edge) => edge.sourceNodeId !== nodeId && edge.targetNodeId !== nodeId),
-    )
+    setNodes((currentNodes) => deleteCanvasNodeAndConnectedEdges(nodeId, currentNodes, []).nodes)
+    setEdges((currentEdges) => deleteCanvasNodeAndConnectedEdges(nodeId, [], currentEdges).edges)
     if (selectedNodeId === nodeId) setSelectedNodeId('')
     if (connectingFromNodeId === nodeId) {
       setConnectingFromNodeId('')
@@ -2550,36 +2554,6 @@ function CustomerDeliverablePreviewCard({
   )
 }
 
-function ArtifactTypeQuickPicker({
-  value,
-  onChange,
-}: {
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="flex flex-wrap gap-1" data-testid="artifact-type-quick-picker">
-      {CUSTOMER_ARTIFACT_QUICK_TYPES.map((type) => (
-        <button
-          key={type}
-          type="button"
-          className={cn(
-            'flex h-7 items-center gap-1 rounded-md border px-2 text-[10px] transition hover:border-primary/60',
-            value === type
-              ? 'border-primary bg-primary text-primary-foreground'
-              : 'bg-background text-muted-foreground',
-          )}
-          onClick={() => onChange(type)}
-          title={`交付 ${artifactTypeLabel(type)}，通常是${artifactFileHint(type)}`}
-        >
-          {artifactTypeIcon(type, 'size-3')}
-          <span>{artifactTypeLabel(type)}</span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function NodeArtifactOutputsEditor({
   node,
   onUpdateNode,
@@ -2595,6 +2569,14 @@ function NodeArtifactOutputsEditor({
       outputContract: addOutputContractArtifactType(node.outputContract, node, type),
     })
   }
+  const updateOutput = (key: string, patch: Partial<CanvasArtifactOutput>) => {
+    onUpdateNode(node.id, {
+      outputContract: updateOutputContractOutputs(
+        node.outputContract,
+        outputs.map((output) => (output.key === key ? { ...output, ...patch } : output)),
+      ),
+    })
+  }
   const removeOutput = (key: string) => {
     onUpdateNode(node.id, {
       outputContract: removeOutputContractArtifactOutput(node.outputContract, node, key),
@@ -2604,35 +2586,63 @@ function NodeArtifactOutputsEditor({
   return (
     <div data-testid="node-artifact-outputs-editor" className="rounded-md border bg-muted/20 p-2">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <div className="text-[11px] font-medium">节点产物口</div>
+        <div className="min-w-0">
+          <div className="text-[11px] font-medium">输出端口</div>
+          <div className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
+            这个节点会产出什么，连线时就从这里选择。
+          </div>
+        </div>
         <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
           {outputs.length} 个
         </Badge>
       </div>
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {outputs.map((output, index) => (
           <div
             key={output.key}
-            className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-[10px]"
+            className="rounded-md border bg-background p-2 text-[10px]"
           >
-            <span className="flex min-w-0 items-center gap-1.5">
-              {artifactTypeIcon(output.type, 'size-3 shrink-0 text-primary')}
-              <span className="truncate font-medium">{artifactTypeLabel(output.type)}</span>
-              {index === 0 && (
-                <Badge variant="secondary" className="h-4 px-1 text-[8px]">
-                  默认
-                </Badge>
-              )}
-            </span>
-            <button
-              type="button"
-              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-              disabled={outputs.length <= 1}
-              onClick={() => removeOutput(output.key)}
-              title="删除这个产物口"
-            >
-              <X className="size-3" />
-            </button>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-1.5">
+                {artifactTypeIcon(output.type, 'size-3 shrink-0 text-primary')}
+                <span className="truncate font-medium">输出 {index + 1}</span>
+                {index === 0 && (
+                  <Badge variant="secondary" className="h-4 px-1 text-[8px]">
+                    默认
+                  </Badge>
+                )}
+              </span>
+              <button
+                type="button"
+                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                disabled={outputs.length <= 1}
+                onClick={() => removeOutput(output.key)}
+                title="删除这个输出端口"
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+            <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-1.5">
+              <Select
+                value={output.type}
+                onChange={(value) =>
+                  updateOutput(output.key, {
+                    type: value,
+                    label: output.label === artifactTypeLabel(output.type) ? artifactTypeLabel(value) : output.label,
+                    description:
+                      output.description === artifactFileHint(output.type) ? artifactFileHint(value) : output.description,
+                  })
+                }
+                options={CUSTOMER_ARTIFACT_QUICK_TYPES}
+                labels={ARTIFACT_TYPE_LABELS}
+              />
+              <Input
+                value={output.label}
+                onChange={(event) => updateOutput(output.key, { label: event.target.value })}
+                className="h-8 text-xs"
+                placeholder="端口名称"
+              />
+            </div>
           </div>
         ))}
       </div>
@@ -2652,7 +2662,7 @@ function NodeArtifactOutputsEditor({
         ))}
       </div>
       <div className="mt-1.5 text-[10px] leading-4 text-muted-foreground">
-        从某个产物口拖线，下游就只会收到这一类产物。
+        例：从“视频”端口拖线到下游，下游就只会收到视频。
       </div>
     </div>
   )
@@ -2685,13 +2695,18 @@ function NodeInputTypesEditor({
   return (
     <div data-testid="node-input-types-editor" className="rounded-md border bg-muted/20 p-2">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <div className="text-[11px] font-medium">输入类型</div>
+        <div className="min-w-0">
+          <div className="text-[11px] font-medium">输入端口</div>
+          <div className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
+            这个节点允许接收哪些上游产物。
+          </div>
+        </div>
         <button
           type="button"
           className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
           onClick={clearTypes}
         >
-          自动
+          自动接收
         </button>
       </div>
       <div className={cn('flex flex-wrap gap-1', compact && 'max-h-14 overflow-hidden')}>
@@ -2716,7 +2731,7 @@ function NodeInputTypesEditor({
         })}
       </div>
       <div className="mt-1.5 text-[10px] leading-4 text-muted-foreground">
-        不勾选时自动接收上游产物；勾选后，这个输入口就按视频、音频或文件类型分类。
+        不选时自动跟随上游连线；选择后，这个节点只接收被勾选的类型。
       </div>
     </div>
   )
@@ -2873,7 +2888,7 @@ function CanvasNodeInputSummary({
       )}
     >
       <div className="mb-1 flex items-center justify-between gap-2 text-[9px] text-muted-foreground">
-        <span className="font-medium">输入类型</span>
+        <span className="font-medium">输入端口</span>
         <span>{inputTypes.length === 1 && inputTypes[0] === 'any_file' ? '自动接收' : '分类接收'}</span>
       </div>
       <div className="flex min-w-0 flex-wrap gap-1">
@@ -3254,19 +3269,21 @@ function CanvasQuickEditor({
     <div
       data-testid="canvas-quick-editor"
       data-canvas-interactive="true"
-      className="pointer-events-auto absolute right-3 top-3 z-40 w-80 max-w-[calc(100%-1.5rem)] rounded-md border bg-card/95 p-3 shadow-lg backdrop-blur"
+      className="pointer-events-auto absolute right-3 top-3 z-40 w-[23rem] max-w-[calc(100%-1.5rem)] rounded-md border bg-card/95 p-3 shadow-lg backdrop-blur"
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">画布内编辑</div>
-          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{nodeTypeLabel(node.type)}</div>
+          <div className="truncate text-sm font-semibold">节点设置</div>
+          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            先设置节点身份，再设置输入端口和输出端口。
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
-            {artifactTypeLabel(artifactTypeOf(node))}
+            {artifactOutputsOf(node).length} 个输出
           </Badge>
           <Button
             type="button"
@@ -3286,120 +3303,106 @@ function CanvasQuickEditor({
       </div>
 
       <div className="space-y-2">
-        <Input
-          value={node.label}
-          onChange={(event) =>
-            onUpdateNode(node.id, {
-              label: event.target.value,
-              config: { ...node.config, label: event.target.value },
-            })
-          }
-          placeholder="节点名称"
-        />
-        <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-2 rounded-md border bg-muted/20 p-2">
+          <div className="text-[11px] font-medium">节点身份</div>
+          <Input
+            value={node.label}
+            onChange={(event) =>
+              onUpdateNode(node.id, {
+                label: event.target.value,
+                config: { ...node.config, label: event.target.value },
+              })
+            }
+            placeholder="节点名称"
+          />
           <Select
             value={node.type}
             onChange={changeNodeType}
             options={NODE_TYPE_OPTIONS}
             labels={NODE_TYPE_LABELS}
           />
-          <Select
-            value={artifactTypeOf(node)}
-            onChange={(value) =>
-              onUpdateNode(node.id, {
-                outputContract: updateOutputContractArtifactType(node.outputContract, value),
-              })
-            }
-            options={ARTIFACT_TYPE_OPTIONS}
-            labels={ARTIFACT_TYPE_LABELS}
-          />
+
+          {node.type === 'agent_employee' && (
+            <Select
+              value={node.agentProfileId ?? ''}
+              onChange={changeAgent}
+              options={['', ...agents.map((agent) => agent.id)]}
+              labels={Object.fromEntries(agents.map((agent) => [agent.id, agent.name]))}
+              emptyLabel="选择智能体"
+            />
+          )}
+
+          {node.type === 'software_command' && (
+            <Select
+              value={node.softwareCommandId ?? ''}
+              onChange={changeSoftwareCommand}
+              options={['', ...softwareCommands.map((command) => command.id)]}
+              labels={Object.fromEntries(
+                softwareCommands.map((command) => [command.id, command.name]),
+              )}
+              emptyLabel="选择软件命令"
+            />
+          )}
         </div>
-        <ArtifactTypeQuickPicker
-          value={artifactTypeOf(node)}
-          onChange={(value) =>
-            onUpdateNode(node.id, {
-              outputContract: updateOutputContractArtifactType(node.outputContract, value),
-            })
-          }
-        />
-        <NodeArtifactOutputsEditor node={node} onUpdateNode={onUpdateNode} compact />
+
         <NodeInputTypesEditor node={node} onUpdateNode={onUpdateNode} compact />
-        <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-          <input
-            type="checkbox"
-            className="size-4"
-            checked={customerVisibleOf(node)}
+        <NodeArtifactOutputsEditor node={node} onUpdateNode={onUpdateNode} compact />
+
+        <div className="space-y-2 rounded-md border bg-muted/20 p-2">
+          <div className="text-[11px] font-medium">任务与交付规则</div>
+          <Textarea
+            className="min-h-16 text-xs"
+            value={stringField(node.config, 'instruction')}
             onChange={(event) =>
               onUpdateNode(node.id, {
-                outputContract: {
-                  ...node.outputContract,
-                  customerVisible: event.target.checked,
-                },
+                config: { ...node.config, instruction: event.target.value },
               })
             }
+            placeholder="这个节点要完成什么"
           />
-          客户可以看到这个产物
-        </label>
-        <Input
-          value={stringField(node.outputContract, 'deliverableTitle')}
-          onChange={(event) =>
-            onUpdateNode(node.id, {
-              outputContract: { ...node.outputContract, deliverableTitle: event.target.value },
-            })
-          }
-          placeholder="客户看到的名称"
-        />
-
-        {node.type === 'agent_employee' && (
-          <Select
-            value={node.agentProfileId ?? ''}
-            onChange={changeAgent}
-            options={['', ...agents.map((agent) => agent.id)]}
-            labels={Object.fromEntries(agents.map((agent) => [agent.id, agent.name]))}
-            emptyLabel="选择智能体"
-          />
-        )}
-
-        {node.type === 'software_command' && (
-          <Select
-            value={node.softwareCommandId ?? ''}
-            onChange={changeSoftwareCommand}
-            options={['', ...softwareCommands.map((command) => command.id)]}
-            labels={Object.fromEntries(
-              softwareCommands.map((command) => [command.id, command.name]),
-            )}
-            emptyLabel="选择软件命令"
-          />
-        )}
-
-        <Textarea
-          className="min-h-16 text-xs"
-          value={stringField(node.config, 'instruction')}
-          onChange={(event) =>
-            onUpdateNode(node.id, {
-              config: { ...node.config, instruction: event.target.value },
-            })
-          }
-          placeholder="这个节点要完成什么"
-        />
-
-        <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-          <input
-            type="checkbox"
-            className="size-4"
-            checked={approvalRequired(node)}
+          <Input
+            value={stringField(node.outputContract, 'deliverableTitle')}
             onChange={(event) =>
               onUpdateNode(node.id, {
-                approvalPolicy: {
-                  ...node.approvalPolicy,
-                  required: event.target.checked,
-                  riskLevel: stringField(node.approvalPolicy, 'riskLevel') || 'medium',
-                },
+                outputContract: { ...node.outputContract, deliverableTitle: event.target.value },
               })
             }
+            placeholder="客户看到的交付名称"
           />
-          需要人工审批
-        </label>
+          <label className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-xs">
+            <input
+              type="checkbox"
+              className="size-4"
+              checked={customerVisibleOf(node)}
+              onChange={(event) =>
+                onUpdateNode(node.id, {
+                  outputContract: {
+                    ...node.outputContract,
+                    customerVisible: event.target.checked,
+                  },
+                })
+              }
+            />
+            客户可以看到这个节点产物
+          </label>
+          <label className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-xs">
+            <input
+              type="checkbox"
+              className="size-4"
+              checked={approvalRequired(node)}
+              onChange={(event) =>
+                onUpdateNode(node.id, {
+                  approvalPolicy: {
+                    ...node.approvalPolicy,
+                    required: event.target.checked,
+                    riskLevel: stringField(node.approvalPolicy, 'riskLevel') || 'medium',
+                  },
+                })
+              }
+            />
+            运行到这里需要人工审批
+          </label>
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <Button
@@ -3564,41 +3567,18 @@ function NodeInspector({
           />
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-          <div className="space-y-1.5">
-            <FieldLabel>节点类型</FieldLabel>
-            <Select
-              value={node.type}
-              onChange={changeNodeType}
-              options={NODE_TYPE_OPTIONS}
-              labels={NODE_TYPE_LABELS}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <FieldLabel>输出产物</FieldLabel>
-            <Select
-              value={artifactTypeOf(node)}
-              onChange={(value) =>
-                onUpdateNode(node.id, {
-                  outputContract: updateOutputContractArtifactType(node.outputContract, value),
-                })
-              }
-              options={ARTIFACT_TYPE_OPTIONS}
-              labels={ARTIFACT_TYPE_LABELS}
-            />
-          </div>
+        <div className="space-y-1.5">
+          <FieldLabel>节点类型</FieldLabel>
+          <Select
+            value={node.type}
+            onChange={changeNodeType}
+            options={NODE_TYPE_OPTIONS}
+            labels={NODE_TYPE_LABELS}
+          />
         </div>
 
-        <ArtifactTypeQuickPicker
-          value={artifactTypeOf(node)}
-          onChange={(value) =>
-            onUpdateNode(node.id, {
-              outputContract: updateOutputContractArtifactType(node.outputContract, value),
-            })
-          }
-        />
-        <NodeArtifactOutputsEditor node={node} onUpdateNode={onUpdateNode} />
         <NodeInputTypesEditor node={node} onUpdateNode={onUpdateNode} />
+        <NodeArtifactOutputsEditor node={node} onUpdateNode={onUpdateNode} />
 
         <div className="rounded-md border bg-muted/20 p-2">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -4434,20 +4414,7 @@ function normalizeArtifactOutput(value: unknown, index: number, fallbackType: st
 }
 
 function artifactOutputsOf(node: DraftNode): CanvasArtifactOutput[] {
-  const fallbackType = artifactTypeOf(node)
-  const outputs = jsonArray(node.outputContract, 'outputs')
-    .map((value, index) => normalizeArtifactOutput(value, index, fallbackType))
-    .filter((output): output is CanvasArtifactOutput => Boolean(output))
-  if (outputs.length > 0) return dedupeArtifactOutputs(outputs)
-  return [
-    {
-      key: 'artifact',
-      type: fallbackType,
-      label: deliveryTitleOf(node) || artifactTypeLabel(fallbackType),
-      description: deliveryDescriptionOf(node) || artifactFileHint(fallbackType),
-      customerVisible: customerVisibleOf(node),
-    },
-  ]
+  return getCanvasNodeOutputPorts(node) as CanvasArtifactOutput[]
 }
 
 function dedupeArtifactOutputs(outputs: CanvasArtifactOutput[]): CanvasArtifactOutput[] {
@@ -4465,22 +4432,14 @@ function primaryArtifactOutput(node: DraftNode): CanvasArtifactOutput {
 }
 
 function selectedInputTypesOf(node: DraftNode): string[] {
-  return uniqueStrings(
-    jsonArray(node.inputMapping, 'acceptedArtifactTypes').filter(
-      (value): value is string => typeof value === 'string' && value.trim().length > 0,
-    ),
-  )
+  return getCanvasNodeAcceptedInputTypes(node)
 }
 
 function inputTypesForNode(node: DraftNode, edges: DraftEdge[], nodes: DraftNode[]): string[] {
   const configured = selectedInputTypesOf(node)
   if (configured.length > 0) return configured
-  const nodeById = new Map(nodes.map((item) => [item.id, item]))
-  const incoming = uniqueStrings(
-    edges
-      .filter((edge) => edge.targetNodeId === node.id)
-      .map((edge) => edgeArtifactType(edge, nodeById.get(edge.sourceNodeId)))
-      .filter((type) => type && type !== 'artifact'),
+  const incoming = getCanvasIncomingArtifactTypes(node, edges, nodes).filter(
+    (type) => type !== 'any_file',
   )
   return incoming.length > 0 ? incoming : ['any_file']
 }
@@ -4533,31 +4492,15 @@ function removeOutputContractArtifactOutput(base: JsonObject, node: DraftNode, k
 }
 
 function artifactEdgeMapping(output: CanvasArtifactOutput): JsonObject {
-  return {
-    handoffMode: 'fixed_artifact',
-    outputKey: output.key,
-    targetInputKey: output.key,
-    artifactType: output.type,
-    artifactLabel: output.label,
-    artifactOnly: true,
-  }
+  return createCanvasArtifactEdgeMapping(output as CanvasArtifactPort) as unknown as JsonObject
 }
 
 function edgeOutputKey(edge: DraftEdge): string {
-  const value = edge.mapping.outputKey
-  if (typeof value === 'string' && value) return value
-  if (typeof edge.sourceHandle === 'string' && edge.sourceHandle.startsWith('artifact:')) {
-    return edge.sourceHandle.slice('artifact:'.length)
-  }
-  return 'artifact'
+  return getCanvasEdgeOutputKey(edge)
 }
 
 function edgeArtifactType(edge: DraftEdge, source?: DraftNode): string {
-  const value = edge.mapping.artifactType
-  if (typeof value === 'string' && value) return value
-  const key = edgeOutputKey(edge)
-  const output = source ? artifactOutputsOf(source).find((item) => item.key === key) : null
-  return output?.type ?? (source ? artifactTypeOf(source) : 'artifact')
+  return getCanvasEdgeArtifactType(edge, source)
 }
 
 function artifactTypeOf(node: DraftNode): string {
@@ -4745,35 +4688,6 @@ function normalizedOutputContract(node: DraftNode): JsonObject {
     deliverableTitle: deliveryTitleOf(node),
     deliveryDescription: deliveryDescriptionOf(node),
     outputs: normalizedArtifactOutputs(node),
-  }
-}
-
-function updateOutputContractArtifactType(base: JsonObject, nextType: string): JsonObject {
-  const previousType = typeof base.artifactType === 'string' && base.artifactType ? base.artifactType : nextType
-  const previousDefault = `${artifactTypeLabel(previousType)} · ${artifactFileHint(previousType)}`
-  const nextDefault = `${artifactTypeLabel(nextType)} · ${artifactFileHint(nextType)}`
-  const currentDescription = typeof base.description === 'string' ? base.description : ''
-  const currentDeliveryDescription = typeof base.deliveryDescription === 'string' ? base.deliveryDescription : ''
-  const shouldUpdateDescription = !currentDescription || currentDescription === previousDefault
-  const shouldUpdateDeliveryDescription =
-    !currentDeliveryDescription ||
-    currentDeliveryDescription === currentDescription ||
-    currentDeliveryDescription === previousDefault
-
-  return {
-    ...base,
-    artifactType: nextType,
-    description: shouldUpdateDescription ? nextDefault : currentDescription,
-    deliveryDescription: shouldUpdateDeliveryDescription ? nextDefault : currentDeliveryDescription,
-    outputs: [
-      {
-        key: 'artifact',
-        type: nextType,
-        label: artifactTypeLabel(nextType),
-        description: shouldUpdateDeliveryDescription ? nextDefault : currentDeliveryDescription,
-        customerVisible: typeof base.customerVisible === 'boolean' ? base.customerVisible : true,
-      },
-    ],
   }
 }
 

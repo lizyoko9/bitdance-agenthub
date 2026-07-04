@@ -43,6 +43,7 @@ export interface CanvasArtifactPort {
 }
 
 export interface CanvasArtifactEdgeMapping {
+  [key: string]: unknown
   handoffMode: 'fixed_artifact'
   outputKey: string
   targetInputKey: string
