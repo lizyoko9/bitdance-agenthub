@@ -1540,7 +1540,6 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
                   const displayDescription =
                     agent?.role ?? softwareCommand?.description ?? nodeDescription(node)
                   const artifactType = artifactTypeOf(node)
-                  const primaryOutput = primaryArtifactOutput(node)
                   const inputTypes = inputTypesForNode(node, edges, nodes)
                   const selected = selectedNodeId === node.id
                   const connecting = connectingFromNodeId === node.id
@@ -1677,7 +1676,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
                       data-testid="canvas-artifact-output-list"
                       className="relative z-30 mt-1 flex min-h-7 min-w-0 items-center gap-1 overflow-visible rounded-md bg-card/80 p-0.5"
                     >
-                      {[primaryOutput].map((output) => (
+                      {artifactOutputsOf(node).map((output) => (
                         <button
                           key={output.key}
                           type="button"
