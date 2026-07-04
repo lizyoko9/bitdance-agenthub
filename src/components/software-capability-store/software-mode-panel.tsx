@@ -25,7 +25,7 @@ export function SoftwareModePanel({
       <div className="grid gap-2 sm:grid-cols-2">
         {card.modes.length === 0 ? (
           <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            还没有接入方式。打开高级配置后可以创建 CLI、MCP 或软件命令。
+            还没有接入方式。打开完整配置后可以创建 CLI、MCP 或软件命令。
           </div>
         ) : (
           card.modes.map((mode) => (

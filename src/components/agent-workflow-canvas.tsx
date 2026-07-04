@@ -1359,7 +1359,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
               onClick={() => setShowAdvancedPanel((value) => !value)}
             >
               <Eye className="size-3.5" />
-              高级设置
+              画布设置
             </Button>
           </div>
         </div>
@@ -2260,7 +2260,7 @@ function CustomerDeliveryDock({
       </div>
       {nodes.length > 4 && (
         <div className="mt-1.5 text-[10px] text-muted-foreground">
-          还有 {nodes.length - 4} 个交付物，可在右侧高级设置里查看。
+          还有 {nodes.length - 4} 个交付物，可在右侧画布设置里查看。
         </div>
       )}
     </div>

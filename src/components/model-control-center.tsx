@@ -678,7 +678,7 @@ export function ModelControlCenter() {
               onClick={() => setShowConfigPanel((value) => !value)}
             >
               <Settings2 className="size-3.5" />
-              高级配置
+              完整配置
             </Button>
             <Button size="icon" variant="ghost" onClick={() => void reload()} disabled={loading}>
               <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
@@ -1425,7 +1425,7 @@ function ModelConnectionWorkbench({
             <span>模型连接工作台</span>
           </div>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
-            普通用户只需要在这里添加模型、设为首选模型、选择网络出口并一键检测。高级适配器参数已经收起来。
+              普通用户只需要在这里添加模型、设为首选模型、选择网络出口并一键检测。复杂适配器参数已经收起来。
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -1435,7 +1435,7 @@ function ModelConnectionWorkbench({
           </Button>
           <Button size="sm" variant="outline" className="h-8 gap-1" onClick={onOpenAdvanced}>
             <Settings2 className="size-3.5" />
-            高级设置
+            完整配置
           </Button>
         </div>
       </div>

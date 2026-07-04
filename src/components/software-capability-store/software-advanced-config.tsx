@@ -41,7 +41,7 @@ export function SoftwareAdvancedConfig({
       >
         <span className="flex items-center gap-2 font-semibold">
           <Settings2 className="size-4" />
-          高级配置
+          完整配置
         </span>
         <span className="text-xs text-muted-foreground">{open ? '收起' : '展开'}</span>
       </button>
