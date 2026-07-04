@@ -34,6 +34,8 @@ Recommended and approved approach:
 - Orchestration belongs on the canvas.
 - Execution belongs in the runtime.
 - Results belong in artifacts.
+- AgentHub itself is free: no paid tiers, no membership gating, no paywalled modules, and no upsell UI.
+- External model/API/CLI costs can be shown as usage reminders, but they are not AgentHub product pricing.
 - Ordinary users should see simple decisions first.
 - Advanced CLI, MCP, API, and automation parameters should stay available but collapsed by default.
 - A feature should be added as a module with a clear contract, not as another block inside an already crowded page.
