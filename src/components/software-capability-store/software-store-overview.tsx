@@ -73,6 +73,7 @@ export function SoftwareStoreOverview({
           <button
             key={card.key}
             type="button"
+            data-testid="software-store-card"
             onClick={() => onSelectCard(card)}
             className={cn(
               'rounded-lg border bg-card p-4 text-left transition hover:border-primary hover:bg-primary/5',
@@ -95,6 +96,7 @@ export function SoftwareStoreOverview({
               <Badge variant="outline">{card.commandCount} 个命令</Badge>
               <Badge variant="outline">{card.assignedAgentCount} 个智能体</Badge>
             </div>
+            <div className="mt-3 text-xs font-medium text-primary">打开设置</div>
           </button>
         ))}
       </div>

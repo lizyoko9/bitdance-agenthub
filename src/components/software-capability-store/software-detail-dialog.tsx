@@ -3,6 +3,7 @@
 import type { ComponentProps } from 'react'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -48,11 +49,22 @@ export function SoftwareDetailDialog({
 }: SoftwareDetailDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[86vh] max-w-4xl overflow-y-auto">
+      <DialogContent className="max-h-[86vh] max-w-4xl overflow-y-auto" data-testid="software-detail-dialog">
         {card ? (
           <>
             <DialogHeader>
-              <DialogTitle>{card.name}</DialogTitle>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <DialogTitle>{card.name}</DialogTitle>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0"
+                  onClick={() => onOpenChange(false)}
+                >
+                  返回软件商店
+                </Button>
+              </div>
               <div className="flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline">{card.category}</Badge>
                 <Badge variant={card.connectionStatus === '已接入' ? 'default' : 'outline'}>

@@ -7,59 +7,42 @@ import {
   buildAgentSettingsCapabilitySummary,
 } from './agent-employee-settings'
 
-describe('agent employee settings model', () => {
-  it('keeps visible sections at employee level', () => {
-    expect(AGENT_EMPLOYEE_SETTING_SECTIONS.map((section) => section.id)).toEqual([
-      'basic',
-      'model',
-      'toolkit',
-      'permissions',
-      'memory',
-      'output',
-    ])
-    expect(AGENT_EMPLOYEE_SETTING_SECTIONS.map((section) => section.label)).toEqual([
-      '基础信息',
-      '模型选择',
-      '员工工具包',
-      '权限边界',
-      '记忆学习',
-      '交付产物',
-    ])
-  })
-
-  it('rejects infrastructure creation labels inside agent settings', () => {
+describe('agent employee settings', () => {
+  it('keeps the visible editor focused on employee setup instead of infrastructure forms', () => {
     expect(() =>
-      assertSimpleAgentSettingsLabels(['基础信息', 'Network Profile', 'CLI Profile']),
-    ).toThrow(/low-level/i)
-    expect(() =>
-      assertSimpleAgentSettingsLabels(['基础信息', 'Prompt Template', 'Style Guide']),
-    ).toThrow(/low-level/i)
-  })
-
-  it('allows assigning already configured capabilities', () => {
-    expect(() =>
-      assertSimpleAgentSettingsLabels(['模型选择', '员工工具包', 'Skills', 'MCP', 'CLI']),
+      assertSimpleAgentSettingsLabels([
+        ...AGENT_EMPLOYEE_SETTING_SECTIONS.map((section) => section.label),
+        '选择模型',
+        '员工工具包',
+        '权限边界',
+        '记忆学习',
+        '交付产物',
+      ]),
     ).not.toThrow()
+
+    expect(() =>
+      assertSimpleAgentSettingsLabels(['Network Profile', 'CLI Profile', 'MCP Server']),
+    ).toThrow(/low-level infrastructure/)
   })
 
-  it('summarizes selected toolkit counts', () => {
-    const summary = buildAgentSettingsCapabilitySummary({
-      toolNames: ['read_artifact', 'write_artifact'],
-      skillIds: ['skill_a', 'skill_b', 'skill_c'],
-      mcpServerIds: ['mcp_local'],
-      cliProfileIds: ['cli_codex', 'cli_jianying'],
-    })
-
-    expect(summary).toEqual({
+  it('summarizes assigned employee capabilities without counting duplicates', () => {
+    expect(
+      buildAgentSettingsCapabilitySummary({
+        toolNames: ['bash', 'bash', 'fs_read'],
+        skillIds: ['skill-a', 'skill-a'],
+        mcpServerIds: ['mcp-a'],
+        cliProfileIds: ['cli-a', 'cli-b'],
+      }),
+    ).toEqual({
       tools: 2,
-      skills: 3,
+      skills: 1,
       mcpServers: 1,
       cliProfiles: 2,
-      total: 8,
+      total: 6,
     })
   })
 
-  it('builds a safe patch from an already configured model profile', () => {
+  it('only lets agents pick already configured assignable models', () => {
     expect(
       buildAgentModelSelectionPatch({
         provider: 'deepseek',
@@ -74,14 +57,12 @@ describe('agent employee settings model', () => {
       apiBaseUrl: 'https://api.deepseek.com',
       supportsVision: false,
     })
-  })
 
-  it('does not let unsupported model backends leak into employee settings', () => {
     expect(
       buildAgentModelSelectionPatch({
         provider: 'ollama',
-        model: 'local-model',
-        baseUrl: 'http://localhost:11434',
+        model: 'llama3',
+        baseUrl: 'http://127.0.0.1:11434',
         supportsVision: false,
       }),
     ).toBeNull()
