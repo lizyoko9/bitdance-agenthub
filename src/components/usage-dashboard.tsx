@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { fetchUsageSummary, type UsageBucket, type UsageSummary } from '@/lib/api'
+import { AGENTHUB_FREE_PRODUCT_NOTICE } from '@/lib/free-product-policy'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 
@@ -94,7 +95,7 @@ export function UsageDashboard() {
               数据分析
             </div>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              看清每个模型实际消耗、费用、缓存命中和上下文压力。
+              看清每个模型实际消耗、外部费用、缓存命中和上下文压力。
             </p>
           </div>
           <button
@@ -109,17 +110,21 @@ export function UsageDashboard() {
         </header>
 
         <div className="mx-auto max-w-[1440px] space-y-3">
+          <section className="rounded-md border bg-emerald-50 px-3 py-2 text-[11px] leading-5 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
+            {AGENTHUB_FREE_PRODUCT_NOTICE}
+          </section>
+
           <section className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
             <HeroMetric
               icon={<Coins className="size-4" />}
-              title="总费用"
+              title="外部模型费用"
               value={formatUsd(data.runtime.estimatedCostUsd)}
               detail={`${formatTokens(data.allTime.totalTokens)} tokens · ${formatInteger(data.allTime.runs)} 次请求`}
               tone="money"
             />
             <HeroMetric
               icon={<BarChart3 className="size-4" />}
-              title="最贵模型"
+              title="消耗最高模型"
               value={topModel?.model ?? '暂无'}
               detail={
                 topModel
@@ -129,7 +134,7 @@ export function UsageDashboard() {
             />
             <HeroMetric
               icon={<Repeat2 className="size-4" />}
-              title="缓存省钱"
+              title="缓存节省"
               value={formatUsd(data.promptCache.estimatedSavedUsd)}
               detail={`命中 ${cacheHitPercent > 0 ? `${cacheHitPercent}%` : '-'} · 目标命中 ${Math.round(
                 data.promptCache.targetHitRate * 100,
