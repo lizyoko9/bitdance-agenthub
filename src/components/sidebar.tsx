@@ -14,7 +14,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { AgentAvatar } from '@/components/agent-avatar'
 import { GlobalSearchTrigger } from '@/components/global-search-trigger'
 import { NewConversationDialog } from '@/components/new-conversation-dialog'
-import { SettingsButton } from '@/components/settings-dialog'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -156,7 +155,6 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
             </div>
           )}
           <div className={cn('flex items-center', collapsed ? 'flex-col gap-1' : 'gap-0.5')}>
-            <SettingsButton />
             <ThemeToggle />
             <Button
               size="icon"
