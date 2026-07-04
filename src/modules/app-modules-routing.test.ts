@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { getAppModule, normalizeAppModuleId, type AppModuleId } from './app-modules'
+import { appModules, getAppModule, normalizeAppModuleId, type AppModuleId } from './app-modules'
 
 describe('app module routing', () => {
   const legacyOrchestrationIds = [
@@ -16,6 +16,16 @@ describe('app module routing', () => {
     for (const id of legacyOrchestrationIds) {
       expect(normalizeAppModuleId(id)).toBe('agent-canvas')
       expect(getAppModule(id).id).toBe('agent-canvas')
+      expect(getAppModule(id).label).toBe('编排画布')
+    }
+  })
+
+  it('keeps retired orchestration aliases out of primary navigation data', () => {
+    const moduleById = new Map(appModules.map((module) => [module.id, module]))
+
+    for (const id of legacyOrchestrationIds) {
+      expect(moduleById.get(id)?.group).toBe('hidden')
+      expect(moduleById.get(id)?.label).toBe('编排画布')
     }
   })
 
