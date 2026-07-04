@@ -1020,7 +1020,7 @@ function BusinessDynamicWorkbench({
             </Button>
             <Button variant="outline" size="sm" onClick={onOpenCanvas}>
               <GitBranch className="size-4" />
-              工作流
+              编排画布
             </Button>
             <Button variant="outline" size="sm" onClick={onOpenRuns}>
               <Activity className="size-4" />
