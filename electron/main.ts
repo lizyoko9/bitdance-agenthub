@@ -76,9 +76,75 @@ if (!gotLock) {
     })
 
     await win.loadURL(url)
+    await installRuntimeTextLeakGuard(win)
   })
 
   app.on('window-all-closed', () => {
     app.quit()
   })
+}
+
+async function installRuntimeTextLeakGuard(win: BrowserWindow) {
+  const script = String.raw`
+    (() => {
+      if (window.__agenthubRuntimeTextLeakGuardInstalled) return
+      window.__agenthubRuntimeTextLeakGuardInstalled = true
+
+      function looksLikeRuntimeLeak(value) {
+        if (!value || value.length < 80) return false
+        return (
+          value.includes('@font-face') ||
+          value.includes('__nextjs') ||
+          value.includes('__NEXT_DATA__') ||
+          value.includes('_next/static') ||
+          value.includes('data-next-') ||
+          value.includes('function(') ||
+          value.includes('=>{')
+        )
+      }
+
+      function scrubRuntimeTextLeaks() {
+        for (const element of document.querySelectorAll('body script, body style, body template, body noscript')) {
+          if (looksLikeRuntimeLeak(element.textContent || '')) {
+            element.setAttribute('data-agenthub-hidden-runtime-leak', 'true')
+            element.style.setProperty('display', 'none', 'important')
+            element.style.setProperty('visibility', 'hidden', 'important')
+            element.style.setProperty('width', '0', 'important')
+            element.style.setProperty('height', '0', 'important')
+            element.style.setProperty('overflow', 'hidden', 'important')
+          }
+        }
+
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+        const leaked = []
+        while (walker.nextNode()) {
+          const node = walker.currentNode
+          const parent = node.parentElement
+          if (!parent) continue
+          if (['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE'].includes(parent.tagName)) {
+            if (looksLikeRuntimeLeak(node.textContent || '')) {
+              parent.setAttribute('data-agenthub-hidden-runtime-leak', 'true')
+              ;(parent instanceof HTMLElement ? parent : null)?.style.setProperty('display', 'none', 'important')
+            }
+            continue
+          }
+          if (looksLikeRuntimeLeak(node.textContent || '')) leaked.push(node)
+        }
+        for (const node of leaked) node.parentNode?.removeChild(node)
+      }
+
+      scrubRuntimeTextLeaks()
+      new MutationObserver(() => requestAnimationFrame(scrubRuntimeTextLeaks)).observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      })
+    })()
+  `
+
+  try {
+    await win.webContents.executeJavaScript(script)
+  } catch (err) {
+    console.error('[AgentHub] runtime text leak guard failed', err)
+  }
 }

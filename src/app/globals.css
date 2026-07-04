@@ -49,6 +49,8 @@
 }
 
 :root {
+  --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+  --font-geist-mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -118,6 +120,16 @@
 }
 
 @layer base {
+  head,
+  script,
+  style,
+  template,
+  noscript,
+  meta,
+  link {
+    display: none !important;
+  }
+
   * {
     @apply border-border outline-ring/50;
   }

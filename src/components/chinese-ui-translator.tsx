@@ -362,15 +362,19 @@ const sentencePatterns: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
 export function ChineseUiTranslator() {
   useEffect(() => {
     const translateRoot = () => {
-      translateTextNodes(document.body)
-      translateElementAttributes(document.body)
+      const root = document.getElementById('agenthub-app-root')
+      if (!root) return
+      translateTextNodes(root)
+      translateElementAttributes(root)
     }
 
     translateRoot()
     const observer = new MutationObserver(() => {
       window.requestAnimationFrame(translateRoot)
     })
-    observer.observe(document.body, {
+    const root = document.getElementById('agenthub-app-root')
+    if (!root) return () => observer.disconnect()
+    observer.observe(root, {
       childList: true,
       subtree: true,
       characterData: true,
@@ -387,6 +391,7 @@ function translateTextNodes(root: ParentNode) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       if (!node.textContent?.trim()) return NodeFilter.FILTER_REJECT
+      if (looksLikeRuntimeSource(node.textContent)) return NodeFilter.FILTER_REJECT
       const parent = node.parentElement
       if (!parent || shouldSkip(parent)) return NodeFilter.FILTER_REJECT
       return NodeFilter.FILTER_ACCEPT
@@ -415,21 +420,34 @@ function translateElementAttributes(root: ParentNode) {
 
 function shouldSkip(element: Element): boolean {
   const tagName = element.tagName
-  if (['SCRIPT', 'STYLE', 'TEXTAREA', 'CODE', 'PRE'].includes(tagName)) return true
+  if (['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'TEXTAREA', 'CODE', 'PRE'].includes(tagName)) return true
   return Boolean(
     element.closest(
-      '[data-no-auto-zh], [contenteditable="true"], [id^="message-"], [data-selection-target="message"]',
+      'head, script, style, link, meta, noscript, template, [data-nextjs-toast], [data-nextjs-dialog], [data-no-auto-zh], [contenteditable="true"], [id^="message-"], [data-selection-target="message"]',
     ),
   )
 }
 
 function shouldSkipAttributes(element: Element): boolean {
   const tagName = element.tagName
-  if (['SCRIPT', 'STYLE', 'CODE', 'PRE'].includes(tagName)) return true
+  if (['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'CODE', 'PRE'].includes(tagName)) return true
   return Boolean(
     element.closest(
-      '[data-no-auto-zh], [contenteditable="true"], [id^="message-"], [data-selection-target="message"]',
+      'head, script, style, link, meta, noscript, template, [data-nextjs-toast], [data-nextjs-dialog], [data-no-auto-zh], [contenteditable="true"], [id^="message-"], [data-selection-target="message"]',
     ),
+  )
+}
+
+function looksLikeRuntimeSource(value: string): boolean {
+  if (value.length > 500) return true
+  return (
+    value.includes('@font-face') ||
+    value.includes('__nextjs') ||
+    value.includes('_next/static') ||
+    value.includes('__NEXT_DATA__') ||
+    value.includes('function(') ||
+    value.includes('=>{') ||
+    value.includes('data-next-')
   )
 }
 

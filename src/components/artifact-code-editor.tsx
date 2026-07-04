@@ -4,7 +4,6 @@ import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { javascript } from '@codemirror/lang-javascript'
 import { markdown } from '@codemirror/lang-markdown'
-import { githubDark, githubLight } from '@uiw/codemirror-theme-github'
 import CodeMirror from '@uiw/react-codemirror'
 import { useTheme } from 'next-themes'
 import { useMemo } from 'react'
@@ -48,7 +47,7 @@ export default function ArtifactCodeEditor({
       value={value}
       onChange={onChange}
       extensions={extensions}
-      theme={resolvedTheme === 'dark' ? githubDark : githubLight}
+      theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
       readOnly={readOnly}
       height="100%"
       style={{ height: '100%', fontSize: 13 }}

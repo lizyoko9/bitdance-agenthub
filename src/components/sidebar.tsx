@@ -1,26 +1,15 @@
 'use client'
 
 import {
-  BarChart3,
-  Bot,
-  Brain,
   ChevronDown,
   ChevronRight,
-  GitBranch,
   GitMerge,
-  Layers,
-  MessageSquare,
-  MonitorCog,
-  Package,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Search,
-  Wrench,
-  Workflow,
-  Zap,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { GlobalSearchTrigger } from '@/components/global-search-trigger'
@@ -33,100 +22,21 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { createConversation, fetchAgents, fetchConversations, fetchModelProfiles } from '@/lib/api'
 import { subscribeUiCommand } from '@/lib/ui-command-events'
 import { cn } from '@/lib/utils'
+import {
+  advancedAppModules,
+  getAppModuleLabel,
+  primaryAppModules,
+  type AppModuleDefinition,
+  type AppModuleId,
+} from '@/modules/app-modules'
 import type { AgentRow, ConversationRow } from '@/db/schema'
 import { useAppStore, useConversationList, useUnreadCount } from '@/stores/app-store'
 
-export type SidebarMode =
-  | 'workbench'
-  | 'conversations'
-  | 'artifacts'
-  | 'employee-factory'
-  | 'workflows'
-  | 'agent-canvas'
-  | 'skills'
-  | 'memory'
-  | 'context'
-  | 'models'
-  | 'tools'
-  | 'capabilities'
-  | 'collaboration'
-  | 'governance'
-  | 'configops'
-  | 'production'
-  | 'agents'
-  | 'analytics'
+export type SidebarMode = AppModuleId
 
 interface SidebarProps {
   mode: SidebarMode
   onModeChange: (mode: SidebarMode) => void
-}
-
-const primaryNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> = [
-  { mode: 'workbench', label: '工作台', icon: <MonitorCog className="size-4" /> },
-  { mode: 'conversations', label: '对话', icon: <MessageSquare className="size-4" /> },
-  { mode: 'agents', label: '智能体', icon: <Bot className="size-4" /> },
-  { mode: 'workflows', label: '工作流', icon: <Workflow className="size-4" /> },
-  { mode: 'agent-canvas', label: '编排画布', icon: <GitBranch className="size-4" /> },
-  { mode: 'skills', label: '技能管理', icon: <Package className="size-4" /> },
-  { mode: 'models', label: '模型管理', icon: <Zap className="size-4" /> },
-  { mode: 'tools', label: '工具连接', icon: <Wrench className="size-4" /> },
-]
-
-const advancedNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> = [
-  { mode: 'artifacts', label: '交付物', icon: <Layers className="size-4" /> },
-  { mode: 'memory', label: '记忆管理', icon: <Brain className="size-4" /> },
-  { mode: 'analytics', label: '数据分析', icon: <BarChart3 className="size-4" /> },
-]
-
-const hiddenNavLabels = new Map<SidebarMode, string>([
-  ['configops', '配置管理'],
-  ['production', '交付检查'],
-])
-
-const cleanNavLabels: Record<SidebarMode, string> = {
-  workbench: '工作台',
-  conversations: '对话',
-  artifacts: '交付物',
-  'employee-factory': '智能体设置',
-  workflows: '工作流',
-  'agent-canvas': '编排画布',
-  skills: '技能管理',
-  memory: '记忆管理',
-  context: '上下文',
-  models: '模型管理',
-  tools: '工具连接',
-  capabilities: '能力图谱',
-  collaboration: '团队协作',
-  governance: '安全治理',
-  configops: '配置管理',
-  production: '交付检查',
-  agents: '智能体',
-  analytics: '数据分析',
-}
-
-const navDisplayLabels: Record<SidebarMode, string> = {
-  workbench: '\u5de5\u4f5c\u53f0',
-  conversations: '\u5bf9\u8bdd',
-  artifacts: '\u4ea4\u4ed8\u7269',
-  'employee-factory': '\u667a\u80fd\u4f53\u8bbe\u7f6e',
-  workflows: '\u5de5\u4f5c\u6d41',
-  'agent-canvas': '\u7f16\u6392\u753b\u5e03',
-  skills: '\u6280\u80fd\u7ba1\u7406',
-  memory: '\u8bb0\u5fc6\u7ba1\u7406',
-  context: '\u4e0a\u4e0b\u6587',
-  models: '\u6a21\u578b\u7ba1\u7406',
-  tools: '\u5de5\u5177\u8fde\u63a5',
-  capabilities: '\u80fd\u529b\u56fe\u8c31',
-  collaboration: '\u56e2\u961f\u534f\u4f5c',
-  governance: '\u5b89\u5168\u6cbb\u7406',
-  configops: '\u914d\u7f6e\u7ba1\u7406',
-  production: '\u4ea4\u4ed8\u68c0\u67e5',
-  agents: '\u667a\u80fd\u4f53',
-  analytics: '\u6570\u636e\u5206\u6790',
-}
-
-function navLabel(mode: SidebarMode): string {
-  return navDisplayLabels[mode] ?? cleanNavLabels[mode] ?? hiddenNavLabels.get(mode) ?? navDisplayLabels.workbench
 }
 
 export function Sidebar({ mode, onModeChange }: SidebarProps) {
@@ -269,14 +179,13 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
               collapsed ? 'p-1' : 'space-y-1 p-3',
             )}
           >
-            {primaryNav.map((item) => (
-              <NavButton
-                key={item.mode}
-                active={mode === item.mode}
+            {primaryAppModules.map((item) => (
+              <ModuleNavButton
+                key={item.id}
+                active={mode === item.id}
                 collapsed={collapsed}
-                icon={item.icon}
-                label={navLabel(item.mode)}
-                onClick={() => selectMode(item.mode)}
+                module={item}
+                onClick={() => selectMode(item.id)}
               />
             ))}
             {!collapsed && (
@@ -289,16 +198,15 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 {showMore ? '收起更多功能' : '更多功能'}
               </button>
             )}
-            {(showMore || collapsed || advancedNav.some((item) => item.mode === mode)) && (
+            {(showMore || collapsed || advancedAppModules.some((item) => item.id === mode)) && (
               <div className={cn('space-y-1', !collapsed && 'pt-1')}>
-                {advancedNav.map((item) => (
-                  <NavButton
-                    key={item.mode}
-                    active={mode === item.mode}
+                {advancedAppModules.map((item) => (
+                  <ModuleNavButton
+                    key={item.id}
+                    active={mode === item.id}
                     collapsed={collapsed}
-                    icon={item.icon}
-                    label={navLabel(item.mode)}
-                    onClick={() => selectMode(item.mode)}
+                    module={item}
+                    onClick={() => selectMode(item.id)}
                   />
                 ))}
               </div>
@@ -428,23 +336,22 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   )
 }
 
-function NavButton({
+function ModuleNavButton({
   active,
   collapsed,
-  icon,
-  label,
+  module,
   onClick,
 }: {
   active: boolean
   collapsed: boolean
-  icon: ReactNode
-  label: string
+  module: AppModuleDefinition
   onClick: () => void
 }) {
+  const Icon = module.icon
   return (
     <button
       type="button"
-      title={label}
+      title={module.label}
       onClick={onClick}
       className={cn(
         'flex w-full items-center gap-2 rounded-md text-sm font-medium transition',
@@ -452,8 +359,8 @@ function NavButton({
         active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
       )}
     >
-      {icon}
-      {!collapsed && <span className="truncate">{label}</span>}
+      <Icon className="size-4" />
+      {!collapsed && <span className="truncate">{module.label}</span>}
     </button>
   )
 }
@@ -579,5 +486,5 @@ function UnreadBadge({ value }: { value: number }) {
 }
 
 function currentLabel(mode: SidebarMode): string {
-  return navLabel(mode)
+  return getAppModuleLabel(mode)
 }

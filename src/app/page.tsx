@@ -7,7 +7,7 @@ import { SelectionPopover } from '@/components/selection-popover'
 
 export default function Home() {
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div id="agenthub-app-root" className="flex h-screen overflow-hidden bg-background">
       <AppShell />
       <FileExplorerPanel />
       <ArtifactPreviewPanel />

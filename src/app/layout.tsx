@@ -1,25 +1,15 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
 
 import { GlobalSearch } from '@/components/global-search'
 import { StreamProvider } from '@/components/stream-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 
+import '@xyflow/react/dist/style.css'
 import './globals.css'
-
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-})
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-})
 
 export const metadata: Metadata = {
   title: 'AgentHub',
-  description: '多 Agent 协作平台',
+  description: '多智能体员工工作台',
 }
 
 export default function RootLayout({
@@ -28,11 +18,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html
-      lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-      suppressHydrationWarning
-    >
+    <html lang="zh-CN" className="h-full antialiased" suppressHydrationWarning>
       <body className="h-screen overflow-hidden">
         <ThemeProvider>
           <StreamProvider>{children}</StreamProvider>
