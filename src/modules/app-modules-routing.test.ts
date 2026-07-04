@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { getAppModule, normalizeAppModuleId, type AppModuleId } from './app-modules'
+
+describe('app module routing', () => {
+  const legacyOrchestrationIds = [
+    'workflows',
+    'agent-orchestration',
+    'langflow-native',
+    'infinite-canvas',
+  ] satisfies AppModuleId[]
+
+  it('opens every legacy orchestration entry as the unified canvas module', () => {
+    for (const id of legacyOrchestrationIds) {
+      expect(normalizeAppModuleId(id)).toBe('agent-canvas')
+      expect(getAppModule(id).id).toBe('agent-canvas')
+    }
+  })
+
+  it('does not load the retired experimental orchestration pages from the registry', () => {
+    const source = readFileSync(join(process.cwd(), 'src/modules/app-modules.tsx'), 'utf8')
+
+    expect(source).not.toContain('LangflowAgentOrchestrationModule')
+    expect(source).not.toContain('LangflowNativeModule')
+    expect(source).not.toContain('InfiniteCanvasModule')
+    expect(source).not.toContain('WorkflowLibrary')
+  })
+})

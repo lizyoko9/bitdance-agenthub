@@ -25,16 +25,12 @@ import { ArtifactLibrary } from '@/components/artifact-library'
 import { ChatPanel } from '@/components/chat-panel'
 import { ConfigOpsCenter } from '@/components/config-ops-center'
 import { DesktopWorkbench } from '@/components/desktop-workbench'
-import { InfiniteCanvasModule } from '@/components/infinite-canvas-module'
-import { LangflowAgentOrchestrationModule } from '@/components/langflow-agent-orchestration-module'
-import { LangflowNativeModule } from '@/components/langflow-native-module'
 import { MemoryManagementCenter } from '@/components/memory-management-center'
 import { ModelControlCenter } from '@/components/model-control-center'
 import { ProductionIntegrationsCenter } from '@/components/production-integrations-center'
 import { SkillsCenter } from '@/components/skills-center'
 import { ToolControlCenter } from '@/components/tool-control-center'
 import { UsageDashboard } from '@/components/usage-dashboard'
-import { WorkflowLibrary } from '@/components/workflow-library'
 import { buildVisibleAppModules, normalizeOrchestrationModuleId } from '@/lib/app-module-navigation'
 
 export type AppModuleId =
@@ -114,17 +110,10 @@ export const appModules: AppModuleDefinition[] = [
   {
     id: 'workflows',
     label: '工作流',
-    description: '集中展示保存过和运行过的编排流程。',
+    description: '旧入口兼容模块，统一收口到编排画布。',
     icon: Workflow,
     group: 'primary',
-    render: ({ onOpenWorkflow }) => (
-      <WorkflowLibrary
-        onOpenWorkflow={onOpenWorkflow}
-        onCreateWorkflow={() => {
-          onOpenWorkflow('')
-        }}
-      />
-    ),
+    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'agent-canvas',
@@ -137,26 +126,26 @@ export const appModules: AppModuleDefinition[] = [
   {
     id: 'agent-orchestration',
     label: 'Agent 编排',
-    description: 'Langflow 风格的 Agent 编排模块：组件库、节点图、产物连线、运行骨架和节点检查器。',
+    description: '旧入口兼容模块，统一收口到编排画布。',
     icon: Workflow,
     group: 'primary',
-    render: ({ onModeChange }) => <LangflowAgentOrchestrationModule onModeChange={onModeChange} />,
+    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'langflow-native',
     label: 'Langflow 原生',
-    description: '直接按 Langflow v1.10.1 的 Flow JSON、节点、边、handle 和运行顺序处理。',
+    description: '旧入口兼容模块，统一收口到编排画布。',
     icon: GitBranch,
     group: 'primary',
-    render: () => <LangflowNativeModule />,
+    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'infinite-canvas',
     label: '无限画布',
-    description: 'Leafer UI 风格的无限画布模块：拖拽、缩放、图层、节点选择和缩略图。',
+    description: '旧入口兼容模块，统一收口到编排画布。',
     icon: Layers,
     group: 'primary',
-    render: () => <InfiniteCanvasModule />,
+    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'skills',
@@ -269,16 +258,8 @@ export const appModules: AppModuleDefinition[] = [
   },
 ]
 
-const displayOverrides: Partial<Record<AppModuleId, Pick<AppModuleDefinition, 'label' | 'description'>>> = {
-  'langflow-native': {
-    label: 'Langflow 编排',
-    description: 'AgentHub 自带的 Langflow 风格节点编排模块，支持组件库、节点端口、连线和右侧配置。',
-  },
-}
-
 function withDisplayOverride(module: AppModuleDefinition): AppModuleDefinition {
-  const override = displayOverrides[module.id]
-  return override ? { ...module, ...override } : module
+  return module
 }
 
 export const primaryAppModules = buildVisibleAppModules(appModules, 'primary').map(withDisplayOverride)
@@ -286,8 +267,12 @@ export const advancedAppModules = buildVisibleAppModules(appModules, 'advanced')
 
 const moduleById = new Map(appModules.map((module) => [module.id, module]))
 
+function getRawAppModule(id: AppModuleId): AppModuleDefinition {
+  return moduleById.get(id) ?? moduleById.get('workbench')!
+}
+
 export function getAppModule(id: AppModuleId): AppModuleDefinition {
-  return withDisplayOverride(moduleById.get(id) ?? moduleById.get('workbench')!)
+  return withDisplayOverride(getRawAppModule(normalizeAppModuleId(id)))
 }
 
 export function getAppModuleLabel(id: AppModuleId): string {
@@ -297,7 +282,7 @@ export function getAppModuleLabel(id: AppModuleId): string {
 export function normalizeAppModuleId(id: AppModuleId): AppModuleId {
   const orchestrationId = normalizeOrchestrationModuleId(id) as AppModuleId
   if (orchestrationId !== id) return orchestrationId
-  return getAppModule(id).normalizeTo ?? id
+  return getRawAppModule(id).normalizeTo ?? id
 }
 
 export function renderAppModule(id: AppModuleId, context: AppModuleRenderContext): ReactNode {
