@@ -170,6 +170,15 @@ export function doesEdgeMatchTargetInput(
   return accepted.includes(getEdgeArtifactType(edge, source))
 }
 
+export function canConnectArtifactOutputToTarget(
+  output: CanvasArtifactPort,
+  targetNode: AgentCanvasNodeLike,
+): boolean {
+  const accepted = getNodeAcceptedInputTypes(targetNode)
+  if (accepted.length === 0 || accepted.includes('any_file')) return true
+  return accepted.includes(output.type)
+}
+
 export function deleteNodeAndConnectedEdges<TNode extends AgentCanvasNodeLike, TEdge extends AgentCanvasEdgeLike>(
   nodeId: string,
   nodes: TNode[],

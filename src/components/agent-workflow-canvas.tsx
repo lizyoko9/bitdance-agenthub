@@ -94,6 +94,7 @@ import {
   type WorkflowPresetDto,
 } from '@/lib/api'
 import {
+  canConnectArtifactOutputToTarget as canConnectCanvasArtifactOutputToTarget,
   createArtifactEdgeMapping as createCanvasArtifactEdgeMapping,
   deleteNodeAndConnectedEdges as deleteCanvasNodeAndConnectedEdges,
   getEdgeArtifactType as getCanvasEdgeArtifactType,
@@ -768,12 +769,17 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
   ) => {
     if (!sourceId || !targetId || sourceId === targetId) return false
     const sourceNode = nodes.find((node) => node.id === sourceId) ?? null
+    const targetNode = nodes.find((node) => node.id === targetId) ?? null
     const output =
       sourceOutput ??
       (sourceNode
         ? artifactOutputsOf(sourceNode).find((item) => item.key === connectingOutputKey) ??
           primaryArtifactOutput(sourceNode)
         : null)
+    if (output && targetNode && !canConnectCanvasArtifactOutputToTarget(output as CanvasArtifactPort, targetNode)) {
+      setNotice(`${nodeTypeLabel(targetNode.type)} 不能接收 ${artifactTypeLabel(output.type)}，请选择匹配的产物端口`)
+      return false
+    }
     const outputKey = output?.key ?? 'artifact'
     const exists = edges.some(
       (edge) =>
@@ -854,6 +860,25 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
       return
     }
     setSelectedNodeId(node.id)
+  }
+
+  const connectionOutputForNode = (sourceNodeId: string, outputKey?: string): CanvasArtifactOutput | null => {
+    const sourceNode = nodes.find((item) => item.id === sourceNodeId) ?? null
+    if (!sourceNode) return null
+    const outputs = artifactOutputsOf(sourceNode)
+    return outputs.find((output) => output.key === outputKey) ?? outputs[0] ?? null
+  }
+
+  const canReceivePendingConnection = (targetNode: DraftNode): boolean => {
+    if (connectingFromNodeId && connectingFromNodeId !== targetNode.id) {
+      const output = connectionOutputForNode(connectingFromNodeId, connectingOutputKey)
+      return output ? canConnectCanvasArtifactOutputToTarget(output as CanvasArtifactPort, targetNode) : true
+    }
+    if (connectionDrag && connectionDrag.sourceNodeId !== targetNode.id) {
+      const output = connectionOutputForNode(connectionDrag.sourceNodeId, connectionDrag.outputKey)
+      return output ? canConnectCanvasArtifactOutputToTarget(output as CanvasArtifactPort, targetNode) : true
+    }
+    return false
   }
 
   const saveWorkflow = () =>
@@ -1522,7 +1547,8 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
                   const canReceiveConnection =
                     Boolean(connectingFromNodeId || connectionDrag) &&
                     connectingFromNodeId !== node.id &&
-                    connectionDrag?.sourceNodeId !== node.id
+                    connectionDrag?.sourceNodeId !== node.id &&
+                    canReceivePendingConnection(node)
                   const runState = canvasNodeRunState(nodeRun ?? null)
                   return (
                     <div

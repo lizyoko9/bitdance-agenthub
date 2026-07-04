@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canConnectArtifactOutputToTarget,
   createArtifactEdgeMapping,
   deleteNodeAndConnectedEdges,
   doesEdgeMatchTargetInput,
@@ -95,6 +96,21 @@ describe('agent canvas artifact model', () => {
     })
 
     expect(doesEdgeMatchTargetInput(bundleEdge, packager, writer)).toBe(true)
+  })
+
+  it('blocks connecting a selected output to a target that only accepts another artifact type', () => {
+    const editor = node({
+      id: 'editor',
+      outputContract: {
+        outputs: [{ key: 'final_video', type: 'video', label: 'Final video' }],
+      },
+    })
+    const codeReviewer = node({
+      id: 'code_reviewer',
+      inputMapping: { acceptedArtifactTypes: ['code'] },
+    })
+
+    expect(canConnectArtifactOutputToTarget(getNodeOutputPorts(editor)[0], codeReviewer)).toBe(false)
   })
 
   it('deletes the selected node and all connected edges', () => {
