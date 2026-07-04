@@ -103,6 +103,7 @@ import {
   getNodeOutputPorts as getCanvasNodeOutputPorts,
   type CanvasArtifactPort,
 } from '@/lib/agent-canvas-artifacts'
+import { isEditableShortcutTarget, resolveCanvasKeyboardAction } from '@/lib/canvas-keyboard-actions'
 import { cn } from '@/lib/utils'
 
 const NODE_WIDTH = 212
@@ -795,7 +796,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
     return true
   }
 
-  const removeNode = (nodeId: string) => {
+  const removeNode = useCallback((nodeId: string) => {
     setNodes((currentNodes) => deleteCanvasNodeAndConnectedEdges(nodeId, currentNodes, []).nodes)
     setEdges((currentEdges) => deleteCanvasNodeAndConnectedEdges(nodeId, [], currentEdges).edges)
     if (selectedNodeId === nodeId) setSelectedNodeId('')
@@ -804,7 +805,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
       setConnectingOutputKey('')
     }
     if (connectionDrag?.sourceNodeId === nodeId) setConnectionDrag(null)
-  }
+  }, [connectionDrag, connectingFromNodeId, selectedNodeId])
 
   const removeEdge = (edgeId: string) => {
     setEdges((current) => current.filter((edge) => edge.id !== edgeId))
@@ -812,12 +813,25 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
 
   const handleCanvasKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!selectedNodeId) return
-    if (isCanvasFormTarget(event.target)) return
-    if (event.key !== 'Delete' && event.key !== 'Backspace') return
+    if (resolveCanvasKeyboardAction(event) !== 'delete-selected-node') return
     event.preventDefault()
     event.stopPropagation()
     removeNode(selectedNodeId)
   }
+
+  useEffect(() => {
+    if (!selectedNodeId) return
+
+    const handleWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (resolveCanvasKeyboardAction(event) !== 'delete-selected-node') return
+      event.preventDefault()
+      event.stopPropagation()
+      removeNode(selectedNodeId)
+    }
+
+    window.addEventListener('keydown', handleWindowKeyDown)
+    return () => window.removeEventListener('keydown', handleWindowKeyDown)
+  }, [removeNode, selectedNodeId])
 
   const updateNode = (nodeId: string, patch: Partial<DraftNode>) => {
     setNodes((current) =>
@@ -1156,7 +1170,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
 
   const handleCanvasPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     const wantsPrimaryPan = event.button === 0 && !isCanvasInteractiveTarget(event.target)
-    const wantsMiddlePan = event.button === 1 && !isCanvasFormTarget(event.target)
+    const wantsMiddlePan = event.button === 1 && !isEditableShortcutTarget(event.target)
     if (!wantsPrimaryPan && !wantsMiddlePan) return
     event.preventDefault()
     setNodePalette(null)
@@ -4863,11 +4877,6 @@ function isCanvasInteractiveTarget(target: EventTarget | null): boolean {
       ].join(','),
     ),
   )
-}
-
-function isCanvasFormTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  return Boolean(target.closest('input,textarea,select,[contenteditable="true"]'))
 }
 
 function formatError(err: unknown): string {
