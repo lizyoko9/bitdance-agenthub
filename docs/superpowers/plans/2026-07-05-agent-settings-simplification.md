@@ -30,30 +30,30 @@
   - `assertSimpleAgentSettingsLabels(labels)`
   - `buildAgentSettingsCapabilitySummary(args)`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Tests must prove:
 - visible sections are business-level: basic, model, toolkit, permissions, memory, output
 - forbidden infrastructure labels are rejected
 - counts summarize selected Skills, MCP servers, CLI profiles, and built-in tools
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run: `node node_modules\vitest\vitest.mjs run src/lib/agent-employee-settings.test.ts`
 
 Expected: FAIL because module does not exist.
 
-- [ ] **Step 3: Implement pure module**
+- [x] **Step 3: Implement pure module**
 
 Implement with no React imports.
 
-- [ ] **Step 4: Run passing test**
+- [x] **Step 4: Run passing test**
 
 Run: `node node_modules\vitest\vitest.mjs run src/lib/agent-employee-settings.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/agent-employee-settings.ts src/lib/agent-employee-settings.test.ts docs/superpowers/plans/2026-07-05-agent-settings-simplification.md
@@ -84,9 +84,9 @@ git commit -m "feat: add simple agent settings model"
   - Show permissions, memory, and output as plain employee-level cards
   - No low-level creation forms
 
-- [ ] **Step 1: Implement panel**
-- [ ] **Step 2: Replace `EmployeeAgentFactory` embedded settings in `AgentLibrary` with the new panel**
-- [ ] **Step 3: Run targeted tests**
+- [x] **Step 1: Implement panel**
+- [x] **Step 2: Replace `EmployeeAgentFactory` embedded settings in `AgentLibrary` with the new panel**
+- [x] **Step 3: Run targeted tests**
 
 Run:
 
@@ -95,7 +95,7 @@ node node_modules\vitest\vitest.mjs run src/lib/agent-employee-settings.test.ts
 node node_modules\typescript\bin\tsc --noEmit --pretty false 2>&1 | Select-String -Pattern "agent-employee-settings|agent-library"
 ```
 
-- [ ] **Step 4: Browser smoke**
+- [x] **Step 4: Browser smoke**
 
 Open Agent page and verify:
 - clicking an Agent opens settings

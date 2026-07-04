@@ -27,6 +27,28 @@ export interface AgentSettingsCapabilitySummary {
   total: number
 }
 
+export type AssignableAgentModelProvider =
+  | 'anthropic'
+  | 'openai'
+  | 'deepseek'
+  | 'volcano-ark'
+  | 'openai-compatible'
+
+export interface AgentModelSelectionProfile {
+  provider: string
+  model: string
+  baseUrl: string
+  supportsVision: boolean
+}
+
+export interface AgentModelSelectionPatch {
+  adapterName: 'custom'
+  modelProvider: AssignableAgentModelProvider
+  modelId: string
+  apiBaseUrl: string | null
+  supportsVision: boolean
+}
+
 export const AGENT_EMPLOYEE_SETTING_SECTIONS: AgentEmployeeSettingSection[] = [
   {
     id: 'basic',
@@ -78,6 +100,14 @@ export const FORBIDDEN_AGENT_SETTINGS_INFRASTRUCTURE_LABELS = [
   '软件命令创建',
 ] as const
 
+const ASSIGNABLE_AGENT_MODEL_PROVIDERS = new Set<string>([
+  'anthropic',
+  'openai',
+  'deepseek',
+  'volcano-ark',
+  'openai-compatible',
+])
+
 export function assertSimpleAgentSettingsLabels(labels: string[]): void {
   const normalized = labels.map((label) => label.toLowerCase())
   const forbidden = FORBIDDEN_AGENT_SETTINGS_INFRASTRUCTURE_LABELS.find((label) =>
@@ -100,6 +130,21 @@ export function buildAgentSettingsCapabilitySummary(
     mcpServers,
     cliProfiles,
     total: tools + skills + mcpServers + cliProfiles,
+  }
+}
+
+export function buildAgentModelSelectionPatch(
+  profile: AgentModelSelectionProfile,
+): AgentModelSelectionPatch | null {
+  if (!ASSIGNABLE_AGENT_MODEL_PROVIDERS.has(profile.provider)) return null
+  const modelId = profile.model.trim()
+  if (!modelId) return null
+  return {
+    adapterName: 'custom',
+    modelProvider: profile.provider as AssignableAgentModelProvider,
+    modelId,
+    apiBaseUrl: profile.baseUrl.trim() || null,
+    supportsVision: profile.supportsVision,
   }
 }
 

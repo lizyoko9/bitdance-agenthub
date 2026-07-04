@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   AGENT_EMPLOYEE_SETTING_SECTIONS,
   assertSimpleAgentSettingsLabels,
+  buildAgentModelSelectionPatch,
   buildAgentSettingsCapabilitySummary,
 } from './agent-employee-settings'
 
@@ -56,5 +57,33 @@ describe('agent employee settings model', () => {
       cliProfiles: 2,
       total: 8,
     })
+  })
+
+  it('builds a safe patch from an already configured model profile', () => {
+    expect(
+      buildAgentModelSelectionPatch({
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        baseUrl: 'https://api.deepseek.com',
+        supportsVision: false,
+      }),
+    ).toEqual({
+      adapterName: 'custom',
+      modelProvider: 'deepseek',
+      modelId: 'deepseek-chat',
+      apiBaseUrl: 'https://api.deepseek.com',
+      supportsVision: false,
+    })
+  })
+
+  it('does not let unsupported model backends leak into employee settings', () => {
+    expect(
+      buildAgentModelSelectionPatch({
+        provider: 'ollama',
+        model: 'local-model',
+        baseUrl: 'http://localhost:11434',
+        supportsVision: false,
+      }),
+    ).toBeNull()
   })
 })

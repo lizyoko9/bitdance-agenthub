@@ -15,8 +15,8 @@ import {
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
+import { AgentEmployeeSettingsPanel } from '@/components/agent-employee-settings-panel'
 import { CreateAgentDialog } from '@/components/create-agent-dialog'
-import { EmployeeAgentFactory } from '@/components/employee-agent-factory'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -183,15 +183,10 @@ export function AgentLibrary({
           </div>
           {advancedSettingsOpen ? (
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-              <EmployeeAgentFactory
-                embedded
-                initialTab="agent"
-                initialFocusSection={focusCapabilitiesOnSettingsOpen ? 'capabilities' : undefined}
-                initialAgentProfileId={settingsAgent.id}
-                initialAgentName={settingsAgent.name}
-                initialAgentDescription={settingsAgent.description}
-                title={`${settingsAgent.name} 的完整配置`}
-                subtitle="模型、技能、CLI、MCP、记忆、权限和交付物都集中在当前智能体里。"
+              <AgentEmployeeSettingsPanel
+                agent={settingsAgent}
+                onEditBasic={() => openEdit(settingsAgent)}
+                focusCapabilities={focusCapabilitiesOnSettingsOpen}
               />
             </div>
           ) : (
@@ -326,7 +321,7 @@ function AgentSettingsOverview({
           </Button>
           <Button size="sm" onClick={onToggleAdvanced} className="gap-1.5">
             <Settings2 className="size-3.5" />
-            {advancedOpen ? '收起完整配置' : '打开完整配置'}
+            {advancedOpen ? '收起员工设置' : '打开员工设置'}
           </Button>
         </div>
       </div>
