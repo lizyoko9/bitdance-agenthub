@@ -31,4 +31,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('onDrop={handleCanvasDrop}')
     expect(source).toContain('draggable')
   })
+
+  it('lets the node inspector add and remove input/output artifact ports', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+
+    expect(source).toContain('addPortToNode')
+    expect(source).toContain('removePortFromNode')
+    expect(source).toContain("onAddPort={() => addPortToNode(node.id, 'inputs')}")
+    expect(source).toContain("onAddPort={() => addPortToNode(node.id, 'outputs')}")
+    expect(source).toContain("removePortFromNode(node.id, 'inputs', portId)")
+    expect(source).toContain("removePortFromNode(node.id, 'outputs', portId)")
+    expect(source).toContain('新增输入')
+    expect(source).toContain('新增输出')
+  })
 })

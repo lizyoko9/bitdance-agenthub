@@ -234,6 +234,48 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     )
   }
 
+  const addPortToNode = useCallback((nodeId: string, direction: 'inputs' | 'outputs') => {
+    const type: ArtifactType = direction === 'inputs' ? 'any' : 'document'
+    const port: AgentFlowPort = {
+      id: `${direction}-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      label: direction === 'inputs' ? '新输入' : artifactLabels[type],
+      type,
+    }
+
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, [direction]: [...node.data[direction], port] } }
+          : node,
+      ),
+    )
+  }, [setNodes])
+
+  const removePortFromNode = useCallback((nodeId: string, direction: 'inputs' | 'outputs', portId: string) => {
+    const removedHandle = direction === 'inputs' ? `in:${portId}` : `out:${portId}`
+
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                [direction]: node.data[direction].filter((port) => port.id !== portId),
+              },
+            }
+          : node,
+      ),
+    )
+    setEdges((current) =>
+      current.filter((edge) =>
+        direction === 'inputs'
+          ? !(edge.target === nodeId && edge.targetHandle === removedHandle)
+          : !(edge.source === nodeId && edge.sourceHandle === removedHandle),
+      ),
+    )
+  }, [setEdges, setNodes])
+
   const deleteNodeById = useCallback((nodeId: string) => {
     setNodes((current) => current.filter((node) => node.id !== nodeId))
     setEdges((current) =>
@@ -400,6 +442,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               softwareCommands={softwareCommands}
               onUpdateNode={updateNode}
               onDeleteNode={deleteSelectedNode}
+              addPortToNode={addPortToNode}
+              removePortFromNode={removePortFromNode}
             />
           </div>
         </div>
@@ -496,12 +540,16 @@ function NodeConfigPanel({
   softwareCommands,
   onUpdateNode,
   onDeleteNode,
+  addPortToNode,
+  removePortFromNode,
 }: {
   node: AgentFlowNode | null
   agents: AgentProfileRow[]
   softwareCommands: SoftwareCommandRow[]
   onUpdateNode: (nodeId: string, patch: Partial<AgentFlowNodeData>) => void
   onDeleteNode: () => void
+  addPortToNode: (nodeId: string, direction: 'inputs' | 'outputs') => void
+  removePortFromNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string) => void
 }) {
   if (!node) {
     return (
@@ -597,11 +645,25 @@ function NodeConfigPanel({
         )}
 
         <PanelBlock title="输入端口">
-          <PortEditor ports={node.data.inputs} direction="inputs" onTypeChange={updatePortType} />
+          <PortEditor
+            ports={node.data.inputs}
+            direction="inputs"
+            addLabel="新增输入"
+            onTypeChange={updatePortType}
+            onAddPort={() => addPortToNode(node.id, 'inputs')}
+            onRemovePort={(portId) => removePortFromNode(node.id, 'inputs', portId)}
+          />
         </PanelBlock>
 
         <PanelBlock title="输出端口">
-          <PortEditor ports={node.data.outputs} direction="outputs" onTypeChange={updatePortType} />
+          <PortEditor
+            ports={node.data.outputs}
+            direction="outputs"
+            addLabel="新增输出"
+            onTypeChange={updatePortType}
+            onAddPort={() => addPortToNode(node.id, 'outputs')}
+            onRemovePort={(portId) => removePortFromNode(node.id, 'outputs', portId)}
+          />
           <div className="mt-2 text-[11px] leading-4 text-muted-foreground">
             从某个输出端口拉线，下游只收到这个端口代表的产物。
           </div>
@@ -625,17 +687,23 @@ function NodeConfigPanel({
 function PortEditor({
   ports,
   direction,
+  addLabel,
   onTypeChange,
+  onAddPort,
+  onRemovePort,
 }: {
   ports: AgentFlowPort[]
   direction: 'inputs' | 'outputs'
+  addLabel: string
   onTypeChange: (portId: string, direction: 'inputs' | 'outputs', type: ArtifactType) => void
+  onAddPort: () => void
+  onRemovePort: (portId: string) => void
 }) {
-  if (ports.length === 0) return <div className="text-xs text-muted-foreground">这个节点没有端口。</div>
   return (
     <div className="space-y-2">
+      {ports.length === 0 && <div className="text-xs text-muted-foreground">这个节点没有端口。</div>}
       {ports.map((port) => (
-        <div key={port.id} className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2">
+        <div key={port.id} className="grid grid-cols-[minmax(0,1fr)_6.5rem_2rem] gap-2">
           <div className="truncate rounded-md border bg-background px-2 py-1.5 text-xs">{port.label}</div>
           <select
             className="rounded-md border bg-background px-2 text-xs"
@@ -648,8 +716,21 @@ function PortEditor({
               </option>
             ))}
           </select>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 px-0 text-xs"
+            onClick={() => onRemovePort(port.id)}
+          >
+            ×
+          </Button>
         </div>
       ))}
+      <Button type="button" size="sm" variant="outline" className="h-8 w-full gap-1 text-xs" onClick={onAddPort}>
+        <Plus className="size-3" />
+        {addLabel}
+      </Button>
     </div>
   )
 }
@@ -771,7 +852,7 @@ function defaultDescription(kind: AgentFlowNodeKind) {
 }
 
 function inputHandleId(port: AgentFlowPort) {
-  return `in:${port.type}`
+  return `in:${port.id}`
 }
 
 function outputHandleId(port: AgentFlowPort) {
