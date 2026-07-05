@@ -748,6 +748,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     )
   }, [edges, executionPlan, handoffSteps.length, nodes, workflowDraftId, workflowTitle])
 
+  const saveWorkflowDraftToLibrary = useCallback((draft: CanvasDraft) => {
+    window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
+    const nextLibrary = upsertCanvasDraft(loadCanvasDraftLibrary(), draft)
+    saveCanvasDraftLibrary(nextLibrary)
+    setSavedDrafts(nextLibrary)
+    return nextLibrary
+  }, [])
+
   const saveCanvasDraft = useCallback(() => {
     const title = workflowTitle.trim() || '未命名流程'
     const draftId = workflowDraftId || createCanvasDraftId()
@@ -762,16 +770,13 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       handoffSteps,
     }
 
-    window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
-    const nextLibrary = upsertCanvasDraft(loadCanvasDraftLibrary(), draft)
-    saveCanvasDraftLibrary(nextLibrary)
-    setSavedDrafts(nextLibrary)
+    saveWorkflowDraftToLibrary(draft)
     setWorkflowDraftId(draftId)
     setWorkflowTitle(title)
     setNotice(`流程已保存：${title}，${nodes.length} 个节点、${edges.length} 条连线。`)
-  }, [edges, handoffSteps, initialWorkflowId, nodes, workflowDraftId, workflowTitle])
+  }, [edges, handoffSteps, initialWorkflowId, nodes, saveWorkflowDraftToLibrary, workflowDraftId, workflowTitle])
 
-  const loadSavedCanvasDraft = useCallback((draftId: string) => {
+  const openSavedCanvasDraft = useCallback((draftId: string) => {
     const draft = savedDrafts.find((item) => item.workflowDraftId === draftId)
     if (!draft) return
     applyCanvasDraft(draft)
@@ -805,8 +810,9 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setPreflightIssues([])
     setLastRun(null)
     window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
+    saveWorkflowDraftToLibrary(draft)
     setNotice(`已载入流程模板：${draft.title}。你可以直接修改节点、连线和交付物。`)
-  }, [initialWorkflowId, setEdges, setNodes])
+  }, [initialWorkflowId, saveWorkflowDraftToLibrary, setEdges, setNodes])
 
   return (
     <div className="flex h-full min-h-[720px] flex-col bg-background" data-testid="langflow-agent-canvas">
@@ -834,7 +840,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             className="h-9 w-44 rounded-md border bg-background px-2 text-sm"
             aria-label="打开已保存流程"
             value={savedDrafts.some((draft) => draft.workflowDraftId === workflowDraftId) ? workflowDraftId : ''}
-            onChange={(event) => loadSavedCanvasDraft(event.target.value)}
+            onChange={(event) => openSavedCanvasDraft(event.target.value)}
           >
             <option value="">打开已保存流程</option>
             {savedDrafts.map((draft) => (
@@ -914,6 +920,37 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               <div className="mt-0.5 text-xs text-muted-foreground">先选组件，再拖拽组合流程。</div>
             </div>
             <Badge variant="outline">{agentFlowNodeTemplates.length} 类</Badge>
+          </div>
+          <div className="mb-3 rounded-lg border bg-background p-2" data-testid="canvas-saved-workflows">
+            <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">
+              <span>保存的流程</span>
+              <span>{savedDrafts.length} 个</span>
+            </div>
+            {savedDrafts.length === 0 ? (
+              <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
+                保存或套用模板后，流程会出现在这里。
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {savedDrafts.slice(0, 5).map((draft) => (
+                  <button
+                    key={draft.workflowDraftId ?? draft.savedAt}
+                    type="button"
+                    data-testid="canvas-saved-workflow-card"
+                    className={cn(
+                      'w-full rounded-md border bg-background px-2.5 py-2 text-left transition hover:border-primary hover:bg-primary/5',
+                      draft.workflowDraftId === workflowDraftId && 'border-primary bg-primary/5',
+                    )}
+                    onClick={() => draft.workflowDraftId && openSavedCanvasDraft(draft.workflowDraftId)}
+                  >
+                    <span className="block truncate text-xs font-semibold">{draft.title ?? '未命名流程'}</span>
+                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                      {draft.nodes.length} 节点 / {draft.edges.length} 连线
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="mb-3 rounded-lg border bg-muted/30 p-2" data-testid="canvas-workflow-presets">
             <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">

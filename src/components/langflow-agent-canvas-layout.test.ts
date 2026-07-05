@@ -121,6 +121,18 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('report-delivery')
   })
 
+  it('keeps saved workflows inside the canvas module instead of a separate confusing page', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="canvas-saved-workflows"')
+    expect(source).toContain('data-testid="canvas-saved-workflow-card"')
+    expect(source).toContain('保存的流程')
+    expect(source).toContain('openSavedCanvasDraft')
+    expect(source).toContain('saveWorkflowDraftToLibrary')
+    expect(source).toContain('applyWorkflowPreset')
+    expect(source).toContain('setSavedDrafts(nextLibrary)')
+  })
+
   it('filters palette components while a typed output connection is active', () => {
     const source = readCanvasSource()
 
@@ -283,7 +295,7 @@ describe('Langflow agent canvas layout', () => {
 
     expect(source).toContain('loadCanvasDraft')
     expect(source).toContain('loadCanvasDraftLibrary')
-    expect(source).toContain('loadSavedCanvasDraft')
+    expect(source).toContain('openSavedCanvasDraft')
     expect(source).toContain("draft?.schema !== 'agenthub.langflow_agent_canvas.v1'")
     expect(source).toContain('setNodes(cloneCanvasNodes(draft.nodes))')
     expect(source).toContain('setEdges(cloneCanvasEdges(draft.edges))')
