@@ -759,6 +759,16 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   }, [selectEdgeById])
 
   useEffect(() => {
+    const handleEdgeDelete = (event: Event) => {
+      const edgeId = (event as CustomEvent<{ edgeId?: string }>).detail?.edgeId
+      if (edgeId) deleteEdgeById(edgeId)
+    }
+
+    window.addEventListener('agenthub:canvas-edge-delete', handleEdgeDelete)
+    return () => window.removeEventListener('agenthub:canvas-edge-delete', handleEdgeDelete)
+  }, [deleteEdgeById])
+
+  useEffect(() => {
     const handleNodeDelete = (event: Event) => {
       const nodeId = (event as CustomEvent<{ nodeId?: string }>).detail?.nodeId
       if (nodeId) deleteNodeById(nodeId)
@@ -1485,6 +1495,11 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
     event.stopPropagation()
     window.dispatchEvent(new CustomEvent('agenthub:canvas-edge-select', { detail: { edgeId: id } }))
   }
+  const deleteThisEdge = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    window.dispatchEvent(new CustomEvent('agenthub:canvas-edge-delete', { detail: { edgeId: id } }))
+  }
 
   return (
     <g data-testid="langflow-agent-edge" data-edge-artifact-type={type} onPointerDown={selectThisEdge}>
@@ -1502,10 +1517,29 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
         markerEnd={markerEnd}
         style={{ stroke: artifactColors[type], strokeWidth: selected ? 4 : 2.4 }}
       />
-      <foreignObject x={labelX - 38} y={labelY - 12} width={76} height={24}>
-        <div className="rounded-full border bg-background px-2 py-1 text-center text-[10px] shadow-sm">
-          {artifactLabels[type]}
-        </div>
+      <foreignObject x={labelX - (selected ? 64 : 38)} y={labelY - 14} width={selected ? 128 : 76} height={28}>
+        {selected && (
+          <div
+            className="flex h-7 items-center justify-center gap-1 rounded-full border bg-background px-2 text-[10px] shadow-sm"
+            data-testid="edge-inline-toolbar"
+          >
+            <span className="min-w-0 truncate">{artifactLabels[type]}</span>
+            <button
+              type="button"
+              className="inline-flex size-5 items-center justify-center rounded-full text-destructive transition hover:bg-destructive/10"
+              data-testid="edge-toolbar-delete"
+              aria-label="删除连线"
+              onPointerDownCapture={deleteThisEdge}
+            >
+              <Trash2 className="size-3" />
+            </button>
+          </div>
+        )}
+        {!selected && (
+          <div className="rounded-full border bg-background px-2 py-1 text-center text-[10px] shadow-sm">
+            {artifactLabels[type]}
+          </div>
+        )}
       </foreignObject>
     </g>
   )

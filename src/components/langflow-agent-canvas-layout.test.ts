@@ -162,6 +162,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('onPaneClick={() =>')
   })
 
+  it('shows an inline delete action on the selected edge like a visual flow editor', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="edge-inline-toolbar"')
+    expect(source).toContain('data-testid="edge-toolbar-delete"')
+    expect(source).toContain('agenthub:canvas-edge-delete')
+    expect(source).toContain('handleEdgeDelete')
+    expect(source).toContain('deleteEdgeById(edgeId)')
+    expect(source).toContain('selected &&')
+  })
+
   it('supports dragging palette components onto the canvas at the drop position', () => {
     const source = readCanvasSource()
 
