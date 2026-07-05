@@ -8,6 +8,7 @@ export type AgentFlowRunIssueCode =
   | 'source_port_missing'
   | 'target_port_missing'
   | 'port_type_mismatch'
+  | 'agent_profile_missing'
   | 'software_command_missing'
   | 'node_disconnected'
 
@@ -68,6 +69,15 @@ export function validateAgentFlowForRun(args: {
   }
 
   for (const node of args.nodes) {
+    if (node.data.kind === 'agent' && !node.data.agentId) {
+      issues.push({
+        code: 'agent_profile_missing',
+        severity: 'error',
+        nodeId: node.id,
+        message: `${nodeTitle(node)} 还没有选择智能体员工。`,
+      })
+    }
+
     if (node.data.kind === 'tool' && !node.data.softwareCommandId) {
       issues.push({
         code: 'software_command_missing',

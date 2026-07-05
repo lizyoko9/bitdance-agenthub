@@ -47,6 +47,28 @@ describe('validateAgentFlowForRun', () => {
     expect(result.issues.map((issue) => issue.code)).toContain('software_command_missing')
   })
 
+  it('blocks agent nodes that have not selected an employee profile', () => {
+    const result = validateAgentFlowForRun({
+      nodes: [
+        node('input-1', 'input', { outputs: [{ id: 'message', type: 'message' }] }),
+        node('agent-1', 'agent', { inputs: [{ id: 'message', type: 'message' }], outputs: [{ id: 'report', type: 'report' }] }),
+      ],
+      edges: [
+        {
+          id: 'edge-1',
+          source: 'input-1',
+          target: 'agent-1',
+          sourceHandle: 'out:message',
+          targetHandle: 'in:message',
+          data: { artifactType: 'message' },
+        },
+      ],
+    })
+
+    expect(result.ready).toBe(false)
+    expect(result.issues.map((issue) => issue.code)).toContain('agent_profile_missing')
+  })
+
   it('blocks edges that point at missing ports or incompatible artifact types', () => {
     const result = validateAgentFlowForRun({
       nodes: [
@@ -82,9 +104,13 @@ describe('validateAgentFlowForRun', () => {
   it('accepts a typed handoff and reports disconnected nodes as warnings only', () => {
     const result = validateAgentFlowForRun({
       nodes: [
-        node('agent-1', 'agent', { outputs: [{ id: 'video', type: 'video' }] }),
+        node('agent-1', 'agent', { agentId: 'agent-profile-1', outputs: [{ id: 'video', type: 'video' }] }),
         node('artifact-1', 'artifact', { inputs: [{ id: 'video', type: 'video' }] }),
-        node('agent-2', 'agent', { inputs: [{ id: 'message', type: 'message' }], outputs: [{ id: 'report', type: 'report' }] }),
+        node('agent-2', 'agent', {
+          agentId: 'agent-profile-2',
+          inputs: [{ id: 'message', type: 'message' }],
+          outputs: [{ id: 'report', type: 'report' }],
+        }),
       ],
       edges: [
         {
