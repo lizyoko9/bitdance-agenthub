@@ -146,6 +146,15 @@ interface HandoffStep {
   handoffContract: string
 }
 
+interface CustomerDeliverySummary {
+  id: string
+  title: string
+  description: string
+  artifactType: ArtifactType | null
+  sourceTitle: string
+  handoffContract: string
+}
+
 interface CanvasDraft {
   schema: 'agenthub.langflow_agent_canvas.v1'
   workflowDraftId?: string
@@ -1520,6 +1529,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                 )}
                 <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
                 <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
+                <CustomerDeliveryPreviewPanel nodes={nodes} edges={edges} />
               </>
             )}
           </div>
@@ -2589,6 +2599,56 @@ function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible
   )
 }
 
+function CustomerDeliveryPreviewPanel({
+  nodes,
+  edges,
+}: {
+  nodes: AgentFlowNode[]
+  edges: AgentFlowEdge[]
+}) {
+  const deliveries = buildCustomerDeliverySummaries(nodes, edges)
+
+  return (
+    <section
+      className="rounded-xl border bg-background p-3"
+      data-testid="customer-delivery-preview-panel"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <CheckCircle2 className="size-4 text-emerald-500" />
+          客户最终看到
+        </div>
+        <Badge variant="outline">{deliveries.length} 个</Badge>
+      </div>
+      {deliveries.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+          还没有客户可见交付节点。选中最终产物节点后，打开“这个节点产物客户可见”。
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {deliveries.map((delivery) => (
+            <article
+              key={delivery.id}
+              className="rounded-lg border bg-muted/20 p-2 text-xs"
+              data-testid="customer-delivery-card"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 truncate font-semibold">{delivery.title}</div>
+                {delivery.artifactType ? <ArtifactPill type={delivery.artifactType} /> : <Badge variant="outline">待定</Badge>}
+              </div>
+              <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{delivery.description}</div>
+              <div className="mt-2 rounded-md border bg-background px-2 py-1.5 text-[11px] text-muted-foreground">
+                {delivery.handoffContract}
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">来源：{delivery.sourceTitle}</div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function ActiveConnectionBanner({
   activeConnectionType,
   sourceNodeTitle,
@@ -2882,6 +2942,30 @@ function buildOutgoingHandoffsForNode(
       targetPortLabel: edge.data?.targetPortLabel ?? artifactLabels[artifactType],
     }]
   })
+}
+
+function buildCustomerDeliverySummaries(
+  nodes: AgentFlowNode[],
+  edges: AgentFlowEdge[],
+): CustomerDeliverySummary[] {
+  return nodes
+    .filter((node) => node.data.customerVisible)
+    .map((node) => {
+      const incomingHandoffs = buildIncomingHandoffsForNode(node.id, nodes, edges)
+      const primaryHandoff = incomingHandoffs[0]
+      const fallbackType = node.data.inputs[0]?.type ?? node.data.outputs[0]?.type ?? null
+
+      return {
+        id: node.id,
+        title: node.data.title,
+        description: node.data.description,
+        artifactType: primaryHandoff?.artifactType ?? fallbackType,
+        sourceTitle: primaryHandoff?.sourceTitle ?? '等待上游交付',
+        handoffContract: primaryHandoff
+          ? `${primaryHandoff.artifactLabel}: ${primaryHandoff.sourcePortLabel} -> ${primaryHandoff.targetPortLabel}`
+          : '等待上游交付',
+      }
+    })
 }
 
 function createCanvasWorkflowPresetDraft(

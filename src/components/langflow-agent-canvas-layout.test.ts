@@ -604,6 +604,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="handoff-artifact-contract"')
   })
 
+  it('summarizes customer visible deliverables separately from raw handoff chains', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('CustomerDeliveryPreviewPanel')
+    expect(source).toContain('<CustomerDeliveryPreviewPanel nodes={nodes} edges={edges} />')
+    expect(source).toContain('buildCustomerDeliverySummaries')
+    expect(source).toContain('node.data.customerVisible')
+    expect(source).toContain('data-testid="customer-delivery-preview-panel"')
+    expect(source).toContain('data-testid="customer-delivery-card"')
+    expect(source).toContain('客户最终看到')
+    expect(source).toContain('等待上游交付')
+  })
+
   it('lets users click a preflight issue to select the broken node', () => {
     const source = readCanvasSource()
 
