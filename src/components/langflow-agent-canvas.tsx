@@ -25,16 +25,13 @@ import {
   Bot,
   CheckCircle2,
   ClipboardCheck,
-  FileText,
   GitBranch,
-  Package,
   Play,
   Plus,
   RefreshCw,
   Save,
   Settings2,
   Sparkles,
-  UserCheck,
   Wrench,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
@@ -45,16 +42,21 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
+import {
+  agentFlowNodeTemplates,
+  cloneTemplatePorts,
+  getAgentFlowNodeTemplate,
+  type AgentFlowNodeKind,
+  type AgentFlowTemplatePortKind,
+} from '@/lib/agent-flow-node-templates'
 import { fetchAgentProfiles, fetchSoftwareCommands } from '@/lib/api'
 import {
   LANGFLOW_PORT_KIND_LABELS,
   canConnectPortKinds,
-  type LangflowPortKind,
 } from '@/lib/langflow-port-contracts'
 import { cn } from '@/lib/utils'
 
-type AgentFlowNodeKind = 'input' | 'agent' | 'tool' | 'approval' | 'artifact'
-type ArtifactType = LangflowPortKind | 'any'
+type ArtifactType = AgentFlowTemplatePortKind
 
 interface AgentFlowPort {
   id: string
@@ -109,6 +111,7 @@ interface EdgeRoute {
 }
 
 const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
+const NODE_TEMPLATE_MIME = 'application/agenthub-node-template'
 
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
 
@@ -140,61 +143,15 @@ const nodeKindLabels: Record<AgentFlowNodeKind, string> = {
   artifact: '交付产物',
 }
 
-const palette: Array<{
-  kind: AgentFlowNodeKind
-  title: string
-  description: string
-  icon: ReactNode
-}> = [
-  {
-    kind: 'input',
-    title: '客户输入',
-    description: '任务目标、文件、消息或素材入口',
-    icon: <FileText className="size-4" />,
-  },
-  {
-    kind: 'agent',
-    title: '员工 Agent',
-    description: '选择一个已配置智能体执行任务',
-    icon: <Bot className="size-4" />,
-  },
-  {
-    kind: 'tool',
-    title: '工具 / 软件',
-    description: '调用 CLI、MCP 或软件命令',
-    icon: <Wrench className="size-4" />,
-  },
-  {
-    kind: 'approval',
-    title: '人工确认',
-    description: '高风险步骤进入确认节点',
-    icon: <UserCheck className="size-4" />,
-  },
-  {
-    kind: 'artifact',
-    title: '交付产物',
-    description: '客户最终能看到的文件或结果',
-    icon: <Package className="size-4" />,
-  },
-]
-
 const initialNodes: AgentFlowNode[] = [
-  createFlowNode('input', { x: 40, y: 120 }, '客户需求', {
+  createNodeFromTemplate('customer-request', { x: 40, y: 120 }, {
     description: '收集客户目标、文件和约束。',
-    outputs: [{ id: 'message', label: '客户消息', type: 'message' }],
   }, 'input-1'),
-  createFlowNode('agent', { x: 420, y: 120 }, '员工 Agent', {
+  createNodeFromTemplate('employee-agent', { x: 420, y: 120 }, {
     description: '根据目标完成分析、执行和验证。',
-    inputs: [{ id: 'message', label: '客户消息', type: 'message' }],
-    outputs: [
-      { id: 'report', label: '报告', type: 'report' },
-      { id: 'code', label: '代码', type: 'code' },
-    ],
   }, 'agent-2'),
-  createFlowNode('artifact', { x: 820, y: 120 }, '客户交付物', {
+  createNodeFromTemplate('customer-deliverable', { x: 820, y: 120 }, {
     description: '只接收上一节点连过来的指定产物。',
-    inputs: [{ id: 'report', label: '报告', type: 'report' }],
-    outputs: [],
     customerVisible: true,
   }, 'artifact-3'),
 ]
@@ -270,15 +227,19 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     [activeConnectionType, executionStages, nodes],
   )
 
-  const addNode = useCallback((kind: AgentFlowNodeKind, position?: { x: number; y: number }) => {
+  const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
     const nextIndex = nodes.length + 1
-    const node = createFlowNode(kind, position ?? { x: 160 + nextIndex * 54, y: 120 + nextIndex * 28 })
+    if (!getAgentFlowNodeTemplate(templateId)) {
+      setNotice('没有找到这个节点模板，先换一个模板试试。')
+      return
+    }
+    const node = createNodeFromTemplate(templateId, position ?? { x: 160 + nextIndex * 54, y: 120 + nextIndex * 28 })
     setNodes((current) => [...current, node])
     setSelectedNodeId(node.id)
   }, [nodes.length, setNodes])
 
-  const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, kind: AgentFlowNodeKind) => {
-    event.dataTransfer.setData('application/agenthub-node-kind', kind)
+  const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, templateId: string) => {
+    event.dataTransfer.setData(NODE_TEMPLATE_MIME, templateId)
     event.dataTransfer.effectAllowed = 'move'
   }, [])
 
@@ -289,11 +250,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
   const handleCanvasDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
-    const kind = event.dataTransfer.getData('application/agenthub-node-kind')
-    if (!isAgentFlowNodeKind(kind)) return
+    const templateId = event.dataTransfer.getData(NODE_TEMPLATE_MIME)
+    if (!getAgentFlowNodeTemplate(templateId)) return
 
-    addNode(kind, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
-  }, [addNode, screenToFlowPosition])
+    addNodeFromTemplate(templateId, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+  }, [addNodeFromTemplate, screenToFlowPosition])
 
   const handleConnectStart = useCallback((_: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
     if (params.handleType !== 'source' || !params.nodeId || !params.handleId) {
@@ -617,27 +578,36 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               <div className="text-sm font-semibold">组件库</div>
               <div className="mt-0.5 text-xs text-muted-foreground">像 Langflow 一样先选节点再组合。</div>
             </div>
-            <Badge variant="outline">{palette.length} 类</Badge>
+            <Badge variant="outline">{agentFlowNodeTemplates.length} 类</Badge>
           </div>
           <div className="space-y-2">
-            {palette.map((item) => (
+            {agentFlowNodeTemplates.map((template) => (
               <button
-                key={item.kind}
+                key={template.id}
                 type="button"
                 draggable
                 className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary hover:bg-primary/5"
-                onClick={() => addNode(item.kind)}
-                onDragStart={(event) => handlePaletteDragStart(event, item.kind)}
+                data-template-id={template.id}
+                onClick={() => addNodeFromTemplate(template.id)}
+                onDragStart={(event) => handlePaletteDragStart(event, template.id)}
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  {item.icon}
+                  {nodeIcon(template.kind)}
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold">{item.title}</span>
-                  <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{item.description}</span>
-                  <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary">
+                  <span className="flex items-center gap-2">
+                    <span className="block truncate text-sm font-semibold">{template.title}</span>
+                    <Badge variant="secondary" className="shrink-0 text-[10px]">
+                      {template.category}
+                    </Badge>
+                  </span>
+                  <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{template.description}</span>
+                  <span className="mt-2 inline-flex flex-wrap items-center gap-1 text-xs font-medium text-primary">
                     <Plus className="size-3" />
                     添加节点
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {template.inputs.length} 入 / {template.outputs.length} 出
+                    </span>
                   </span>
                 </span>
               </button>
@@ -1139,27 +1109,29 @@ function nodeIcon(kind: AgentFlowNodeKind) {
   return <Sparkles className="size-4" />
 }
 
-function createFlowNode(
-  kind: AgentFlowNodeKind,
+function createNodeFromTemplate(
+  templateId: string,
   position: { x: number; y: number },
-  title = nodeKindLabels[kind],
   overrides: Partial<AgentFlowNodeData> = {},
   fixedId?: string,
 ): AgentFlowNode {
-  const id = fixedId ?? `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const template = getAgentFlowNodeTemplate(templateId)
+  if (!template) throw new Error(`Unknown Agent flow node template: ${templateId}`)
+
+  const id = fixedId ?? `${template.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
   return {
     id,
     type: 'agentFlowNode',
     position,
     data: {
-      kind,
-      title,
-      subtitle: nodeKindLabels[kind],
-      description: overrides.description ?? defaultDescription(kind),
+      kind: template.kind,
+      title: template.title,
+      subtitle: template.subtitle,
+      description: template.description,
       status: 'idle',
-      inputs: defaultInputs(kind),
-      outputs: defaultOutputs(kind),
-      customerVisible: kind === 'artifact',
+      inputs: cloneTemplatePorts(template.inputs),
+      outputs: cloneTemplatePorts(template.outputs),
+      customerVisible: Boolean(template.customerVisible),
       ...overrides,
     },
   }
@@ -1189,32 +1161,6 @@ function createFlowEdge(
       label: artifactLabels[artifactType],
     },
   }
-}
-
-function defaultInputs(kind: AgentFlowNodeKind): AgentFlowPort[] {
-  if (kind === 'input') return []
-  if (kind === 'artifact') return [{ id: 'report', label: '接收产物', type: 'report' }]
-  if (kind === 'approval') return [{ id: 'document', label: '待确认内容', type: 'document' }]
-  return [{ id: 'message', label: '上游输入', type: 'message' }]
-}
-
-function defaultOutputs(kind: AgentFlowNodeKind): AgentFlowPort[] {
-  if (kind === 'artifact') return []
-  if (kind === 'input') return [{ id: 'message', label: '客户消息', type: 'message' }]
-  if (kind === 'tool') return [{ id: 'file_bundle', label: '工具结果', type: 'file_bundle' }]
-  if (kind === 'approval') return [{ id: 'document', label: '确认结果', type: 'document' }]
-  return [{ id: 'report', label: '报告', type: 'report' }]
-}
-
-function defaultDescription(kind: AgentFlowNodeKind) {
-  const map: Record<AgentFlowNodeKind, string> = {
-    input: '接收用户目标、素材和上下文。',
-    agent: '调用一个员工级 Agent，完成规划、执行和验证。',
-    tool: '调用已经接入的 CLI、MCP 或桌面软件能力。',
-    approval: '在高风险动作前暂停，让用户确认是否继续。',
-    artifact: '汇总客户最终可以看到的交付产物。',
-  }
-  return map[kind]
 }
 
 function inputHandleId(port: AgentFlowPort) {
@@ -1346,10 +1292,6 @@ function canConnect(sourceType: ArtifactType, targetType: ArtifactType) {
 function isEditableElement(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
-}
-
-function isAgentFlowNodeKind(value: string): value is AgentFlowNodeKind {
-  return value === 'input' || value === 'agent' || value === 'tool' || value === 'approval' || value === 'artifact'
 }
 
 const nodeTypes = { agentFlowNode: AgentFlowNodeCard }

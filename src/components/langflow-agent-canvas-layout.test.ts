@@ -42,10 +42,20 @@ describe('Langflow agent canvas layout', () => {
     const source = readCanvasSource()
 
     expect(source).toContain('useReactFlow')
-    expect(source).toContain('application/agenthub-node-kind')
+    expect(source).toContain('application/agenthub-node-template')
     expect(source).toContain('screenToFlowPosition')
     expect(source).toContain('onDrop={handleCanvasDrop}')
     expect(source).toContain('draggable')
+  })
+
+  it('uses reusable business node templates instead of raw abstract node kinds', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('agentFlowNodeTemplates')
+    expect(source).toContain('createNodeFromTemplate')
+    expect(source).toContain('getAgentFlowNodeTemplate')
+    expect(source).toContain('templateId')
+    expect(source).toContain('template.outputs')
   })
 
   it('lets the node inspector add and remove input/output artifact ports', () => {
@@ -76,7 +86,8 @@ describe('Langflow agent canvas layout', () => {
 
     expect(source).toContain('LANGFLOW_PORT_KIND_LABELS')
     expect(source).toContain('canConnectPortKinds')
-    expect(source).toContain("type ArtifactType = LangflowPortKind | 'any'")
+    expect(source).toContain('type AgentFlowTemplatePortKind')
+    expect(source).toContain('type ArtifactType = AgentFlowTemplatePortKind')
   })
 
   it('previews the artifact handoff chain before running a workflow', () => {
