@@ -71,6 +71,7 @@ interface AgentFlowNodeData extends Record<string, unknown> {
   inputs: AgentFlowPort[]
   outputs: AgentFlowPort[]
   customerVisible?: boolean
+  executionStage?: number
 }
 
 type AgentFlowNode = Node<AgentFlowNodeData>
@@ -250,6 +251,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) ?? null
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
   const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
+  const executionStages = useMemo(() => buildExecutionStages(nodes, edges), [edges, nodes])
+  const nodesForCanvas = useMemo(
+    () => nodes.map((node) => ({ ...node, data: { ...node.data, executionStage: executionStages.get(node.id) } })),
+    [executionStages, nodes],
+  )
 
   const addNode = useCallback((kind: AgentFlowNodeKind, position?: { x: number; y: number }) => {
     const nextIndex = nodes.length + 1
@@ -539,7 +545,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
       <main className="relative min-h-0 flex-1">
         <ReactFlow<AgentFlowNode, AgentFlowEdge>
-          nodes={nodes}
+          nodes={nodesForCanvas}
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
@@ -658,7 +664,14 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
             </div>
           </div>
         </div>
-        <StatusBadge status={data.status} />
+        <div className="flex shrink-0 items-center gap-1">
+          {data.executionStage && (
+            <Badge variant="outline" className="text-[10px]">
+              第 {data.executionStage} 步
+            </Badge>
+          )}
+          <StatusBadge status={data.status} />
+        </div>
       </div>
 
       <div className="px-3 py-2">
@@ -1178,6 +1191,43 @@ function buildHandoffSteps(nodes: AgentFlowNode[], edges: AgentFlowEdge[]): Hand
       artifactLabel: artifactLabels[artifactType],
     }]
   })
+}
+
+function buildExecutionStages(nodes: AgentFlowNode[], edges: AgentFlowEdge[]) {
+  const incomingCount = new Map(nodes.map((node) => [node.id, 0]))
+  const remainingIncoming = new Map(incomingCount)
+  const outgoing = new Map<string, string[]>()
+  const stages = new Map<string, number>()
+
+  for (const edge of edges) {
+    if (!incomingCount.has(edge.source) || !incomingCount.has(edge.target)) continue
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1)
+    remainingIncoming.set(edge.target, (remainingIncoming.get(edge.target) ?? 0) + 1)
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target])
+  }
+
+  const queue = nodes
+    .filter((node) => (incomingCount.get(node.id) ?? 0) === 0)
+    .sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y)
+    .map((node) => node.id)
+
+  for (const nodeId of queue) stages.set(nodeId, 1)
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const sourceId = queue[index]
+    const sourceStage = stages.get(sourceId) ?? 1
+    for (const targetId of outgoing.get(sourceId) ?? []) {
+      stages.set(targetId, Math.max(stages.get(targetId) ?? 1, sourceStage + 1))
+      remainingIncoming.set(targetId, Math.max((remainingIncoming.get(targetId) ?? 1) - 1, 0))
+      if (remainingIncoming.get(targetId) === 0) queue.push(targetId)
+    }
+  }
+
+  for (const node of nodes) {
+    if (!stages.has(node.id)) stages.set(node.id, 1)
+  }
+
+  return stages
 }
 
 function describeEdgeRoute(edge: AgentFlowEdge, nodes: AgentFlowNode[]): EdgeRoute | null {

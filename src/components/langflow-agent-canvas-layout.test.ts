@@ -119,4 +119,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('sourceHandle')
     expect(source).toContain('targetHandle')
   })
+
+  it('shows computed execution stages on canvas nodes', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('buildExecutionStages')
+    expect(source).toContain('const executionStages = useMemo')
+    expect(source).toContain('const nodesForCanvas = useMemo')
+    expect(source).toContain('nodes={nodesForCanvas}')
+    expect(source).toContain('executionStage?: number')
+    expect(source).toContain('第 {data.executionStage} 步')
+  })
 })
