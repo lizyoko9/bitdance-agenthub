@@ -418,6 +418,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('describeNodeExecutor')
   })
 
+  it('shows clickable delivery outlets in the node inspector before advanced port settings', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodeDeliveryOutletPanel')
+    expect(source).toContain('data-testid="node-delivery-outlets"')
+    expect(source).toContain('data-testid="node-delivery-output-button"')
+    expect(source).toContain('onStartOutputConnection')
+    expect(source).toContain('onStartOutputConnection(node.id, output.type, output.id)')
+    expect(source.indexOf('NodeDeliveryOutletPanel')).toBeLessThan(source.indexOf('data-testid="advanced-port-settings"'))
+  })
+
   it('shows a plain-language setup guide before advanced node settings', () => {
     const source = readCanvasSource()
 

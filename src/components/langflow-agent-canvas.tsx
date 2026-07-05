@@ -421,6 +421,22 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     restoreCanvasHistorySnapshot(next)
     setNotice('已重做画布编辑。')
   }, [buildCurrentHistorySnapshot, redoStack, restoreCanvasHistorySnapshot])
+  const startOutputConnection = useCallback((nodeId: string, type: ArtifactType, outputId: string) => {
+    const node = nodes.find((item) => item.id === nodeId)
+    const output = node?.data.outputs.find((item) => item.id === outputId)
+    if (!node || !output) return
+
+    setSelectedNodeId(node.id)
+    setSelectedEdgeId('')
+    setActiveConnectionType(type)
+    setActiveOutputPort({ nodeId: node.id, outputId, type })
+    setPaletteCollapsed(false)
+    setActiveTemplateCategory('全部')
+    setTemplateSearchQuery('')
+    setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })))
+    setEdges((current) => current.map((item) => ({ ...item, selected: false })))
+    setNotice(`正在交付 ${output.label}，请选择下游节点或从左侧添加兼容节点。`)
+  }, [nodes, setEdges, setNodes])
   const nodesForCanvas = useMemo(
     () => nodes.map((node) => ({
       ...node,
@@ -430,15 +446,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         activeOutputPortId: activeOutputPort?.nodeId === node.id ? activeOutputPort.outputId : undefined,
         executionStage: executionStages.get(node.id),
         onOutputConnectStart: (type: ArtifactType, outputId: string) => {
-          setSelectedNodeId(node.id)
-          setSelectedEdgeId('')
-          setActiveConnectionType(type)
-          setActiveOutputPort({ nodeId: node.id, outputId, type })
-          setPaletteCollapsed(false)
-          setActiveTemplateCategory('全部')
-          setTemplateSearchQuery('')
-          setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })))
-          setEdges((current) => current.map((item) => ({ ...item, selected: false })))
+          startOutputConnection(node.id, type, outputId)
         },
         onInputConnectComplete: (targetNodeId: string, targetInputId: string) => {
           if (!activeOutputPort) return
@@ -482,7 +490,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         },
       },
     })),
-    [activeConnectionType, activeOutputPort, edges, executionStages, nodes, pushCanvasHistory, setEdges, setNodes],
+    [activeConnectionType, activeOutputPort, edges, executionStages, nodes, pushCanvasHistory, setEdges, startOutputConnection],
   )
 
   const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
@@ -1419,6 +1427,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                     changePortTypeForNode={changePortTypeForNode}
                     replaceNodePortsForAgent={replaceNodePortsForAgent}
                     replaceNodePortsForSoftwareCommand={replaceNodePortsForSoftwareCommand}
+                    onStartOutputConnection={startOutputConnection}
                   />
                 )}
                 <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
@@ -1737,6 +1746,7 @@ function NodeConfigPanel({
   changePortTypeForNode,
   replaceNodePortsForAgent,
   replaceNodePortsForSoftwareCommand,
+  onStartOutputConnection,
 }: {
   node: AgentFlowNode | null
   nodes: AgentFlowNode[]
@@ -1750,6 +1760,7 @@ function NodeConfigPanel({
   changePortTypeForNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string, nextType: ArtifactType) => void
   replaceNodePortsForAgent: (nodeId: string, agent: AgentProfileRow) => void
   replaceNodePortsForSoftwareCommand: (nodeId: string, command: SoftwareCommandRow) => void
+  onStartOutputConnection: (nodeId: string, type: ArtifactType, outputId: string) => void
 }) {
   if (!node) {
     return (
@@ -1844,6 +1855,7 @@ function NodeConfigPanel({
         )}
 
         <NodeBusinessSetup node={node} />
+        <NodeDeliveryOutletPanel node={node} onStartOutputConnection={onStartOutputConnection} />
         <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
         <NodeSetupGuide node={node} />
 
@@ -1926,6 +1938,46 @@ function NodeBusinessSetup({ node }: { node: AgentFlowNode }) {
             testId="node-business-outputs"
           />
         </div>
+      </div>
+    </PanelBlock>
+  )
+}
+
+function NodeDeliveryOutletPanel({
+  node,
+  onStartOutputConnection,
+}: {
+  node: AgentFlowNode
+  onStartOutputConnection: (nodeId: string, type: ArtifactType, outputId: string) => void
+}) {
+  return (
+    <PanelBlock title="交付出口">
+      <div data-testid="node-delivery-outlets" className="space-y-2">
+        <div className="text-xs leading-5 text-muted-foreground">
+          这里决定这个节点能把什么交给下游。点击一个产物后，再选择下游节点或从左侧添加兼容节点。
+        </div>
+        {node.data.outputs.length === 0 ? (
+          <div className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
+            这个节点暂时没有可交付产物。
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            {node.data.outputs.map((output) => (
+              <Button
+                key={output.id}
+                type="button"
+                variant="outline"
+                className="h-auto justify-start gap-2 px-2 py-2 text-left"
+                data-testid="node-delivery-output-button"
+                onClick={() => onStartOutputConnection(node.id, output.type, output.id)}
+              >
+                <ArtifactPill type={output.type} />
+                <span className="min-w-0 flex-1 truncate text-xs">{output.label}</span>
+                <span className="text-[11px] text-muted-foreground">连接</span>
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
     </PanelBlock>
   )
