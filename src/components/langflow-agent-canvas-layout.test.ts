@@ -21,4 +21,14 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('deleteNodeById(selectedNodeId)')
     expect(source).toContain('isEditableElement(event.target)')
   })
+
+  it('supports dragging palette components onto the canvas at the drop position', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+
+    expect(source).toContain('useReactFlow')
+    expect(source).toContain('application/agenthub-node-kind')
+    expect(source).toContain('screenToFlowPosition')
+    expect(source).toContain('onDrop={handleCanvasDrop}')
+    expect(source).toContain('draggable')
+  })
 })

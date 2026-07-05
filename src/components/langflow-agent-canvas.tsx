@@ -18,6 +18,7 @@ import {
   type NodeProps,
   useEdgesState,
   useNodesState,
+  useReactFlow,
 } from '@xyflow/react'
 import {
   Bot,
@@ -35,7 +36,7 @@ import {
   UserCheck,
   Wrench,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -179,6 +180,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [edges, setEdges, onEdgesChange] = useEdgesState<AgentFlowEdge>(initialEdges)
   const [selectedNodeId, setSelectedNodeId] = useState('agent-2')
   const [notice, setNotice] = useState<string | null>(null)
+  const { screenToFlowPosition } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
 
   useEffect(() => {
     let cancelled = false
@@ -199,12 +201,30 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
 
-  const addNode = (kind: AgentFlowNodeKind) => {
+  const addNode = useCallback((kind: AgentFlowNodeKind, position?: { x: number; y: number }) => {
     const nextIndex = nodes.length + 1
-    const node = createFlowNode(kind, { x: 160 + nextIndex * 54, y: 120 + nextIndex * 28 })
+    const node = createFlowNode(kind, position ?? { x: 160 + nextIndex * 54, y: 120 + nextIndex * 28 })
     setNodes((current) => [...current, node])
     setSelectedNodeId(node.id)
-  }
+  }, [nodes.length, setNodes])
+
+  const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, kind: AgentFlowNodeKind) => {
+    event.dataTransfer.setData('application/agenthub-node-kind', kind)
+    event.dataTransfer.effectAllowed = 'move'
+  }, [])
+
+  const handleCanvasDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const handleCanvasDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const kind = event.dataTransfer.getData('application/agenthub-node-kind')
+    if (!isAgentFlowNodeKind(kind)) return
+
+    addNode(kind, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+  }, [addNode, screenToFlowPosition])
 
   const updateNode = (nodeId: string, patch: Partial<AgentFlowNodeData>) => {
     setNodes((current) =>
@@ -322,6 +342,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onDragOver={handleCanvasDragOver}
+          onDrop={handleCanvasDrop}
           onNodeClick={(_, node) => setSelectedNodeId(node.id)}
           fitView
           fitViewOptions={{ padding: 0.2 }}
@@ -349,8 +371,10 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               <button
                 key={item.kind}
                 type="button"
+                draggable
                 className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary hover:bg-primary/5"
                 onClick={() => addNode(item.kind)}
+                onDragStart={(event) => handlePaletteDragStart(event, item.kind)}
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   {item.icon}
@@ -761,6 +785,10 @@ function canConnect(sourceType: ArtifactType, targetType: ArtifactType) {
 function isEditableElement(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+}
+
+function isAgentFlowNodeKind(value: string): value is AgentFlowNodeKind {
+  return value === 'input' || value === 'agent' || value === 'tool' || value === 'approval' || value === 'artifact'
 }
 
 const nodeTypes = { agentFlowNode: AgentFlowNodeCard }
