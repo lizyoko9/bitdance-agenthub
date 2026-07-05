@@ -112,6 +112,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('isEditableElement(event.target)')
   })
 
+  it('supports canceling the current artifact connection with the Escape key', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain("event.key === 'Escape'")
+    expect(source).toContain('activeConnectionType')
+    expect(source).toContain('activeOutputPort')
+    expect(source).toContain('setActiveConnectionType(null)')
+    expect(source).toContain('setActiveOutputPort(null)')
+  })
+
   it('supports selecting and deleting the selected workflow edge with the Delete key', () => {
     const source = readCanvasSource()
 

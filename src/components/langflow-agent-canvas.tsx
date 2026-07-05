@@ -694,8 +694,16 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableElement(event.target)) return
+      if (event.key === 'Escape') {
+        if (!activeConnectionType && !activeOutputPort) return
+        event.preventDefault()
+        setActiveConnectionType(null)
+        setActiveOutputPort(null)
+        return
+      }
       if (event.key !== 'Delete') return
-      if ((!selectedNodeId && !selectedEdgeId) || isEditableElement(event.target)) return
+      if (!selectedNodeId && !selectedEdgeId) return
       event.preventDefault()
       if (selectedEdgeId) {
         deleteEdgeById(selectedEdgeId)
@@ -706,7 +714,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [deleteEdgeById, deleteNodeById, selectedEdgeId, selectedNodeId])
+  }, [activeConnectionType, activeOutputPort, deleteEdgeById, deleteNodeById, selectedEdgeId, selectedNodeId])
 
   const onConnect = useCallback(
     (connection: Connection) => {
