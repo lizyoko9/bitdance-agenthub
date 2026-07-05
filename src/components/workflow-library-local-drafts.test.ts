@@ -1,0 +1,32 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import { describe, expect, it } from 'vitest'
+
+describe('workflow library local canvas drafts', () => {
+  const readWorkflowLibrarySource = () =>
+    readFileSync(resolve(process.cwd(), 'src/components/workflow-library.tsx'), 'utf8')
+
+  const readCanvasSource = () =>
+    readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+
+  it('merges saved canvas drafts into the workflow list', () => {
+    const source = readWorkflowLibrarySource()
+
+    expect(source).toContain('CANVAS_DRAFT_LIBRARY_STORAGE_KEY')
+    expect(source).toContain('loadLocalCanvasWorkflows')
+    expect(source).toContain('localCanvasWorkflows')
+    expect(source).toContain("source: 'local_canvas'")
+    expect(source).toContain('nodeCount')
+    expect(source).toContain('edgeCount')
+  })
+
+  it('opens the requested saved canvas draft by workflow id', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('findCanvasDraftById')
+    expect(source).toContain('initialWorkflowId')
+    expect(source).toContain('library.find')
+    expect(source).toContain('workflowDraftId === draftId')
+  })
+})

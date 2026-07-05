@@ -237,12 +237,13 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     const library = loadCanvasDraftLibrary()
     setSavedDrafts(library)
 
-    const draft = loadCanvasDraft() ?? library[0]
+    const draft = findCanvasDraftById(library, initialWorkflowId) ?? loadCanvasDraft() ?? library[0]
     if (!draft) return
 
     applyCanvasDraft(draft)
+    window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
     setNotice(`已恢复本地草稿：${draft.nodes.length} 个节点、${draft.edges.length} 条连线。`)
-  }, [applyCanvasDraft])
+  }, [applyCanvasDraft, initialWorkflowId])
 
   const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) ?? null
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
@@ -1558,6 +1559,11 @@ function loadCanvasDraftLibrary(): CanvasDraft[] {
   } catch {
     return []
   }
+}
+
+function findCanvasDraftById(library: CanvasDraft[], draftId?: string): CanvasDraft | null {
+  if (!draftId) return null
+  return library.find((draft) => draft.workflowDraftId === draftId) ?? null
 }
 
 function saveCanvasDraftLibrary(drafts: CanvasDraft[]) {

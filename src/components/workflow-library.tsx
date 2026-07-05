@@ -25,8 +25,17 @@ interface WorkflowLibraryProps {
   onCreateWorkflow: () => void
 }
 
+type WorkflowListEntry = WorkflowRow & {
+  source: 'database' | 'local_canvas'
+  nodeCount?: number
+  edgeCount?: number
+}
+
+const CANVAS_DRAFT_LIBRARY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.library'
+
 export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLibraryProps) {
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([])
+  const [localCanvasWorkflows, setLocalCanvasWorkflows] = useState<WorkflowListEntry[]>([])
   const [runs, setRuns] = useState<WorkflowRunRow[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -35,6 +44,7 @@ export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLi
   const reload = async () => {
     setLoading(true)
     setError(null)
+    setLocalCanvasWorkflows(loadLocalCanvasWorkflows())
     try {
       const [nextWorkflows, nextRuns] = await Promise.all([fetchWorkflows(), fetchWorkflowRuns()])
       setWorkflows(nextWorkflows)
@@ -59,21 +69,30 @@ export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLi
     return map
   }, [runs])
 
+  const allWorkflows = useMemo<WorkflowListEntry[]>(() => {
+    const databaseWorkflows = workflows.map((workflow) => ({ ...workflow, source: 'database' as const }))
+    const localIds = new Set(localCanvasWorkflows.map((workflow) => workflow.id))
+    return [
+      ...localCanvasWorkflows,
+      ...databaseWorkflows.filter((workflow) => !localIds.has(workflow.id)),
+    ]
+  }, [localCanvasWorkflows, workflows])
+
   const filteredWorkflows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return workflows
-    return workflows.filter((workflow) => {
+    if (!q) return allWorkflows
+    return allWorkflows.filter((workflow) => {
       return (
         workflow.name.toLowerCase().includes(q) ||
         workflow.description.toLowerCase().includes(q) ||
         workflow.status.toLowerCase().includes(q)
       )
     })
-  }, [query, workflows])
+  }, [allWorkflows, query])
 
   const completedCount = useMemo(() => {
-    return workflows.filter((workflow) => latestRunByWorkflowId.get(workflow.id)?.status === 'complete').length
-  }, [latestRunByWorkflowId, workflows])
+    return allWorkflows.filter((workflow) => latestRunByWorkflowId.get(workflow.id)?.status === 'complete').length
+  }, [allWorkflows, latestRunByWorkflowId])
 
   const runningCount = useMemo(() => {
     return runs.filter((run) => run.status === 'running' || run.status === 'queued').length
@@ -104,7 +123,7 @@ export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLi
           </div>
         </div>
         <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
-          <WorkflowMetric label="工作流" value={workflows.length} />
+          <WorkflowMetric label="工作流" value={allWorkflows.length} />
           <WorkflowMetric label="已完成" value={completedCount} />
           <WorkflowMetric label="运行中" value={runningCount} />
           <WorkflowMetric label="运行记录" value={runs.length} />
@@ -182,7 +201,7 @@ function WorkflowListItem({
   runCount,
   onOpen,
 }: {
-  workflow: WorkflowRow
+  workflow: WorkflowListEntry
   latestRun: WorkflowRunRow | null
   runCount: number
   onOpen: () => void
@@ -201,6 +220,9 @@ function WorkflowListItem({
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
             <Badge variant="outline">版本 {workflow.version}</Badge>
+            {workflow.source === 'local_canvas' ? <Badge variant="outline">本地草稿</Badge> : null}
+            {workflow.nodeCount !== undefined ? <Badge variant="outline">{workflow.nodeCount} 节点</Badge> : null}
+            {workflow.edgeCount !== undefined ? <Badge variant="outline">{workflow.edgeCount} 连线</Badge> : null}
             <Badge variant="outline">{runCount} 次运行</Badge>
             <Badge variant="outline">更新于 {formatTime(workflow.updatedAt)}</Badge>
             {latestRun ? <Badge variant="outline">最近运行 {formatTime(latestRun.startedAt)}</Badge> : null}
@@ -267,4 +289,62 @@ function formatTime(value: number): string {
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
+}
+
+function loadLocalCanvasWorkflows(): WorkflowListEntry[] {
+  if (typeof window === 'undefined') return []
+
+  const raw = window.localStorage.getItem(CANVAS_DRAFT_LIBRARY_STORAGE_KEY)
+  if (!raw) return []
+
+  try {
+    const drafts = JSON.parse(raw) as unknown
+    if (!Array.isArray(drafts)) return []
+
+    return drafts
+      .filter(isLocalCanvasDraft)
+      .map((draft) => {
+        const savedAt = Date.parse(draft.savedAt) || Date.now()
+        return {
+          id: draft.workflowDraftId,
+          name: draft.title?.trim() || '未命名流程',
+          description: `本地画布草稿：${draft.nodes.length} 个节点，${draft.edges.length} 条连线。`,
+          status: 'draft' as WorkflowRow['status'],
+          version: 1,
+          createdAt: savedAt,
+          updatedAt: savedAt,
+          source: 'local_canvas' as const,
+          nodeCount: draft.nodes.length,
+          edgeCount: draft.edges.length,
+        }
+      })
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  } catch {
+    return []
+  }
+}
+
+function isLocalCanvasDraft(value: unknown): value is {
+  schema: 'agenthub.langflow_agent_canvas.v1'
+  workflowDraftId: string
+  title?: string
+  savedAt: string
+  nodes: unknown[]
+  edges: unknown[]
+} {
+  if (!value || typeof value !== 'object') return false
+  const draft = value as {
+    schema?: unknown
+    workflowDraftId?: unknown
+    savedAt?: unknown
+    nodes?: unknown
+    edges?: unknown
+  }
+  return (
+    draft.schema === 'agenthub.langflow_agent_canvas.v1' &&
+    typeof draft.workflowDraftId === 'string' &&
+    typeof draft.savedAt === 'string' &&
+    Array.isArray(draft.nodes) &&
+    Array.isArray(draft.edges)
+  )
 }
