@@ -2032,6 +2032,8 @@ function NodeConfigPanel({
       </div>
 
       <div className="space-y-3">
+        <NodeConfigurationSummary node={node} />
+
         <PanelBlock title="基础信息">
           <Input value={node.data.title} onChange={(event) => onUpdateNode(node.id, { title: event.target.value })} />
           <Textarea
@@ -2096,10 +2098,21 @@ function NodeConfigPanel({
         )}
 
         <NodeBusinessSetup node={node} />
-        <NodeInputRequirementPanel node={node} />
-        <NodeDeliveryOutletPanel node={node} onStartOutputConnection={onStartOutputConnection} />
-        <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
-        <NodeSetupGuide node={node} />
+
+        <details
+          data-testid="node-flow-details"
+          className="rounded-lg border bg-background"
+        >
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+            交付和连接
+          </summary>
+          <div className="space-y-3 border-t p-3">
+            <NodeInputRequirementPanel node={node} />
+            <NodeDeliveryOutletPanel node={node} onStartOutputConnection={onStartOutputConnection} />
+            <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
+            <NodeSetupGuide node={node} />
+          </div>
+        </details>
 
         <details
           data-testid="advanced-port-settings"
@@ -2148,6 +2161,33 @@ function NodeConfigPanel({
         </PanelBlock>
       </div>
     </aside>
+  )
+}
+
+function NodeConfigurationSummary({ node }: { node: AgentFlowNode }) {
+  const configuration = getNodeConfigurationState(node)
+  const isMissing = configuration.status === 'missing'
+
+  return (
+    <section
+      className={cn(
+        'rounded-lg border p-3',
+        isMissing ? 'border-amber-500/40 bg-amber-500/10' : 'bg-primary/5',
+      )}
+      data-testid="node-configuration-summary"
+      data-configuration-status={configuration.status}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold">当前状态</div>
+          <div className="mt-1 text-sm font-semibold">{configuration.label}</div>
+        </div>
+        <Badge variant={isMissing ? 'destructive' : 'outline'} className="text-[10px]">
+          {nodeKindLabels[node.data.kind]}
+        </Badge>
+      </div>
+      <div className="mt-2 text-xs leading-5 text-muted-foreground">{configuration.detail}</div>
+    </section>
   )
 }
 

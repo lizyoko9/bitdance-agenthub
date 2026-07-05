@@ -556,6 +556,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('configurationState.status')
   })
 
+  it('keeps detailed node handoff help behind a single collapsible section', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodeConfigurationSummary node={node}')
+    expect(source).toContain('data-testid="node-configuration-summary"')
+    expect(source).toContain('data-testid="node-flow-details"')
+    expect(source).toContain('NodeInputRequirementPanel node={node}')
+    expect(source).toContain('NodeDeliveryOutletPanel node={node}')
+    expect(source).toContain('NodeHandoffSummary node={node}')
+    expect(source).toContain('NodeSetupGuide node={node}')
+    expect(source.indexOf('data-testid="node-flow-details"')).toBeLessThan(source.indexOf('data-testid="advanced-port-settings"'))
+  })
+
   it('shows clickable delivery outlets in the node inspector before advanced port settings', () => {
     const source = readCanvasSource()
 
