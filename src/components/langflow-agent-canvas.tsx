@@ -1302,7 +1302,6 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             sourceOutputLabel={activeConnectionSource?.sourceOutputLabel}
             onCancel={clearActiveConnection}
           />
-          <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
         </div>
 
         <aside
@@ -1536,6 +1535,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               </div>
             ) : (
               <>
+                <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
                 {selectedEdge ? (
                   <EdgeConfigPanel
                     edge={selectedEdge}
@@ -2736,7 +2736,7 @@ function PreflightIssuePanel({
 
   return (
     <section
-      className="pointer-events-auto absolute right-3 top-3 z-10 w-[22rem] rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur"
+      className="rounded-xl border bg-background p-3"
       data-testid="preflight-issues-panel"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
