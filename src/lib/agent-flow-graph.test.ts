@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { replaceEdgesForSingleTargetHandle, wouldCreateDirectedCycle } from './agent-flow-graph'
+import {
+  findFirstCompatiblePortPair,
+  replaceEdgesForSingleTargetHandle,
+  wouldCreateDirectedCycle,
+} from './agent-flow-graph'
 
 describe('wouldCreateDirectedCycle', () => {
   it('allows a forward handoff that keeps the workflow acyclic', () => {
@@ -44,5 +48,26 @@ describe('replaceEdgesForSingleTargetHandle', () => {
     )
 
     expect(result.map((edge) => edge.id)).toEqual(['b-to-video', 'c-to-other', 'new-to-input'])
+  })
+})
+
+describe('findFirstCompatiblePortPair', () => {
+  it('finds the first output and input pair that can be connected', () => {
+    const result = findFirstCompatiblePortPair({
+      sourceOutputs: [
+        { id: 'report', label: '报告', type: 'report' },
+        { id: 'video', label: '视频', type: 'video' },
+      ],
+      targetInputs: [
+        { id: 'code', label: '代码', type: 'code' },
+        { id: 'clip', label: '视频素材', type: 'video' },
+      ],
+      canConnect: (sourceType, targetType) => sourceType === targetType,
+    })
+
+    expect(result).toEqual({
+      sourcePort: { id: 'video', label: '视频', type: 'video' },
+      targetPort: { id: 'clip', label: '视频素材', type: 'video' },
+    })
   })
 })

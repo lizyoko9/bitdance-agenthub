@@ -41,7 +41,11 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
-import { replaceEdgesForSingleTargetHandle, wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
+import {
+  findFirstCompatiblePortPair,
+  replaceEdgesForSingleTargetHandle,
+  wouldCreateDirectedCycle,
+} from '@/lib/agent-flow-graph'
 import { applyPreflightStatusToNodes } from '@/lib/agent-flow-node-status'
 import { buildAgentFlowRunPlan, type AgentFlowRunPlanStep } from '@/lib/agent-flow-run-plan'
 import { validateAgentFlowForRun, type AgentFlowRunIssue } from '@/lib/agent-flow-run-preflight'
@@ -307,10 +311,41 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       setNotice('没有找到这个节点模板，先换一个模板试试。')
       return
     }
-    const node = createNodeFromTemplate(templateId, position ?? { x: 160 + nextIndex * 54, y: 120 + nextIndex * 28 })
+    const sourceNode = nodes.find((item) => item.id === selectedNodeId)
+    const fallbackPosition = sourceNode
+      ? { x: sourceNode.position.x + 360, y: sourceNode.position.y }
+      : { x: 160 + nextIndex * 54, y: 120 + nextIndex * 28 }
+    const node = createNodeFromTemplate(templateId, position ?? fallbackPosition)
+    const autoPair = sourceNode
+      ? findFirstCompatiblePortPair({
+          sourceOutputs: sourceNode.data.outputs,
+          targetInputs: node.data.inputs,
+          canConnect,
+        })
+      : null
+
     setNodes((current) => [...current, node])
+    if (sourceNode && autoPair) {
+      const edge = createFlowEdge(
+        `auto-${sourceNode.id}-${node.id}-${Date.now()}`,
+        sourceNode.id,
+        node.id,
+        autoPair.sourcePort.id,
+        autoPair.sourcePort.type,
+        outputHandleId(autoPair.sourcePort),
+        inputHandleId(autoPair.targetPort),
+        autoPair.sourcePort.label,
+        autoPair.targetPort.id,
+        autoPair.targetPort.label,
+      )
+      setEdges((current) => replaceEdgesForSingleTargetHandle(current, edge))
+      setNotice(`已把 ${sourceNode.data.title} 的 ${autoPair.sourcePort.label} 接到 ${node.data.title}。`)
+    } else if (sourceNode) {
+      setNotice('已添加节点，但它没有能直接接收当前节点产物的输入端口。')
+    }
     setSelectedNodeId(node.id)
-  }, [nodes.length, setNodes])
+    setSelectedEdgeId('')
+  }, [nodes, selectedNodeId, setEdges, setNodes])
 
   const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, templateId: string) => {
     event.dataTransfer.setData(NODE_TEMPLATE_MIME, templateId)

@@ -8,6 +8,37 @@ export interface TargetInputEdge {
   targetHandle?: string | null
 }
 
+export interface ConnectablePort<TType extends string = string> {
+  id: string
+  label: string
+  type: TType
+}
+
+export interface CompatiblePortPair<TPort extends ConnectablePort = ConnectablePort> {
+  sourcePort: TPort
+  targetPort: TPort
+}
+
+export function findFirstCompatiblePortPair<TPort extends ConnectablePort>({
+  sourceOutputs,
+  targetInputs,
+  canConnect,
+}: {
+  sourceOutputs: TPort[]
+  targetInputs: TPort[]
+  canConnect: (sourceType: TPort['type'], targetType: TPort['type']) => boolean
+}): CompatiblePortPair<TPort> | null {
+  for (const sourcePort of sourceOutputs) {
+    for (const targetPort of targetInputs) {
+      if (canConnect(sourcePort.type, targetPort.type)) {
+        return { sourcePort, targetPort }
+      }
+    }
+  }
+
+  return null
+}
+
 export function wouldCreateDirectedCycle(
   edges: DirectedWorkflowEdge[],
   nextEdge: DirectedWorkflowEdge,

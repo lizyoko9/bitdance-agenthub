@@ -68,6 +68,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('draggable')
   })
 
+  it('auto-links a clicked palette component after the selected compatible node', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('findFirstCompatiblePortPair')
+    expect(source).toContain('findFirstCompatiblePortPair({')
+    expect(source).toContain('selectedNodeId')
+    expect(source).toContain('auto-${sourceNode.id}-${node.id}')
+    expect(source).toContain('replaceEdgesForSingleTargetHandle(current, edge)')
+  })
+
   it('uses reusable business node templates instead of raw abstract node kinds', () => {
     const source = readCanvasSource()
 
