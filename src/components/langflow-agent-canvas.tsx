@@ -313,6 +313,10 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const toggleInspectorCollapsed = useCallback(() => {
     setInspectorCollapsed((current) => !current)
   }, [])
+  const clearActiveConnection = useCallback(() => {
+    setActiveConnectionType(null)
+    setActiveOutputPort(null)
+  }, [])
   useEffect(() => {
     fitCanvasView()
   }, [fitCanvasView, inspectorCollapsed, paletteCollapsed])
@@ -337,15 +341,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setEdges(cloneCanvasEdges(draft.edges))
     setSelectedNodeId(draft.nodes[0]?.id ?? '')
     setSelectedEdgeId('')
-    setActiveConnectionType(null)
-    setActiveOutputPort(null)
+    clearActiveConnection()
     setPreflightVisible(Boolean(draft.handoffSteps?.length))
     setPreflightIssues([])
     setLastRun(findLatestCanvasRunForDraft(loadCanvasRunHistory(), draft.workflowDraftId))
     setWorkflowDraftId(draft.workflowDraftId ?? createCanvasDraftId())
     setWorkflowTitle(draft.title?.trim() || '未命名流程')
     fitCanvasView()
-  }, [fitCanvasView, setEdges, setNodes])
+  }, [clearActiveConnection, fitCanvasView, setEdges, setNodes])
 
   useEffect(() => {
     let cancelled = false
@@ -381,6 +384,17 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
   const executionPlan = useMemo(() => buildAgentFlowRunPlan({ nodes, edges }), [edges, nodes])
   const executionStages = useMemo(() => buildExecutionStages(nodes, edges), [edges, nodes])
+  const activeConnectionSource = useMemo(() => {
+    if (!activeOutputPort) return null
+    const node = nodes.find((item) => item.id === activeOutputPort.nodeId)
+    const output = node?.data.outputs.find((item) => item.id === activeOutputPort.outputId)
+    if (!node || !output) return null
+
+    return {
+      sourceNodeTitle: node.data.title,
+      sourceOutputLabel: output.label,
+    }
+  }, [activeOutputPort, nodes])
   const buildCurrentHistorySnapshot = useCallback(() =>
     createCanvasHistorySnapshot(nodes, edges, selectedNodeId, selectedEdgeId),
   [edges, nodes, selectedEdgeId, selectedNodeId])
@@ -389,9 +403,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setEdges(cloneCanvasEdges(snapshot.edges))
     setSelectedNodeId(snapshot.selectedNodeId)
     setSelectedEdgeId(snapshot.selectedEdgeId)
-    setActiveConnectionType(null)
-    setActiveOutputPort(null)
-  }, [setEdges, setNodes])
+    clearActiveConnection()
+  }, [clearActiveConnection, setEdges, setNodes])
   const pushCanvasHistory = useCallback(() => {
     const snapshot = buildCurrentHistorySnapshot()
     setUndoStack((current) => [...current, snapshot].slice(-CANVAS_HISTORY_LIMIT))
@@ -484,13 +497,12 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           setEdges((current) => replaceEdgesForSingleTargetHandle(current, edge))
           setSelectedNodeId(targetNode.id)
           setSelectedEdgeId('')
-          setActiveConnectionType(null)
-          setActiveOutputPort(null)
+          clearActiveConnection()
           setNotice(`已把 ${sourceNode.data.title} 的 ${sourceOutput.label} 接到 ${targetNode.data.title}。`)
         },
       },
     })),
-    [activeConnectionType, activeOutputPort, edges, executionStages, nodes, pushCanvasHistory, setEdges, startOutputConnection],
+    [activeConnectionType, activeOutputPort, clearActiveConnection, edges, executionStages, nodes, pushCanvasHistory, setEdges, startOutputConnection],
   )
 
   const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
@@ -559,8 +571,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
   const handleConnectStart = useCallback((_: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
     if (params.handleType !== 'source' || !params.nodeId || !params.handleId) {
-      setActiveConnectionType(null)
-      setActiveOutputPort(null)
+      clearActiveConnection()
       return
     }
 
@@ -568,7 +579,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     const output = source?.data.outputs.find((item) => outputHandleId(item) === params.handleId)
     setActiveConnectionType(output?.type ?? null)
     setActiveOutputPort(output ? { nodeId: params.nodeId, outputId: output.id, type: output.type } : null)
-  }, [nodes])
+  }, [clearActiveConnection, nodes])
 
   const isConnectionValid = useCallback((connection: Connection | AgentFlowEdge) => {
     if (!connection.source || !connection.target) return false
@@ -1004,8 +1015,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       if (action === 'cancel-connection') {
         if (!activeConnectionType && !activeOutputPort) return
         event.preventDefault()
-        setActiveConnectionType(null)
-        setActiveOutputPort(null)
+        clearActiveConnection()
         return
       }
       if (action !== 'delete-selected-node') return
@@ -1020,7 +1030,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeConnectionType, activeOutputPort, deleteEdgeById, deleteNodeById, duplicateNodeById, redoCanvasEdit, saveCanvasDraft, selectedEdgeId, selectedNodeId, undoCanvasEdit])
+  }, [activeConnectionType, activeOutputPort, clearActiveConnection, deleteEdgeById, deleteNodeById, duplicateNodeById, redoCanvasEdit, saveCanvasDraft, selectedEdgeId, selectedNodeId, undoCanvasEdit])
 
   const openSavedCanvasDraft = useCallback((draftId: string) => {
     const draft = savedDrafts.find((item) => item.workflowDraftId === draftId)
@@ -1166,10 +1176,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onConnectStart={handleConnectStart}
-          onConnectEnd={() => {
-            setActiveConnectionType(null)
-            setActiveOutputPort(null)
-          }}
+          onConnectEnd={clearActiveConnection}
           isValidConnection={isConnectionValid}
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
@@ -1182,8 +1189,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onPaneClick={() => {
             setSelectedNodeId('')
             setSelectedEdgeId('')
-            setActiveConnectionType(null)
-            setActiveOutputPort(null)
+            clearActiveConnection()
             clearSelectedNodes()
             setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
           }}
@@ -1206,6 +1212,12 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           <Controls />
           <MiniMap pannable zoomable nodeStrokeWidth={3} />
           </ReactFlow>
+          <ActiveConnectionBanner
+            activeConnectionType={activeConnectionType}
+            sourceNodeTitle={activeConnectionSource?.sourceNodeTitle}
+            sourceOutputLabel={activeConnectionSource?.sourceOutputLabel}
+            onCancel={clearActiveConnection}
+          />
           <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
         </div>
 
@@ -2411,6 +2423,45 @@ function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible
         <div className="mt-2 text-[11px] text-muted-foreground">还有 {steps.length - 6} 条链路，运行记录里会完整展开。</div>
       )}
     </section>
+  )
+}
+
+function ActiveConnectionBanner({
+  activeConnectionType,
+  sourceNodeTitle,
+  sourceOutputLabel,
+  onCancel,
+}: {
+  activeConnectionType: ArtifactType | null
+  sourceNodeTitle?: string
+  sourceOutputLabel?: string
+  onCancel: () => void
+}) {
+  if (!activeConnectionType) return null
+
+  const sourceLabel = sourceNodeTitle && sourceOutputLabel
+    ? `${sourceNodeTitle} / ${sourceOutputLabel}`
+    : artifactLabels[activeConnectionType]
+
+  return (
+    <div
+      className="pointer-events-auto absolute left-1/2 top-3 z-20 flex max-w-[min(42rem,calc(100%-2rem))] -translate-x-1/2 items-center gap-2 rounded-full border bg-background/95 px-3 py-2 text-xs shadow-xl backdrop-blur"
+      data-testid="active-connection-banner"
+    >
+      <span className="shrink-0 text-muted-foreground">正在连接</span>
+      <ArtifactPill type={activeConnectionType} />
+      <span className="min-w-0 truncate font-medium">{sourceLabel}</span>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 shrink-0 rounded-full px-2 text-xs"
+        data-testid="active-connection-cancel"
+        onClick={onCancel}
+      >
+        取消
+      </Button>
+    </div>
   )
 }
 

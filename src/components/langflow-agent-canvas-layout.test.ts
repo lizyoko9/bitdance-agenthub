@@ -193,8 +193,7 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain("action === 'cancel-connection'")
     expect(source).toContain('activeConnectionType')
     expect(source).toContain('activeOutputPort')
-    expect(source).toContain('setActiveConnectionType(null)')
-    expect(source).toContain('setActiveOutputPort(null)')
+    expect(source).toContain('clearActiveConnection()')
   })
 
   it('supports selecting and deleting the selected workflow edge with the Delete key', () => {
@@ -333,6 +332,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain("'nodrag nopan")
   })
 
+  it('shows an active connection banner over the canvas with a cancel action', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('ActiveConnectionBanner')
+    expect(source).toContain('data-testid="active-connection-banner"')
+    expect(source).toContain('data-testid="active-connection-cancel"')
+    expect(source).toContain('clearActiveConnection')
+    expect(source).toContain('sourceOutputLabel')
+    expect(source).toContain('onCancel={clearActiveConnection}')
+  })
+
   it('lets users click a compatible input port on an existing node to finish a connection', () => {
     const source = readCanvasSource()
 
@@ -344,8 +354,7 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('onPointerDownCapture={(event) => handleInputPortPointerDown(event, input)}')
     expect(source).toContain('activeOutputPort?.nodeId')
     expect(source).toContain('targetInput.id')
-    expect(source).toContain('setActiveConnectionType(null)')
-    expect(source).toContain('setActiveOutputPort(null)')
+    expect(source).toContain('clearActiveConnection()')
   })
 
   it('routes incompatible input clicks to the canvas so users get an explanation', () => {
@@ -368,7 +377,7 @@ describe('Langflow agent canvas layout', () => {
     const source = readCanvasSource()
 
     expect(source).toMatch(
-      /onPaneClick=\{\(\) => \{\s+setSelectedNodeId\(''\)\s+setSelectedEdgeId\(''\)\s+setActiveConnectionType\(null\)/,
+      /onPaneClick=\{\(\) => \{\s+setSelectedNodeId\(''\)\s+setSelectedEdgeId\(''\)\s+clearActiveConnection\(\)/,
     )
   })
 
@@ -612,8 +621,8 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('activeConnectionType')
     expect(source).toContain('handleConnectStart')
     expect(source).toContain('onConnectStart={handleConnectStart}')
-    expect(source).toContain('onConnectEnd={() => {')
-    expect(source).toContain('setActiveOutputPort(null)')
+    expect(source).toContain('onConnectEnd={clearActiveConnection}')
+    expect(source).toContain('clearActiveConnection')
     expect(source).toContain('connectionType?: ArtifactType | null')
     expect(source).toContain('data-output-port-type={output.type}')
     expect(source).toContain('isInputCompatible')
