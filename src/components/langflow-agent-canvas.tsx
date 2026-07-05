@@ -1133,7 +1133,7 @@ function NodeConfigPanel({
     return (
       <aside className="h-full rounded-xl border bg-background/95 p-4 shadow-xl backdrop-blur">
         <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-          选中一个节点后，在这里配置它使用哪个 Agent、接收什么产物、输出什么交付物。
+          选中一个节点后，这里会显示它接收什么、产出什么，以及需要绑定哪个 Agent 或工具。
         </div>
       </aside>
     )
@@ -1148,7 +1148,7 @@ function NodeConfigPanel({
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Settings2 className="size-4 text-primary" />
-            节点配置
+            节点检查器
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{nodeKindLabels[node.data.kind]}</div>
         </div>
@@ -1221,30 +1221,42 @@ function NodeConfigPanel({
           </PanelBlock>
         )}
 
-        <PanelBlock title="输入端口">
-          <PortEditor
-            ports={node.data.inputs}
-            direction="inputs"
-            addLabel="新增输入"
-            onTypeChange={(portId, direction, type) => changePortTypeForNode(node.id, direction, portId, type)}
-            onAddPort={() => addPortToNode(node.id, 'inputs')}
-            onRemovePort={(portId) => removePortFromNode(node.id, 'inputs', portId)}
-          />
-        </PanelBlock>
+        <NodePortSummary node={node} />
 
-        <PanelBlock title="输出端口">
-          <PortEditor
-            ports={node.data.outputs}
-            direction="outputs"
-            addLabel="新增输出"
-            onTypeChange={(portId, direction, type) => changePortTypeForNode(node.id, direction, portId, type)}
-            onAddPort={() => addPortToNode(node.id, 'outputs')}
-            onRemovePort={(portId) => removePortFromNode(node.id, 'outputs', portId)}
-          />
-          <div className="mt-2 text-[11px] leading-4 text-muted-foreground">
-            从某个输出端口拉线，下游只收到这个端口代表的产物。
+        <details
+          data-testid="advanced-port-settings"
+          className="rounded-lg border bg-background"
+        >
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+            高级端口设置
+          </summary>
+          <div className="space-y-3 border-t p-3">
+            <PanelBlock title="输入端口">
+              <PortEditor
+                ports={node.data.inputs}
+                direction="inputs"
+                addLabel="新增输入"
+                onTypeChange={(portId, direction, type) => changePortTypeForNode(node.id, direction, portId, type)}
+                onAddPort={() => addPortToNode(node.id, 'inputs')}
+                onRemovePort={(portId) => removePortFromNode(node.id, 'inputs', portId)}
+              />
+            </PanelBlock>
+
+            <PanelBlock title="输出端口">
+              <PortEditor
+                ports={node.data.outputs}
+                direction="outputs"
+                addLabel="新增输出"
+                onTypeChange={(portId, direction, type) => changePortTypeForNode(node.id, direction, portId, type)}
+                onAddPort={() => addPortToNode(node.id, 'outputs')}
+                onRemovePort={(portId) => removePortFromNode(node.id, 'outputs', portId)}
+              />
+              <div className="mt-2 text-[11px] leading-4 text-muted-foreground">
+                从某个输出端口拉线，下游只收到这个端口代表的产物。
+              </div>
+            </PanelBlock>
           </div>
-        </PanelBlock>
+        </details>
 
         <PanelBlock title="交付逻辑">
           <label className="flex items-center gap-2 text-xs">
@@ -1258,6 +1270,50 @@ function NodeConfigPanel({
         </PanelBlock>
       </div>
     </aside>
+  )
+}
+
+function NodePortSummary({ node }: { node: AgentFlowNode }) {
+  return (
+    <PanelBlock title="节点输入与产物">
+      <div data-testid="node-port-summary" className="grid gap-2">
+        <PortPreviewList title="接收输入" ports={node.data.inputs} emptyText="这个节点不需要上游输入。" />
+        <PortPreviewList title="输出产物" ports={node.data.outputs} emptyText="这个节点暂时没有产物。" />
+      </div>
+    </PanelBlock>
+  )
+}
+
+function PortPreviewList({
+  title,
+  ports,
+  emptyText,
+}: {
+  title: string
+  ports: AgentFlowPort[]
+  emptyText: string
+}) {
+  return (
+    <section className="rounded-md border bg-muted/20 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold">{title}</div>
+        <Badge variant="outline" className="text-[10px]">
+          {ports.length} 个
+        </Badge>
+      </div>
+      {ports.length === 0 ? (
+        <div className="text-[11px] text-muted-foreground">{emptyText}</div>
+      ) : (
+        <div className="space-y-1">
+          {ports.map((port) => (
+            <div key={port.id} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+              <ArtifactPill type={port.type} />
+              <span className="min-w-0 flex-1 truncate text-xs">{port.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

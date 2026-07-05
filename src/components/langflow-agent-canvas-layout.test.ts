@@ -121,6 +121,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('addLabel=')
   })
 
+  it('shows a node inspector summary before advanced port editing controls', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('节点检查器')
+    expect(source).toContain('data-testid="node-port-summary"')
+    expect(source).toContain('接收输入')
+    expect(source).toContain('输出产物')
+    expect(source).toContain('data-testid="advanced-port-settings"')
+    expect(source).toContain('PortPreviewList')
+  })
+
   it('keeps existing edges consistent when a port artifact type changes', () => {
     const source = readCanvasSource()
 
