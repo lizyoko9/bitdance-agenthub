@@ -43,6 +43,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
 import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
+import { validateAgentFlowForRun } from '@/lib/agent-flow-run-preflight'
 import { buildSoftwareCommandFlowPorts } from '@/lib/agent-flow-software-command-contracts'
 import {
   agentFlowNodeTemplates,
@@ -516,16 +517,18 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
   const runPreflight = useCallback(() => {
     setPreflightVisible(true)
-    if (handoffSteps.length === 0) {
-      setNotice('预检未通过：画布里还没有可执行的节点连线。')
+
+    const preflight = validateAgentFlowForRun({ nodes, edges })
+    if (!preflight.ready) {
+      const firstError = preflight.issues.find((issue) => issue.severity === 'error')
+      setNotice(`预检未通过：${firstError?.message ?? '流程配置还有阻塞项。'}`)
       return
     }
 
-    const connectedNodeIds = new Set(edges.flatMap((edge) => [edge.source, edge.target]))
-    const disconnectedCount = nodes.filter((node) => !connectedNodeIds.has(node.id)).length
+    const firstWarning = preflight.issues.find((issue) => issue.severity === 'warning')
     setNotice(
       `预检完成：${handoffSteps.length} 条交付链路可运行${
-        disconnectedCount > 0 ? `，${disconnectedCount} 个节点还没有接入。` : '。'
+        firstWarning ? `，${preflight.warningCount} 个提醒：${firstWarning.message}` : '。'
       }`,
     )
   }, [edges, handoffSteps.length, nodes])
