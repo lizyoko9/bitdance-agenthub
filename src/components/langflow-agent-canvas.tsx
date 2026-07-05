@@ -41,7 +41,7 @@ import {
   Undo2,
   Wrench,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -1572,6 +1572,12 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
     window.dispatchEvent(new CustomEvent('agenthub:canvas-node-duplicate', { detail: { nodeId: id } }))
   }
 
+  const handleHandoffSelect = (event: ReactMouseEvent<HTMLButtonElement>, edgeId: string) => {
+    event.preventDefault()
+    event.stopPropagation()
+    window.dispatchEvent(new CustomEvent('agenthub:canvas-edge-select', { detail: { edgeId } }))
+  }
+
   return (
     <div
       className={cn(
@@ -1642,15 +1648,18 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
             <div className="mb-1 text-[10px] font-medium text-muted-foreground">已接收</div>
             <div className="grid gap-1">
               {data.incomingHandoffs.map((handoff) => (
-                <div
+                <button
                   key={handoff.id}
-                  className="flex min-w-0 items-center gap-1.5 text-[11px]"
+                  type="button"
+                  className="nodrag nopan flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[11px] transition hover:bg-background"
                   data-testid="node-received-handoff"
+                  aria-label={`查看来自${handoff.sourceTitle}的${handoff.artifactLabel}连线`}
                   title={`${handoff.sourceTitle} / ${handoff.sourcePortLabel} -> ${handoff.targetPortLabel}`}
+                  onClick={(event) => handleHandoffSelect(event, handoff.id)}
                 >
                   <ArtifactPill type={handoff.artifactType} />
                   <span className="min-w-0 flex-1 truncate">{handoff.sourcePortLabel}</span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -1663,15 +1672,18 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
             <div className="mb-1 text-[10px] font-medium text-muted-foreground">已交付</div>
             <div className="grid gap-1">
               {data.outgoingHandoffs.map((handoff) => (
-                <div
+                <button
                   key={handoff.id}
-                  className="flex min-w-0 items-center gap-1.5 text-[11px]"
+                  type="button"
+                  className="nodrag nopan flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[11px] transition hover:bg-background"
                   data-testid="node-outgoing-handoff"
+                  aria-label={`查看交付给${handoff.targetTitle}的${handoff.artifactLabel}连线`}
                   title={`${handoff.sourcePortLabel} -> ${handoff.targetTitle} / ${handoff.targetPortLabel}`}
+                  onClick={(event) => handleHandoffSelect(event, handoff.id)}
                 >
                   <ArtifactPill type={handoff.artifactType} />
                   <span className="min-w-0 flex-1 truncate">{handoff.targetTitle}</span>
-                </div>
+                </button>
               ))}
             </div>
           </div>

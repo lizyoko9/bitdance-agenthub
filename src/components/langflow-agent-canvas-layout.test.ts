@@ -478,6 +478,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('已交付')
   })
 
+  it('lets users select the matching edge from node handoff summaries', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('handleHandoffSelect')
+    expect(source).toContain('agenthub:canvas-edge-select')
+    expect(source).toContain('detail: { edgeId }')
+    expect(source).toContain('event.stopPropagation()')
+    expect(source).toContain('aria-label={`查看来自${handoff.sourceTitle}的${handoff.artifactLabel}连线`}')
+    expect(source).toContain('aria-label={`查看交付给${handoff.targetTitle}的${handoff.artifactLabel}连线`}')
+    expect(source).toContain('data-testid="node-received-handoff"')
+    expect(source).toContain('data-testid="node-outgoing-handoff"')
+  })
+
   it('lets the node inspector add and remove input/output artifact ports', () => {
     const source = readCanvasSource()
 
