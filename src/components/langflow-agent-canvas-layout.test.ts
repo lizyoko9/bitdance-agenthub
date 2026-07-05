@@ -22,6 +22,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('isEditableElement(event.target)')
   })
 
+  it('supports selecting and deleting the selected workflow edge with the Delete key', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+
+    expect(source).toContain('selectedEdgeId')
+    expect(source).toContain('deleteEdgeById')
+    expect(source).toContain('onEdgeClick={(_, edge) =>')
+    expect(source).toContain('deleteEdgeById(selectedEdgeId)')
+    expect(source).toContain('react-flow__edge-interaction')
+    expect(source).toContain('selectEdgeById')
+    expect(source).toContain('agenthub:canvas-edge-select')
+    expect(source).toContain('onPaneClick={() =>')
+  })
+
   it('supports dragging palette components onto the canvas at the drop position', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
 

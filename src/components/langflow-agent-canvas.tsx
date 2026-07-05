@@ -36,7 +36,7 @@ import {
   UserCheck,
   Wrench,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -194,6 +194,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [nodes, setNodes, onNodesChange] = useNodesState<AgentFlowNode>(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<AgentFlowEdge>(initialEdges)
   const [selectedNodeId, setSelectedNodeId] = useState('agent-2')
+  const [selectedEdgeId, setSelectedEdgeId] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const [preflightVisible, setPreflightVisible] = useState(false)
   const { screenToFlowPosition } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
@@ -358,22 +359,47 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId('')
   }, [setEdges, setNodes])
 
+  const deleteEdgeById = useCallback((edgeId: string) => {
+    setEdges((current) => current.filter((edge) => edge.id !== edgeId))
+    setSelectedEdgeId('')
+  }, [setEdges])
+
+  const selectEdgeById = useCallback((edgeId: string) => {
+    setSelectedEdgeId(edgeId)
+    setSelectedNodeId('')
+    setEdges((current) => current.map((item) => ({ ...item, selected: item.id === edgeId })))
+  }, [setEdges])
+
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNode) return
     deleteNodeById(selectedNode.id)
   }, [deleteNodeById, selectedNode])
 
   useEffect(() => {
+    const handleEdgeSelect = (event: Event) => {
+      const edgeId = (event as CustomEvent<{ edgeId?: string }>).detail?.edgeId
+      if (edgeId) selectEdgeById(edgeId)
+    }
+
+    window.addEventListener('agenthub:canvas-edge-select', handleEdgeSelect)
+    return () => window.removeEventListener('agenthub:canvas-edge-select', handleEdgeSelect)
+  }, [selectEdgeById])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Delete') return
-      if (!selectedNodeId || isEditableElement(event.target)) return
+      if ((!selectedNodeId && !selectedEdgeId) || isEditableElement(event.target)) return
       event.preventDefault()
+      if (selectedEdgeId) {
+        deleteEdgeById(selectedEdgeId)
+        return
+      }
       deleteNodeById(selectedNodeId)
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [deleteNodeById, selectedNodeId])
+  }, [deleteEdgeById, deleteNodeById, selectedEdgeId, selectedNodeId])
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -476,7 +502,19 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onConnect={onConnect}
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
-          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+          onNodeClick={(_, node) => {
+            setSelectedNodeId(node.id)
+            setSelectedEdgeId('')
+            setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+          }}
+          onEdgeClick={(_, edge) => {
+            selectEdgeById(edge.id)
+          }}
+          onPaneClick={() => {
+            setSelectedNodeId('')
+            setSelectedEdgeId('')
+            setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+          }}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           defaultEdgeOptions={{
@@ -612,12 +650,30 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
   )
 }
 
-function AgentArtifactEdge({ sourceX, sourceY, targetX, targetY, markerEnd, data }: EdgeProps<AgentFlowEdge>) {
+function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, data, selected }: EdgeProps<AgentFlowEdge>) {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY })
   const type = data?.artifactType ?? 'any'
+  const selectThisEdge = (event: PointerEvent<SVGGElement | SVGPathElement>) => {
+    event.stopPropagation()
+    window.dispatchEvent(new CustomEvent('agenthub:canvas-edge-select', { detail: { edgeId: id } }))
+  }
+
   return (
-    <g data-testid="langflow-agent-edge" data-edge-artifact-type={type}>
-      <BaseEdge path={edgePath} markerEnd={markerEnd} style={{ stroke: artifactColors[type], strokeWidth: 2.4 }} />
+    <g data-testid="langflow-agent-edge" data-edge-artifact-type={type} onPointerDown={selectThisEdge}>
+      <path
+        d={edgePath}
+        className="react-flow__edge-interaction"
+        fill="none"
+        stroke="#ffffff"
+        strokeOpacity={0}
+        strokeWidth={24}
+        style={{ pointerEvents: 'all' }}
+      />
+      <BaseEdge
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={{ stroke: artifactColors[type], strokeWidth: selected ? 4 : 2.4 }}
+      />
       <foreignObject x={labelX - 38} y={labelY - 12} width={76} height={24}>
         <div className="rounded-full border bg-background px-2 py-1 text-center text-[10px] shadow-sm">
           {artifactLabels[type]}
