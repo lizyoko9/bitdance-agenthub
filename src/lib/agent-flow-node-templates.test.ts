@@ -18,14 +18,24 @@ describe('agentFlowNodeTemplates', () => {
       'software-command',
       'human-approval',
       'customer-deliverable',
+      'video-deliverable',
+      'image-deliverable',
+      'code-deliverable',
+      'file-bundle-deliverable',
     ])
 
     expect(getAgentFlowNodeTemplate('employee-agent')?.outputs.map((port) => port.type)).toEqual([
       'report',
       'code',
       'document',
+      'image',
+      'video',
+      'file_bundle',
     ])
     expect(getAgentFlowNodeTemplate('software-command')?.outputs.map((port) => port.type)).toContain('file_bundle')
+    expect(getAgentFlowNodeTemplate('video-deliverable')?.inputs.map((port) => port.type)).toEqual(['video'])
+    expect(getAgentFlowNodeTemplate('image-deliverable')?.inputs.map((port) => port.type)).toEqual(['image'])
+    expect(getAgentFlowNodeTemplate('file-bundle-deliverable')?.inputs.map((port) => port.type)).toEqual(['file_bundle'])
   })
 
   it('groups canvas components by the same mental model as Langflow', () => {

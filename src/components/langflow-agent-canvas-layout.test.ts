@@ -99,6 +99,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-category={group.category}')
   })
 
+  it('lets users search the component palette before adding nodes', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('templateSearchQuery')
+    expect(source).toContain('data-testid="component-palette-search"')
+    expect(source).toContain('placeholder="搜索节点、Agent、产物"')
+    expect(source).toContain('matchesTemplateSearch')
+  })
+
   it('syncs selected Agent contracts into the canvas node ports', () => {
     const source = readCanvasSource()
 

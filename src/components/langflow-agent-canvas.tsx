@@ -233,18 +233,24 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [lastRun, setLastRun] = useState<CanvasRunRecord | null>(null)
   const [activeConnectionType, setActiveConnectionType] = useState<ArtifactType | null>(null)
   const [activeTemplateCategory, setActiveTemplateCategory] = useState<AgentFlowNodeTemplateCategory | '全部'>('全部')
+  const [templateSearchQuery, setTemplateSearchQuery] = useState('')
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
   const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
   const [savedDrafts, setSavedDrafts] = useState<CanvasDraft[]>([])
   const { screenToFlowPosition } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
   const templateGroups = useMemo(() => getAgentFlowNodeTemplateGroups(agentFlowNodeTemplates), [])
-  const filteredTemplateGroups = useMemo(
-    () =>
-      activeTemplateCategory === '全部'
-        ? templateGroups
-        : templateGroups.filter((group) => group.category === activeTemplateCategory),
-    [activeTemplateCategory, templateGroups],
-  )
+  const filteredTemplateGroups = useMemo(() => {
+    const search = templateSearchQuery.trim().toLowerCase()
+    return templateGroups
+      .filter((group) => activeTemplateCategory === '全部' || group.category === activeTemplateCategory)
+      .map((group) => ({
+        ...group,
+        templates: search
+          ? group.templates.filter((template) => matchesTemplateSearch(template, search))
+          : group.templates,
+      }))
+      .filter((group) => group.templates.length > 0)
+  }, [activeTemplateCategory, templateGroups, templateSearchQuery])
 
   const applyCanvasDraft = useCallback((draft: CanvasDraft) => {
     setNodes(cloneCanvasNodes(draft.nodes))
@@ -856,6 +862,13 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             </div>
             <Badge variant="outline">{agentFlowNodeTemplates.length} 类</Badge>
           </div>
+          <Input
+            data-testid="component-palette-search"
+            className="mb-3 h-9"
+            placeholder="搜索节点、Agent、产物"
+            value={templateSearchQuery}
+            onChange={(event) => setTemplateSearchQuery(event.target.value)}
+          />
           <div className="mb-3 flex flex-wrap gap-1" data-testid="component-category-filter">
             {(['全部', ...templateGroups.map((group) => group.category)] as Array<AgentFlowNodeTemplateCategory | '全部'>).map((category) => (
               <button
@@ -1612,6 +1625,25 @@ function nodeIcon(kind: AgentFlowNodeKind) {
   if (kind === 'approval') return <ClipboardCheck className="size-4" />
   if (kind === 'artifact') return <CheckCircle2 className="size-4" />
   return <Sparkles className="size-4" />
+}
+
+function matchesTemplateSearch(
+  template: (typeof agentFlowNodeTemplates)[number],
+  search: string,
+) {
+  const haystack = [
+    template.title,
+    template.subtitle,
+    template.description,
+    template.kind,
+    template.category,
+    ...template.inputs.flatMap((input) => [input.label, input.type]),
+    ...template.outputs.flatMap((output) => [output.label, output.type]),
+  ]
+    .join(' ')
+    .toLowerCase()
+
+  return haystack.includes(search)
 }
 
 function createNodeFromTemplate(
