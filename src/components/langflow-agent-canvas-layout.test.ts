@@ -44,4 +44,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('新增输入')
     expect(source).toContain('新增输出')
   })
+
+  it('keeps existing edges consistent when a port artifact type changes', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+
+    expect(source).toContain('changePortTypeForNode')
+    expect(source).toContain('syncEdgesAfterPortTypeChange')
+    expect(source).toContain("direction === 'outputs'")
+    expect(source).toContain('artifactType: nextType')
+    expect(source).toContain('label: artifactLabels[nextType]')
+    expect(source).toContain('canConnect(edge.data?.artifactType ??')
+  })
 })

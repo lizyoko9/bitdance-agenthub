@@ -276,6 +276,63 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     )
   }, [setEdges, setNodes])
 
+  const syncEdgesAfterPortTypeChange = useCallback((
+    nodeId: string,
+    direction: 'inputs' | 'outputs',
+    portId: string,
+    nextType: ArtifactType,
+  ) => {
+    const changedHandle = direction === 'inputs' ? `in:${portId}` : `out:${portId}`
+
+    setEdges((current) =>
+      current.flatMap((edge) => {
+        if (direction === 'outputs' && edge.source === nodeId && edge.sourceHandle === changedHandle) {
+          const targetInputType = findPortType(nodes, edge.target, 'inputs', edge.targetHandle)
+          if (targetInputType && !canConnect(nextType, targetInputType)) return []
+
+          return [{
+            ...edge,
+            data: {
+              artifactType: nextType,
+              label: artifactLabels[nextType],
+              outputId: edge.data?.outputId ?? portId,
+            },
+          }]
+        }
+
+        if (direction === 'inputs' && edge.target === nodeId && edge.targetHandle === changedHandle) {
+          return canConnect(edge.data?.artifactType ?? 'any', nextType) ? [edge] : []
+        }
+
+        return [edge]
+      }),
+    )
+  }, [nodes, setEdges])
+
+  const changePortTypeForNode = useCallback((
+    nodeId: string,
+    direction: 'inputs' | 'outputs',
+    portId: string,
+    nextType: ArtifactType,
+  ) => {
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                [direction]: node.data[direction].map((port) =>
+                  port.id === portId ? { ...port, type: nextType, label: artifactLabels[nextType] } : port,
+                ),
+              },
+            }
+          : node,
+      ),
+    )
+    syncEdgesAfterPortTypeChange(nodeId, direction, portId, nextType)
+  }, [setNodes, syncEdgesAfterPortTypeChange])
+
   const deleteNodeById = useCallback((nodeId: string) => {
     setNodes((current) => current.filter((node) => node.id !== nodeId))
     setEdges((current) =>
@@ -444,6 +501,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               onDeleteNode={deleteSelectedNode}
               addPortToNode={addPortToNode}
               removePortFromNode={removePortFromNode}
+              changePortTypeForNode={changePortTypeForNode}
             />
           </div>
         </div>
@@ -542,6 +600,7 @@ function NodeConfigPanel({
   onDeleteNode,
   addPortToNode,
   removePortFromNode,
+  changePortTypeForNode,
 }: {
   node: AgentFlowNode | null
   agents: AgentProfileRow[]
@@ -550,6 +609,7 @@ function NodeConfigPanel({
   onDeleteNode: () => void
   addPortToNode: (nodeId: string, direction: 'inputs' | 'outputs') => void
   removePortFromNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string) => void
+  changePortTypeForNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string, nextType: ArtifactType) => void
 }) {
   if (!node) {
     return (
@@ -559,13 +619,6 @@ function NodeConfigPanel({
         </div>
       </aside>
     )
-  }
-
-  const updatePortType = (portId: string, direction: 'inputs' | 'outputs', type: ArtifactType) => {
-    const nextPorts = node.data[direction].map((port) =>
-      port.id === portId ? { ...port, type, label: artifactLabels[type] } : port,
-    )
-    onUpdateNode(node.id, { [direction]: nextPorts })
   }
 
   return (
@@ -649,7 +702,7 @@ function NodeConfigPanel({
             ports={node.data.inputs}
             direction="inputs"
             addLabel="新增输入"
-            onTypeChange={updatePortType}
+            onTypeChange={(portId, direction, type) => changePortTypeForNode(node.id, direction, portId, type)}
             onAddPort={() => addPortToNode(node.id, 'inputs')}
             onRemovePort={(portId) => removePortFromNode(node.id, 'inputs', portId)}
           />
@@ -660,7 +713,7 @@ function NodeConfigPanel({
             ports={node.data.outputs}
             direction="outputs"
             addLabel="新增输出"
-            onTypeChange={updatePortType}
+            onTypeChange={(portId, direction, type) => changePortTypeForNode(node.id, direction, portId, type)}
             onAddPort={() => addPortToNode(node.id, 'outputs')}
             onRemovePort={(portId) => removePortFromNode(node.id, 'outputs', portId)}
           />
@@ -857,6 +910,19 @@ function inputHandleId(port: AgentFlowPort) {
 
 function outputHandleId(port: AgentFlowPort) {
   return `out:${port.id}`
+}
+
+function findPortType(
+  nodes: AgentFlowNode[],
+  nodeId: string,
+  direction: 'inputs' | 'outputs',
+  handleId?: string | null,
+) {
+  const node = nodes.find((item) => item.id === nodeId)
+  if (!node || !handleId) return null
+  const ports = node.data[direction]
+  const match = ports.find((port) => (direction === 'inputs' ? inputHandleId(port) : outputHandleId(port)) === handleId)
+  return match?.type ?? null
 }
 
 function canConnect(sourceType: ArtifactType, targetType: ArtifactType) {
