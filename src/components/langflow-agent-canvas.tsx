@@ -169,8 +169,8 @@ const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
 const CANVAS_DRAFT_LIBRARY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.library'
 const CANVAS_RUN_HISTORY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.runs'
 const NODE_TEMPLATE_MIME = 'application/agenthub-node-template'
-const CANVAS_FIT_VIEW_PADDING = 0.42
-const CANVAS_FIT_VIEW_MAX_ZOOM = 0.5
+const CANVAS_FIT_VIEW_PADDING = 0.18
+const CANVAS_FIT_VIEW_MAX_ZOOM = 0.85
 
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
 
@@ -275,7 +275,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
   const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
   const [savedDrafts, setSavedDrafts] = useState<CanvasDraft[]>([])
-  const { screenToFlowPosition } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
+  const { screenToFlowPosition, fitView } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
+  const fitCanvasView = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        void fitView({ padding: CANVAS_FIT_VIEW_PADDING, maxZoom: CANVAS_FIT_VIEW_MAX_ZOOM })
+      })
+    })
+  }, [fitView])
   const templateGroups = useMemo(() => getAgentFlowNodeTemplateGroups(agentFlowNodeTemplates), [])
   const filteredTemplateGroups = useMemo(() => {
     const search = templateSearchQuery.trim().toLowerCase()
@@ -302,7 +309,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setLastRun(findLatestCanvasRunForDraft(loadCanvasRunHistory(), draft.workflowDraftId))
     setWorkflowDraftId(draft.workflowDraftId ?? createCanvasDraftId())
     setWorkflowTitle(draft.title?.trim() || '未命名流程')
-  }, [setEdges, setNodes])
+    fitCanvasView()
+  }, [fitCanvasView, setEdges, setNodes])
 
   useEffect(() => {
     let cancelled = false
@@ -391,7 +399,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     }
     setSelectedNodeId(node.id)
     setSelectedEdgeId('')
-  }, [nodes, selectedNodeId, setEdges, setNodes])
+    if (!position) fitCanvasView()
+  }, [fitCanvasView, nodes, selectedNodeId, setEdges, setNodes])
 
   const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, templateId: string) => {
     event.dataTransfer.setData(NODE_TEMPLATE_MIME, templateId)
@@ -798,7 +807,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setPreflightIssues([])
     setLastRun(null)
     setNotice('已新建空白流程，可直接拖拽节点开始编排。')
-  }, [setEdges, setNodes])
+    fitCanvasView()
+  }, [fitCanvasView, setEdges, setNodes])
 
   const applyWorkflowPreset = useCallback((presetId: CanvasWorkflowPreset['id']) => {
     const draft = createCanvasWorkflowPresetDraft(presetId, initialWorkflowId ?? null)
@@ -814,10 +824,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
     saveWorkflowDraftToLibrary(draft)
     setNotice(`已载入流程模板：${draft.title}。你可以直接修改节点、连线和交付物。`)
-  }, [initialWorkflowId, saveWorkflowDraftToLibrary, setEdges, setNodes])
+    fitCanvasView()
+  }, [fitCanvasView, initialWorkflowId, saveWorkflowDraftToLibrary, setEdges, setNodes])
 
   return (
-    <div className="flex h-full min-h-[720px] flex-col bg-background" data-testid="langflow-agent-canvas">
+    <div className="flex h-full min-h-[720px] w-full min-w-0 flex-1 flex-col overflow-hidden bg-background" data-testid="langflow-agent-canvas">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-base font-semibold">

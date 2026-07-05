@@ -10,6 +10,7 @@ describe('Langflow agent canvas layout', () => {
   it('uses a Langflow-style three-column workspace so panels do not cover canvas nodes', () => {
     const source = readCanvasSource()
 
+    expect(source).toContain('flex h-full min-h-[720px] w-full min-w-0 flex-1 flex-col overflow-hidden bg-background')
     expect(source).toContain('grid-cols-[17rem_minmax(0,1fr)_22rem]')
     expect(source).toContain('data-testid="canvas-flow-surface"')
     expect(source).toContain('col-start-1 row-start-1')
@@ -52,11 +53,23 @@ describe('Langflow agent canvas layout', () => {
   it('pads automatic fit view so workflow nodes are not hidden under the palette or inspector', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain('const CANVAS_FIT_VIEW_PADDING = 0.42')
-    expect(source).toContain('const CANVAS_FIT_VIEW_MAX_ZOOM = 0.5')
+    expect(source).toContain('const CANVAS_FIT_VIEW_PADDING = 0.18')
+    expect(source).toContain('const CANVAS_FIT_VIEW_MAX_ZOOM = 0.85')
     expect(source).toContain('fitViewOptions={{ padding: CANVAS_FIT_VIEW_PADDING, maxZoom: CANVAS_FIT_VIEW_MAX_ZOOM }}')
     expect(source).toContain('maxZoom={CANVAS_FIT_VIEW_MAX_ZOOM}')
     expect(source).not.toContain('fitViewOptions={{ padding: 0.2 }}')
+    expect(source).not.toContain('const CANVAS_FIT_VIEW_MAX_ZOOM = 0.5')
+  })
+
+  it('recenters the visual workflow after loading a draft or applying a preset', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('const { screenToFlowPosition, fitView } = useReactFlow')
+    expect(source).toContain('const fitCanvasView = useCallback(() => {')
+    expect(source).toContain('window.requestAnimationFrame(() => {')
+    expect(source).toContain('void fitView({ padding: CANVAS_FIT_VIEW_PADDING, maxZoom: CANVAS_FIT_VIEW_MAX_ZOOM })')
+    expect(source).toContain('fitCanvasView()')
+    expect(source).toContain('if (!position) fitCanvasView()')
   })
 
   it('uses compact node cards so three workflow nodes fit inside the middle canvas column', () => {
