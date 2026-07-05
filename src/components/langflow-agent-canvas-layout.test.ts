@@ -251,6 +251,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('replaceEdgesForSingleTargetHandle(current, edge)')
   })
 
+  it('leaves active connection mode after auto-linking a newly added compatible node', () => {
+    const source = readCanvasSource()
+    const addNodeSource = source.slice(source.indexOf('const addNodeFromTemplate'), source.indexOf('const handlePaletteDragStart'))
+
+    expect(addNodeSource).toContain('if (sourceNode && autoPair) {')
+    expect(addNodeSource).toContain('setEdges((current) => replaceEdgesForSingleTargetHandle(current, edge))')
+    expect(addNodeSource).toContain('clearActiveConnection()')
+  })
+
   it('uses reusable business node templates instead of raw abstract node kinds', () => {
     const source = readCanvasSource()
 

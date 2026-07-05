@@ -542,6 +542,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         autoPair.targetPort.label,
       )
       setEdges((current) => replaceEdgesForSingleTargetHandle(current, edge))
+      clearActiveConnection()
       setNotice(`已把 ${sourceNode.data.title} 的 ${autoPair.sourcePort.label} 接到 ${node.data.title}。`)
     } else if (sourceNode) {
       setNotice('已添加节点，但它没有能直接接收当前节点产物的输入端口。')
@@ -549,7 +550,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId(node.id)
     setSelectedEdgeId('')
     if (!position) fitCanvasView()
-  }, [activeConnectionType, activeOutputPort, fitCanvasView, nodes, pushCanvasHistory, selectedNodeId, setEdges, setNodes])
+  }, [activeConnectionType, activeOutputPort, clearActiveConnection, fitCanvasView, nodes, pushCanvasHistory, selectedNodeId, setEdges, setNodes])
 
   const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, templateId: string) => {
     event.dataTransfer.setData(NODE_TEMPLATE_MIME, templateId)
