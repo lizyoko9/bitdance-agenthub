@@ -95,6 +95,14 @@ interface CanvasDraft {
   handoffSteps?: HandoffStep[]
 }
 
+interface EdgeRoute {
+  sourceTitle: string
+  sourcePortLabel: string
+  targetTitle: string
+  targetPortLabel: string
+  artifactType: ArtifactType
+}
+
 const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
 
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
@@ -239,6 +247,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setNotice(`已恢复本地草稿：${draft.nodes.length} 个节点、${draft.edges.length} 条连线。`)
   }, [setEdges, setNodes])
 
+  const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) ?? null
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
   const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
 
@@ -601,16 +610,24 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
         <div className="pointer-events-none absolute right-3 top-3 bottom-3 z-10 w-[22rem]">
           <div className="pointer-events-auto h-full">
-            <NodeConfigPanel
-              node={selectedNode}
-              agents={agents}
-              softwareCommands={softwareCommands}
-              onUpdateNode={updateNode}
-              onDeleteNode={deleteSelectedNode}
-              addPortToNode={addPortToNode}
-              removePortFromNode={removePortFromNode}
-              changePortTypeForNode={changePortTypeForNode}
-            />
+            {selectedEdge ? (
+              <EdgeConfigPanel
+                edge={selectedEdge}
+                nodes={nodes}
+                onDeleteEdge={() => deleteEdgeById(selectedEdge.id)}
+              />
+            ) : (
+              <NodeConfigPanel
+                node={selectedNode}
+                agents={agents}
+                softwareCommands={softwareCommands}
+                onUpdateNode={updateNode}
+                onDeleteNode={deleteSelectedNode}
+                addPortToNode={addPortToNode}
+                removePortFromNode={removePortFromNode}
+                changePortTypeForNode={changePortTypeForNode}
+              />
+            )}
           </div>
         </div>
 
@@ -717,6 +734,68 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
         </div>
       </foreignObject>
     </g>
+  )
+}
+
+function EdgeConfigPanel({
+  edge,
+  nodes,
+  onDeleteEdge,
+}: {
+  edge: AgentFlowEdge
+  nodes: AgentFlowNode[]
+  onDeleteEdge: () => void
+}) {
+  const route = describeEdgeRoute(edge, nodes)
+
+  return (
+    <aside
+      className="h-full min-h-0 overflow-y-auto rounded-xl border bg-background/95 p-4 shadow-xl backdrop-blur"
+      data-testid="langflow-agent-edge-panel"
+    >
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <GitBranch className="size-4 text-primary" />
+            交付连线
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">这条线决定下游节点实际收到哪一种产物。</div>
+        </div>
+        <Button type="button" size="sm" variant="destructive" className="h-8" onClick={onDeleteEdge}>
+          删除
+        </Button>
+      </div>
+
+      {!route ? (
+        <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+          这条连线引用的节点或端口已经不存在，可以删除后重新连接。
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <PanelBlock title="交付产物">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold">{artifactLabels[route.artifactType]}</div>
+              <ArtifactPill type={route.artifactType} />
+            </div>
+            <div className="mt-2 text-xs leading-5 text-muted-foreground">
+              下游节点只会收到这个产物类型，不会自动拿到上游节点的其他文件、视频、代码或报告。
+            </div>
+          </PanelBlock>
+
+          <PanelBlock title="来源端口">
+            <div className="text-sm font-semibold">{route.sourceTitle}</div>
+            <div className="mt-1 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">{route.sourcePortLabel}</div>
+            <div className="mt-2 break-all text-[11px] text-muted-foreground">sourceHandle: {edge.sourceHandle ?? '默认输出'}</div>
+          </PanelBlock>
+
+          <PanelBlock title="目标端口">
+            <div className="text-sm font-semibold">{route.targetTitle}</div>
+            <div className="mt-1 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">{route.targetPortLabel}</div>
+            <div className="mt-2 break-all text-[11px] text-muted-foreground">targetHandle: {edge.targetHandle ?? '默认输入'}</div>
+          </PanelBlock>
+        </div>
+      )}
+    </aside>
   )
 }
 
@@ -1099,6 +1178,34 @@ function buildHandoffSteps(nodes: AgentFlowNode[], edges: AgentFlowEdge[]): Hand
       artifactLabel: artifactLabels[artifactType],
     }]
   })
+}
+
+function describeEdgeRoute(edge: AgentFlowEdge, nodes: AgentFlowNode[]): EdgeRoute | null {
+  const source = nodes.find((node) => node.id === edge.source)
+  const target = nodes.find((node) => node.id === edge.target)
+  if (!source || !target) return null
+
+  const sourcePort = findPortByHandle(source, 'outputs', edge.sourceHandle)
+  const targetPort = findPortByHandle(target, 'inputs', edge.targetHandle)
+  const artifactType = edge.data?.artifactType ?? sourcePort?.type ?? 'any'
+
+  return {
+    sourceTitle: source.data.title,
+    sourcePortLabel: sourcePort?.label ?? edge.data?.label ?? artifactLabels[artifactType],
+    targetTitle: target.data.title,
+    targetPortLabel: targetPort?.label ?? artifactLabels[artifactType],
+    artifactType,
+  }
+}
+
+function findPortByHandle(
+  node: AgentFlowNode,
+  direction: 'inputs' | 'outputs',
+  handleId?: string | null,
+) {
+  if (!handleId) return null
+  const ports = node.data[direction]
+  return ports.find((port) => (direction === 'inputs' ? inputHandleId(port) : outputHandleId(port)) === handleId) ?? null
 }
 
 function loadCanvasDraft(): CanvasDraft | null {

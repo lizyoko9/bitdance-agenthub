@@ -107,4 +107,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('setEdges(draft.edges)')
     expect(source).toContain('setNotice(`已恢复本地草稿')
   })
+
+  it('shows a dedicated handoff inspector when a workflow edge is selected', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('const selectedEdge = edges.find')
+    expect(source).toContain('EdgeConfigPanel')
+    expect(source).toContain('describeEdgeRoute')
+    expect(source).toContain('data-testid="langflow-agent-edge-panel"')
+    expect(source).toContain('onDeleteEdge={() => deleteEdgeById(selectedEdge.id)}')
+    expect(source).toContain('sourceHandle')
+    expect(source).toContain('targetHandle')
+  })
 })
