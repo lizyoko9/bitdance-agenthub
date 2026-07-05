@@ -35,6 +35,7 @@ import {
   Save,
   Settings2,
   Sparkles,
+  Trash2,
   Wrench,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
@@ -733,6 +734,16 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   }, [selectEdgeById])
 
   useEffect(() => {
+    const handleNodeDelete = (event: Event) => {
+      const nodeId = (event as CustomEvent<{ nodeId?: string }>).detail?.nodeId
+      if (nodeId) deleteNodeById(nodeId)
+    }
+
+    window.addEventListener('agenthub:canvas-node-delete', handleNodeDelete)
+    return () => window.removeEventListener('agenthub:canvas-node-delete', handleNodeDelete)
+  }, [deleteNodeById])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isEditableElement(event.target)) return
       if (event.key === 'Escape') {
@@ -1275,14 +1286,36 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
     handleInputPortClick(input)
   }
 
+  const handleToolbarDelete = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    window.dispatchEvent(new CustomEvent('agenthub:canvas-node-delete', { detail: { nodeId: id } }))
+  }
+
   return (
     <div
       className={cn(
-        'w-60 rounded-xl border bg-card text-card-foreground shadow-sm transition hover:shadow-md',
+        'relative w-60 rounded-xl border bg-card text-card-foreground shadow-sm transition hover:shadow-md',
         selected && 'border-primary shadow-primary/20',
       )}
       data-testid="langflow-agent-node"
     >
+      {selected && (
+        <div
+          className="nodrag nopan absolute -top-10 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-lg"
+          data-testid="node-floating-toolbar"
+        >
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-destructive transition hover:bg-destructive/10"
+            onPointerDownCapture={handleToolbarDelete}
+            aria-label="删除节点"
+          >
+            <Trash2 className="size-3.5" />
+            删除
+          </button>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-3 border-b px-3 py-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">

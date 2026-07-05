@@ -117,6 +117,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('isEditableElement(event.target)')
   })
 
+  it('shows a Langflow-style floating toolbar on the selected node for obvious node actions', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="node-floating-toolbar"')
+    expect(source).toContain('selected &&')
+    expect(source).toContain('agenthub:canvas-node-delete')
+    expect(source).toContain('handleNodeDelete')
+    expect(source).toContain('deleteNodeById(nodeId)')
+  })
+
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 
