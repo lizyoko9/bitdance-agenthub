@@ -178,6 +178,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('onNodeDragStart={pushCanvasHistory}')
   })
 
+  it('records node inspector edits before applying node data patches', () => {
+    const source = readCanvasSource()
+    const updateNodeSource = source.slice(source.indexOf('const updateNode ='), source.indexOf('const addPortToNode'))
+
+    expect(updateNodeSource).toContain('useCallback')
+    expect(updateNodeSource).toContain('pushCanvasHistory()')
+    expect(updateNodeSource.indexOf('pushCanvasHistory()')).toBeLessThan(updateNodeSource.indexOf('setNodes((current) =>'))
+  })
+
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 

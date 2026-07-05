@@ -582,13 +582,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     return canConnect(output.type, input.type)
   }, [edges, nodes])
 
-  const updateNode = (nodeId: string, patch: Partial<AgentFlowNodeData>) => {
+  const updateNode = useCallback((nodeId: string, patch: Partial<AgentFlowNodeData>) => {
+    pushCanvasHistory()
     setNodes((current) =>
       current.map((node) =>
         node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node,
       ),
     )
-  }
+  }, [pushCanvasHistory, setNodes])
 
   const addPortToNode = useCallback((nodeId: string, direction: 'inputs' | 'outputs') => {
     const type: ArtifactType = direction === 'inputs' ? 'any' : 'document'
