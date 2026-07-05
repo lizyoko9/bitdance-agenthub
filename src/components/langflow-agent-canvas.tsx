@@ -1856,6 +1856,7 @@ function NodeConfigPanel({
         )}
 
         <NodeBusinessSetup node={node} />
+        <NodeInputRequirementPanel node={node} />
         <NodeDeliveryOutletPanel node={node} onStartOutputConnection={onStartOutputConnection} />
         <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
         <NodeSetupGuide node={node} />
@@ -1939,6 +1940,37 @@ function NodeBusinessSetup({ node }: { node: AgentFlowNode }) {
             testId="node-business-outputs"
           />
         </div>
+      </div>
+    </PanelBlock>
+  )
+}
+
+function NodeInputRequirementPanel({ node }: { node: AgentFlowNode }) {
+  return (
+    <PanelBlock title="接收入口">
+      <div data-testid="node-input-requirements" className="space-y-2">
+        <div className="text-xs leading-5 text-muted-foreground">
+          下游能不能接上，主要看这里。上游连线必须交付这些入口接受的产物类型。
+        </div>
+        {node.data.inputs.length === 0 ? (
+          <div className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
+            这个节点不需要上游输入，通常适合作为流程起点。
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            {node.data.inputs.map((input) => (
+              <div
+                key={input.id}
+                className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-2"
+                data-testid="node-input-requirement-row"
+              >
+                <ArtifactPill type={input.type} />
+                <span className="min-w-0 flex-1 truncate text-xs">{input.label}</span>
+                <span className="text-[11px] text-muted-foreground">可接收</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </PanelBlock>
   )

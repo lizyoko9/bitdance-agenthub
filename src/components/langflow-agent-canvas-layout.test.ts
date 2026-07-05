@@ -438,6 +438,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source.indexOf('NodeDeliveryOutletPanel')).toBeLessThan(source.indexOf('data-testid="advanced-port-settings"'))
   })
 
+  it('shows node input requirements in the inspector before delivery outlets', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodeInputRequirementPanel')
+    expect(source).toContain('data-testid="node-input-requirements"')
+    expect(source).toContain('data-testid="node-input-requirement-row"')
+    expect(source.indexOf('NodeInputRequirementPanel')).toBeLessThan(source.indexOf('NodeDeliveryOutletPanel'))
+  })
+
   it('shows a plain-language setup guide before advanced node settings', () => {
     const source = readCanvasSource()
 
