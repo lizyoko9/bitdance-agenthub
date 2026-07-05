@@ -139,6 +139,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))')
   })
 
+  it('supports duplicating the selected node with Ctrl+D like a visual canvas editor', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain("event.key.toLowerCase() === 'd'")
+    expect(source).toContain('(event.ctrlKey || event.metaKey)')
+    expect(source).toContain('duplicateNodeById(selectedNodeId)')
+    expect(source).toContain('event.preventDefault()')
+  })
+
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 
