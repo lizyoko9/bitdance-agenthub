@@ -16,6 +16,7 @@ import {
   type EdgeProps,
   type Node,
   type NodeProps,
+  type OnConnectStartParams,
   useEdgesState,
   useNodesState,
   useReactFlow,
@@ -72,6 +73,8 @@ interface AgentFlowNodeData extends Record<string, unknown> {
   outputs: AgentFlowPort[]
   customerVisible?: boolean
   executionStage?: number
+  connectionType?: ArtifactType | null
+  onOutputConnectStart?: (type: ArtifactType) => void
 }
 
 type AgentFlowNode = Node<AgentFlowNodeData>
@@ -217,6 +220,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [selectedEdgeId, setSelectedEdgeId] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const [preflightVisible, setPreflightVisible] = useState(false)
+  const [activeConnectionType, setActiveConnectionType] = useState<ArtifactType | null>(null)
   const { screenToFlowPosition } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
 
   useEffect(() => {
@@ -253,8 +257,16 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
   const executionStages = useMemo(() => buildExecutionStages(nodes, edges), [edges, nodes])
   const nodesForCanvas = useMemo(
-    () => nodes.map((node) => ({ ...node, data: { ...node.data, executionStage: executionStages.get(node.id) } })),
-    [executionStages, nodes],
+    () => nodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        connectionType: activeConnectionType,
+        executionStage: executionStages.get(node.id),
+        onOutputConnectStart: setActiveConnectionType,
+      },
+    })),
+    [activeConnectionType, executionStages, nodes],
   )
 
   const addNode = useCallback((kind: AgentFlowNodeKind, position?: { x: number; y: number }) => {
@@ -281,6 +293,17 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
     addNode(kind, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
   }, [addNode, screenToFlowPosition])
+
+  const handleConnectStart = useCallback((_: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
+    if (params.handleType !== 'source' || !params.nodeId || !params.handleId) {
+      setActiveConnectionType(null)
+      return
+    }
+
+    const source = nodes.find((node) => node.id === params.nodeId)
+    const output = source?.data.outputs.find((item) => outputHandleId(item) === params.handleId)
+    setActiveConnectionType(output?.type ?? null)
+  }, [nodes])
 
   const updateNode = (nodeId: string, patch: Partial<AgentFlowNodeData>) => {
     setNodes((current) =>
@@ -543,7 +566,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         <div className="shrink-0 border-b bg-primary/5 px-4 py-2 text-xs text-primary">{notice}</div>
       )}
 
-      <main className="relative min-h-0 flex-1">
+      <main className="relative min-h-0 flex-1" data-active-connection-type={activeConnectionType ?? ''}>
         <ReactFlow<AgentFlowNode, AgentFlowEdge>
           nodes={nodesForCanvas}
           edges={edges}
@@ -552,6 +575,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onConnectStart={handleConnectStart}
+          onConnectEnd={() => setActiveConnectionType(null)}
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
           onNodeClick={(_, node) => {
@@ -678,22 +703,40 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
         <p className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">{data.description}</p>
 
         <div className="mt-3 grid gap-2">
-          {data.inputs.map((input) => (
-            <div key={input.id} className="relative flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5">
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={inputHandleId(input)}
-                className="!size-3 !border-2 !border-background"
-                style={{ backgroundColor: artifactColors[input.type], left: -7 }}
-              />
-              <span className="min-w-0 flex-1 truncate text-[11px]">{input.label}</span>
-              <ArtifactPill type={input.type} />
-            </div>
-          ))}
+          {data.inputs.map((input) => {
+            const isInputCompatible = !data.connectionType || canConnect(data.connectionType, input.type)
+
+            return (
+              <div
+                key={input.id}
+                className={cn(
+                  'relative flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 transition',
+                  data.connectionType && isInputCompatible && 'border-emerald-400 bg-emerald-500/10',
+                  data.connectionType && !isInputCompatible && 'opacity-35 grayscale',
+                )}
+                data-port-compatible={isInputCompatible}
+              >
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id={inputHandleId(input)}
+                  className="!size-3 !border-2 !border-background"
+                  style={{ backgroundColor: artifactColors[input.type], left: -7 }}
+                />
+                <span className="min-w-0 flex-1 truncate text-[11px]">{input.label}</span>
+                <ArtifactPill type={input.type} />
+              </div>
+            )
+          })}
 
           {data.outputs.map((output) => (
-            <div key={output.id} className="relative flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+            <div
+              key={output.id}
+              className="relative flex items-center gap-2 rounded-md border bg-background px-2 py-1.5"
+              data-output-port-type={output.type}
+              onMouseDownCapture={() => data.onOutputConnectStart?.(output.type)}
+              onPointerDownCapture={() => data.onOutputConnectStart?.(output.type)}
+            >
               <ArtifactPill type={output.type} />
               <span className="min-w-0 flex-1 truncate text-[11px]">{output.label}</span>
               <Handle
@@ -701,6 +744,8 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
                 position={Position.Right}
                 id={outputHandleId(output)}
                 className="!size-3 !border-2 !border-background"
+                onMouseDownCapture={() => data.onOutputConnectStart?.(output.type)}
+                onPointerDownCapture={() => data.onOutputConnectStart?.(output.type)}
                 style={{ backgroundColor: artifactColors[output.type], right: -7 }}
               />
             </div>

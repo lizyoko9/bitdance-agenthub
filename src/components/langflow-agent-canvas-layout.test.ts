@@ -130,4 +130,18 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('executionStage?: number')
     expect(source).toContain('第 {data.executionStage} 步')
   })
+
+  it('filters compatible input ports while the user is dragging a connection', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('activeConnectionType')
+    expect(source).toContain('handleConnectStart')
+    expect(source).toContain('onConnectStart={handleConnectStart}')
+    expect(source).toContain('onConnectEnd={() => setActiveConnectionType(null)}')
+    expect(source).toContain('connectionType?: ArtifactType | null')
+    expect(source).toContain('data-output-port-type={output.type}')
+    expect(source).toContain('isInputCompatible')
+    expect(source).toContain('data-port-compatible')
+    expect(source).toContain('canConnect(data.connectionType, input.type)')
+  })
 })
