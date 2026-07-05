@@ -364,6 +364,7 @@ export function ChineseUiTranslator() {
     const translateRoot = () => {
       const root = document.getElementById('agenthub-app-root')
       if (!root) return
+      removeRuntimeSourceTextNodes(root)
       translateTextNodes(root)
       translateElementAttributes(root)
     }
@@ -385,6 +386,22 @@ export function ChineseUiTranslator() {
   }, [])
 
   return null
+}
+
+function removeRuntimeSourceTextNodes(root: ParentNode) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.textContent?.trim()) return NodeFilter.FILTER_REJECT
+      if (!looksLikeRuntimeSource(node.textContent)) return NodeFilter.FILTER_REJECT
+      const parent = node.parentElement
+      if (!parent || shouldSkip(parent)) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+
+  const nodes: Text[] = []
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text)
+  for (const node of nodes) node.remove()
 }
 
 function translateTextNodes(root: ParentNode) {
