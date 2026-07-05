@@ -21,6 +21,16 @@ describe('workflow library local canvas drafts', () => {
     expect(source).toContain('edgeCount')
   })
 
+  it('merges local canvas dry-run records into workflow run status', () => {
+    const source = readWorkflowLibrarySource()
+
+    expect(source).toContain('CANVAS_RUN_HISTORY_STORAGE_KEY')
+    expect(source).toContain('loadLocalCanvasRuns')
+    expect(source).toContain('localCanvasRuns')
+    expect(source).toContain('allRuns')
+    expect(source).toContain("source: 'local_canvas_run'")
+  })
+
   it('opens the requested saved canvas draft by workflow id', () => {
     const source = readCanvasSource()
 
@@ -28,5 +38,15 @@ describe('workflow library local canvas drafts', () => {
     expect(source).toContain('initialWorkflowId')
     expect(source).toContain('library.find')
     expect(source).toContain('workflowDraftId === draftId')
+  })
+
+  it('persists a local canvas dry-run record when preflight succeeds', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('CANVAS_RUN_HISTORY_STORAGE_KEY')
+    expect(source).toContain('saveCanvasRunHistory')
+    expect(source).toContain('upsertCanvasRunHistory')
+    expect(source).toContain('local_canvas_run')
+    expect(source).toContain('executionPlan.map')
   })
 })

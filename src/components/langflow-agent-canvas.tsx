@@ -120,6 +120,27 @@ interface CanvasDraft {
   handoffSteps?: HandoffStep[]
 }
 
+interface CanvasRunRecord {
+  schema: 'agenthub.langflow_agent_canvas.run.v1'
+  id: string
+  workflowDraftId: string
+  workflowTitle: string
+  status: 'complete'
+  source: 'local_canvas_run'
+  startedAt: number
+  finishedAt: number
+  nodeCount: number
+  edgeCount: number
+  handoffCount: number
+  steps: Array<{
+    nodeId: string
+    title: string
+    stage: number
+    incomingContracts: string[]
+    outgoingContracts: string[]
+  }>
+}
+
 interface EdgeRoute {
   sourceTitle: string
   sourcePortLabel: string
@@ -131,6 +152,7 @@ interface EdgeRoute {
 
 const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
 const CANVAS_DRAFT_LIBRARY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.library'
+const CANVAS_RUN_HISTORY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.runs'
 const NODE_TEMPLATE_MIME = 'application/agenthub-node-template'
 
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
@@ -581,13 +603,36 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       return
     }
 
+    const startedAt = Date.now()
+    const run: CanvasRunRecord = {
+      schema: 'agenthub.langflow_agent_canvas.run.v1',
+      id: `local-run-${startedAt}-${Math.random().toString(36).slice(2, 8)}`,
+      workflowDraftId,
+      workflowTitle: workflowTitle.trim() || '未命名流程',
+      status: 'complete',
+      source: 'local_canvas_run',
+      startedAt,
+      finishedAt: startedAt,
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+      handoffCount: handoffSteps.length,
+      steps: executionPlan.map((step) => ({
+        nodeId: step.nodeId,
+        title: step.title,
+        stage: step.stage,
+        incomingContracts: step.incomingContracts,
+        outgoingContracts: step.outgoingContracts,
+      })),
+    }
+    saveCanvasRunHistory(upsertCanvasRunHistory(loadCanvasRunHistory(), run))
+
     const firstWarning = preflight.issues.find((issue) => issue.severity === 'warning')
     setNotice(
-      `预检完成：${handoffSteps.length} 条交付链路可运行${
+      `预检完成并记录一次本地试运行：${handoffSteps.length} 条交付链路可运行${
         firstWarning ? `，${preflight.warningCount} 个提醒：${firstWarning.message}` : '。'
       }`,
     )
-  }, [edges, handoffSteps.length, nodes])
+  }, [edges, executionPlan, handoffSteps.length, nodes, workflowDraftId, workflowTitle])
 
   const saveCanvasDraft = useCallback(() => {
     const title = workflowTitle.trim() || '未命名流程'
@@ -1570,6 +1615,29 @@ function saveCanvasDraftLibrary(drafts: CanvasDraft[]) {
   window.localStorage.setItem(CANVAS_DRAFT_LIBRARY_STORAGE_KEY, JSON.stringify(drafts))
 }
 
+function loadCanvasRunHistory(): CanvasRunRecord[] {
+  const raw = window.localStorage.getItem(CANVAS_RUN_HISTORY_STORAGE_KEY)
+  if (!raw) return []
+
+  try {
+    const runs = JSON.parse(raw) as unknown
+    if (!Array.isArray(runs)) return []
+    return runs
+      .filter(isValidCanvasRunRecord)
+      .sort((a, b) => b.startedAt - a.startedAt)
+  } catch {
+    return []
+  }
+}
+
+function saveCanvasRunHistory(runs: CanvasRunRecord[]) {
+  window.localStorage.setItem(CANVAS_RUN_HISTORY_STORAGE_KEY, JSON.stringify(runs))
+}
+
+function upsertCanvasRunHistory(history: CanvasRunRecord[], run: CanvasRunRecord) {
+  return [run, ...history.filter((item) => item.id !== run.id)].slice(0, 100)
+}
+
 function upsertCanvasDraft(library: CanvasDraft[], draft: CanvasDraft) {
   const draftId = draft.workflowDraftId ?? createCanvasDraftId()
   return [
@@ -1586,6 +1654,19 @@ function isValidCanvasDraft(value: unknown): value is CanvasDraft {
     Array.isArray(draft.nodes) &&
     Array.isArray(draft.edges) &&
     typeof draft.savedAt === 'string'
+  )
+}
+
+function isValidCanvasRunRecord(value: unknown): value is CanvasRunRecord {
+  if (!value || typeof value !== 'object') return false
+  const run = value as Partial<CanvasRunRecord>
+  return (
+    run.schema === 'agenthub.langflow_agent_canvas.run.v1' &&
+    typeof run.id === 'string' &&
+    typeof run.workflowDraftId === 'string' &&
+    run.status === 'complete' &&
+    typeof run.startedAt === 'number' &&
+    typeof run.finishedAt === 'number'
   )
 }
 

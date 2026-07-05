@@ -31,12 +31,18 @@ type WorkflowListEntry = WorkflowRow & {
   edgeCount?: number
 }
 
+type WorkflowRunListEntry = WorkflowRunRow & {
+  source: 'database_run' | 'local_canvas_run'
+}
+
 const CANVAS_DRAFT_LIBRARY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.library'
+const CANVAS_RUN_HISTORY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.runs'
 
 export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLibraryProps) {
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([])
   const [localCanvasWorkflows, setLocalCanvasWorkflows] = useState<WorkflowListEntry[]>([])
   const [runs, setRuns] = useState<WorkflowRunRow[]>([])
+  const [localCanvasRuns, setLocalCanvasRuns] = useState<WorkflowRunListEntry[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -45,6 +51,7 @@ export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLi
     setLoading(true)
     setError(null)
     setLocalCanvasWorkflows(loadLocalCanvasWorkflows())
+    setLocalCanvasRuns(loadLocalCanvasRuns())
     try {
       const [nextWorkflows, nextRuns] = await Promise.all([fetchWorkflows(), fetchWorkflowRuns()])
       setWorkflows(nextWorkflows)
@@ -60,14 +67,21 @@ export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLi
     void reload()
   }, [])
 
+  const allRuns = useMemo<WorkflowRunListEntry[]>(() => {
+    return [
+      ...localCanvasRuns,
+      ...runs.map((run) => ({ ...run, source: 'database_run' as const })),
+    ]
+  }, [localCanvasRuns, runs])
+
   const latestRunByWorkflowId = useMemo(() => {
-    const map = new Map<string, WorkflowRunRow>()
-    for (const run of runs) {
+    const map = new Map<string, WorkflowRunListEntry>()
+    for (const run of allRuns) {
       const current = map.get(run.workflowId)
       if (!current || run.startedAt > current.startedAt) map.set(run.workflowId, run)
     }
     return map
-  }, [runs])
+  }, [allRuns])
 
   const allWorkflows = useMemo<WorkflowListEntry[]>(() => {
     const databaseWorkflows = workflows.map((workflow) => ({ ...workflow, source: 'database' as const }))
@@ -95,8 +109,8 @@ export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLi
   }, [allWorkflows, latestRunByWorkflowId])
 
   const runningCount = useMemo(() => {
-    return runs.filter((run) => run.status === 'running' || run.status === 'queued').length
-  }, [runs])
+    return allRuns.filter((run) => run.status === 'running' || run.status === 'queued').length
+  }, [allRuns])
 
   return (
     <div data-testid="workflow-library" className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
@@ -126,7 +140,7 @@ export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLi
           <WorkflowMetric label="工作流" value={allWorkflows.length} />
           <WorkflowMetric label="已完成" value={completedCount} />
           <WorkflowMetric label="运行中" value={runningCount} />
-          <WorkflowMetric label="运行记录" value={runs.length} />
+          <WorkflowMetric label="运行记录" value={allRuns.length} />
         </div>
       </header>
 
@@ -174,7 +188,7 @@ export function WorkflowLibrary({ onOpenWorkflow, onCreateWorkflow }: WorkflowLi
                   key={workflow.id}
                   workflow={workflow}
                   latestRun={latestRunByWorkflowId.get(workflow.id) ?? null}
-                  runCount={runs.filter((run) => run.workflowId === workflow.id).length}
+                  runCount={allRuns.filter((run) => run.workflowId === workflow.id).length}
                   onOpen={() => onOpenWorkflow(workflow.id)}
                 />
               ))}
@@ -202,7 +216,7 @@ function WorkflowListItem({
   onOpen,
 }: {
   workflow: WorkflowListEntry
-  latestRun: WorkflowRunRow | null
+  latestRun: WorkflowRunListEntry | null
   runCount: number
   onOpen: () => void
 }) {
@@ -237,7 +251,7 @@ function WorkflowListItem({
   )
 }
 
-function WorkflowStatusIcon({ run }: { run: WorkflowRunRow | null }) {
+function WorkflowStatusIcon({ run }: { run: WorkflowRunListEntry | null }) {
   if (run?.status === 'complete') return <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
   if (run?.status === 'running' || run?.status === 'queued') {
     return <Play className="size-4 shrink-0 text-primary" />
@@ -245,7 +259,7 @@ function WorkflowStatusIcon({ run }: { run: WorkflowRunRow | null }) {
   return <Clock3 className="size-4 shrink-0 text-muted-foreground" />
 }
 
-function WorkflowStatusBadge({ workflow, run }: { workflow: WorkflowRow; run: WorkflowRunRow | null }) {
+function WorkflowStatusBadge({ workflow, run }: { workflow: WorkflowRow; run: WorkflowRunListEntry | null }) {
   const label = run ? runStatusLabel(run.status) : workflowStatusLabel(workflow.status)
   return (
     <Badge
@@ -346,5 +360,80 @@ function isLocalCanvasDraft(value: unknown): value is {
     typeof draft.savedAt === 'string' &&
     Array.isArray(draft.nodes) &&
     Array.isArray(draft.edges)
+  )
+}
+
+function loadLocalCanvasRuns(): WorkflowRunListEntry[] {
+  if (typeof window === 'undefined') return []
+
+  const raw = window.localStorage.getItem(CANVAS_RUN_HISTORY_STORAGE_KEY)
+  if (!raw) return []
+
+  try {
+    const runs = JSON.parse(raw) as unknown
+    if (!Array.isArray(runs)) return []
+
+    return runs
+      .filter(isLocalCanvasRunRecord)
+      .map((run) => ({
+        id: run.id,
+        workflowId: run.workflowDraftId,
+        status: run.status,
+        input: {
+          source: 'local_canvas_run',
+          nodeCount: run.nodeCount,
+          edgeCount: run.edgeCount,
+        },
+        output: {
+          handoffCount: run.handoffCount,
+          stepCount: run.steps.length,
+        },
+        error: null,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+        source: 'local_canvas_run' as const,
+      }))
+      .sort((a, b) => b.startedAt - a.startedAt)
+  } catch {
+    return []
+  }
+}
+
+function isLocalCanvasRunRecord(value: unknown): value is {
+  schema: 'agenthub.langflow_agent_canvas.run.v1'
+  id: string
+  workflowDraftId: string
+  status: WorkflowRunRow['status']
+  startedAt: number
+  finishedAt: number
+  nodeCount: number
+  edgeCount: number
+  handoffCount: number
+  steps: unknown[]
+} {
+  if (!value || typeof value !== 'object') return false
+  const run = value as {
+    schema?: unknown
+    id?: unknown
+    workflowDraftId?: unknown
+    status?: unknown
+    startedAt?: unknown
+    finishedAt?: unknown
+    nodeCount?: unknown
+    edgeCount?: unknown
+    handoffCount?: unknown
+    steps?: unknown
+  }
+  return (
+    run.schema === 'agenthub.langflow_agent_canvas.run.v1' &&
+    typeof run.id === 'string' &&
+    typeof run.workflowDraftId === 'string' &&
+    run.status === 'complete' &&
+    typeof run.startedAt === 'number' &&
+    typeof run.finishedAt === 'number' &&
+    typeof run.nodeCount === 'number' &&
+    typeof run.edgeCount === 'number' &&
+    typeof run.handoffCount === 'number' &&
+    Array.isArray(run.steps)
   )
 }
