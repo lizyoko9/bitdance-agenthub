@@ -464,6 +464,20 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('已接收')
   })
 
+  it('shows actual outgoing handoff artifacts on each node card', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('interface OutgoingHandoff')
+    expect(source).toContain('outgoingHandoffs?: OutgoingHandoff[]')
+    expect(source).toContain('outgoingHandoffs: buildOutgoingHandoffsForNode(node.id, nodes, edges)')
+    expect(source).toContain('function buildOutgoingHandoffsForNode')
+    expect(source).toContain('edge.source !== nodeId')
+    expect(source).toContain('edge.data?.artifactType')
+    expect(source).toContain('data-testid="node-outgoing-handoffs"')
+    expect(source).toContain('data-testid="node-outgoing-handoff"')
+    expect(source).toContain('已交付')
+  })
+
   it('lets the node inspector add and remove input/output artifact ports', () => {
     const source = readCanvasSource()
 

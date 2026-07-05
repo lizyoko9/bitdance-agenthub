@@ -92,6 +92,15 @@ interface IncomingHandoff {
   targetPortLabel: string
 }
 
+interface OutgoingHandoff {
+  id: string
+  artifactType: ArtifactType
+  artifactLabel: string
+  targetTitle: string
+  sourcePortLabel: string
+  targetPortLabel: string
+}
+
 interface AgentFlowNodeData extends Record<string, unknown> {
   kind: AgentFlowNodeKind
   title: string
@@ -103,6 +112,7 @@ interface AgentFlowNodeData extends Record<string, unknown> {
   inputs: AgentFlowPort[]
   outputs: AgentFlowPort[]
   incomingHandoffs?: IncomingHandoff[]
+  outgoingHandoffs?: OutgoingHandoff[]
   customerVisible?: boolean
   executionStage?: number
   connectionType?: ArtifactType | null
@@ -468,6 +478,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         connectionType: activeConnectionType,
         activeOutputPortId: activeOutputPort?.nodeId === node.id ? activeOutputPort.outputId : undefined,
         incomingHandoffs: buildIncomingHandoffsForNode(node.id, nodes, edges),
+        outgoingHandoffs: buildOutgoingHandoffsForNode(node.id, nodes, edges),
         executionStage: executionStages.get(node.id),
         onOutputConnectStart: (type: ArtifactType, outputId: string) => {
           startOutputConnection(node.id, type, outputId)
@@ -1644,6 +1655,27 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
             </div>
           </div>
         ) : null}
+        {data.outgoingHandoffs?.length ? (
+          <div
+            className="mt-2 rounded-md border bg-primary/5 p-2"
+            data-testid="node-outgoing-handoffs"
+          >
+            <div className="mb-1 text-[10px] font-medium text-muted-foreground">已交付</div>
+            <div className="grid gap-1">
+              {data.outgoingHandoffs.map((handoff) => (
+                <div
+                  key={handoff.id}
+                  className="flex min-w-0 items-center gap-1.5 text-[11px]"
+                  data-testid="node-outgoing-handoff"
+                  title={`${handoff.sourcePortLabel} -> ${handoff.targetTitle} / ${handoff.targetPortLabel}`}
+                >
+                  <ArtifactPill type={handoff.artifactType} />
+                  <span className="min-w-0 flex-1 truncate">{handoff.targetTitle}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {nodeConnectionHint && (
           <div
             className={cn(
@@ -2811,6 +2843,29 @@ function buildIncomingHandoffsForNode(
       artifactType,
       artifactLabel: artifactLabels[artifactType],
       sourceTitle: sourceTitleById.get(edge.source) ?? edge.source,
+      sourcePortLabel: edge.data?.sourcePortLabel ?? artifactLabels[artifactType],
+      targetPortLabel: edge.data?.targetPortLabel ?? artifactLabels[artifactType],
+    }]
+  })
+}
+
+function buildOutgoingHandoffsForNode(
+  nodeId: string,
+  nodes: AgentFlowNode[],
+  edges: AgentFlowEdge[],
+): OutgoingHandoff[] {
+  const targetTitleById = new Map(nodes.map((node) => [node.id, node.data.title]))
+
+  return edges.flatMap((edge) => {
+    if (edge.source !== nodeId) return []
+    const artifactType = edge.data?.artifactType
+    if (!artifactType) return []
+
+    return [{
+      id: edge.id,
+      artifactType,
+      artifactLabel: artifactLabels[artifactType],
+      targetTitle: targetTitleById.get(edge.target) ?? edge.target,
       sourcePortLabel: edge.data?.sourcePortLabel ?? artifactLabels[artifactType],
       targetPortLabel: edge.data?.targetPortLabel ?? artifactLabels[artifactType],
     }]
