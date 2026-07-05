@@ -798,7 +798,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         setActiveOutputPort(null)
         return
       }
-      if (event.key !== 'Delete') return
+      if (!['Delete', 'Backspace'].includes(event.key)) return
       if (!selectedNodeId && !selectedEdgeId) return
       event.preventDefault()
       if (selectedEdgeId) {

@@ -112,7 +112,7 @@ describe('Langflow agent canvas layout', () => {
   it('supports deleting the selected canvas node with the Delete key', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain("event.key !== 'Delete'")
+    expect(source).toContain("['Delete', 'Backspace'].includes(event.key)")
     expect(source).toContain('deleteNodeById(selectedNodeId)')
     expect(source).toContain('isEditableElement(event.target)')
   })
@@ -160,6 +160,14 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('selectEdgeById')
     expect(source).toContain('agenthub:canvas-edge-select')
     expect(source).toContain('onPaneClick={() =>')
+  })
+
+  it('treats Backspace like Delete for selected canvas objects', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain("['Delete', 'Backspace'].includes(event.key)")
+    expect(source).toContain('deleteEdgeById(selectedEdgeId)')
+    expect(source).toContain('deleteNodeById(selectedNodeId)')
   })
 
   it('shows an inline delete action on the selected edge like a visual flow editor', () => {
