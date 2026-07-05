@@ -91,7 +91,8 @@ interface AgentFlowNodeData extends Record<string, unknown> {
   customerVisible?: boolean
   executionStage?: number
   connectionType?: ArtifactType | null
-  onOutputConnectStart?: (type: ArtifactType) => void
+  activeOutputPortId?: string
+  onOutputConnectStart?: (type: ArtifactType, outputId: string) => void
 }
 
 type AgentFlowNode = Node<AgentFlowNodeData>
@@ -274,6 +275,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [preflightIssues, setPreflightIssues] = useState<AgentFlowRunIssue[]>([])
   const [lastRun, setLastRun] = useState<CanvasRunRecord | null>(null)
   const [activeConnectionType, setActiveConnectionType] = useState<ArtifactType | null>(null)
+  const [activeOutputPort, setActiveOutputPort] = useState<{ nodeId: string; outputId: string; type: ArtifactType } | null>(null)
   const [activeTemplateCategory, setActiveTemplateCategory] = useState<AgentFlowNodeTemplateCategory | '全部'>('全部')
   const [templateSearchQuery, setTemplateSearchQuery] = useState('')
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
@@ -319,6 +321,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setEdges(cloneCanvasEdges(draft.edges))
     setSelectedNodeId(draft.nodes[0]?.id ?? '')
     setSelectedEdgeId('')
+    setActiveConnectionType(null)
+    setActiveOutputPort(null)
     setPreflightVisible(Boolean(draft.handoffSteps?.length))
     setPreflightIssues([])
     setLastRun(findLatestCanvasRunForDraft(loadCanvasRunHistory(), draft.workflowDraftId))
@@ -366,22 +370,24 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       ...node,
       data: {
         ...node.data,
-         connectionType: activeConnectionType,
-         executionStage: executionStages.get(node.id),
-         onOutputConnectStart: (type: ArtifactType) => {
-           setSelectedNodeId(node.id)
-           setSelectedEdgeId('')
-           setActiveConnectionType(type)
-           setPaletteCollapsed(false)
-           setActiveTemplateCategory('全部')
-           setTemplateSearchQuery('')
-           setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })))
-           setEdges((current) => current.map((item) => ({ ...item, selected: false })))
-         },
-       },
-     })),
-     [activeConnectionType, executionStages, nodes, setEdges, setNodes],
-   )
+        connectionType: activeConnectionType,
+        activeOutputPortId: activeOutputPort?.nodeId === node.id ? activeOutputPort.outputId : undefined,
+        executionStage: executionStages.get(node.id),
+        onOutputConnectStart: (type: ArtifactType, outputId: string) => {
+          setSelectedNodeId(node.id)
+          setSelectedEdgeId('')
+          setActiveConnectionType(type)
+          setActiveOutputPort({ nodeId: node.id, outputId, type })
+          setPaletteCollapsed(false)
+          setActiveTemplateCategory('全部')
+          setTemplateSearchQuery('')
+          setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })))
+          setEdges((current) => current.map((item) => ({ ...item, selected: false })))
+        },
+      },
+    })),
+    [activeConnectionType, activeOutputPort, executionStages, nodes, setEdges, setNodes],
+  )
 
   const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
     const nextIndex = nodes.length + 1
@@ -448,12 +454,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const handleConnectStart = useCallback((_: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
     if (params.handleType !== 'source' || !params.nodeId || !params.handleId) {
       setActiveConnectionType(null)
+      setActiveOutputPort(null)
       return
     }
 
     const source = nodes.find((node) => node.id === params.nodeId)
     const output = source?.data.outputs.find((item) => outputHandleId(item) === params.handleId)
     setActiveConnectionType(output?.type ?? null)
+    setActiveOutputPort(output ? { nodeId: params.nodeId, outputId: output.id, type: output.type } : null)
   }, [nodes])
 
   const isConnectionValid = useCallback((connection: Connection | AgentFlowEdge) => {
@@ -931,7 +939,10 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onConnectStart={handleConnectStart}
-          onConnectEnd={() => setActiveConnectionType(null)}
+          onConnectEnd={() => {
+            setActiveConnectionType(null)
+            setActiveOutputPort(null)
+          }}
           isValidConnection={isConnectionValid}
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
@@ -945,6 +956,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             setSelectedNodeId('')
             setSelectedEdgeId('')
             setActiveConnectionType(null)
+            setActiveOutputPort(null)
             clearSelectedNodes()
             setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
           }}
@@ -1264,31 +1276,39 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
             )
           })}
 
-          {data.outputs.map((output) => (
-            <button
-              key={output.id}
-              type="button"
-              className="nodrag nopan relative flex w-full items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-left transition hover:border-primary hover:bg-primary/5"
-              data-testid="node-output-port-button"
-              data-output-port-type={output.type}
-              aria-label={`选择${output.label}作为下一步产物`}
-              onClick={() => data.onOutputConnectStart?.(output.type)}
-              onMouseDownCapture={() => data.onOutputConnectStart?.(output.type)}
-              onPointerDownCapture={() => data.onOutputConnectStart?.(output.type)}
-            >
-              <ArtifactPill type={output.type} />
-              <span className="min-w-0 flex-1 truncate text-[11px]">{output.label}</span>
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={outputHandleId(output)}
-                className="!size-3 !border-2 !border-background"
-                onMouseDownCapture={() => data.onOutputConnectStart?.(output.type)}
-                onPointerDownCapture={() => data.onOutputConnectStart?.(output.type)}
-                style={{ backgroundColor: artifactColors[output.type], right: -7 }}
-              />
-            </button>
-          ))}
+          {data.outputs.map((output) => {
+            const isActiveOutputPort = data.activeOutputPortId === output.id
+
+            return (
+              <button
+                key={output.id}
+                type="button"
+                className={cn(
+                  'nodrag nopan relative flex w-full items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-left transition hover:border-primary hover:bg-primary/5',
+                  isActiveOutputPort && 'border-primary bg-primary/10 ring-1 ring-primary/40',
+                )}
+                data-testid="node-output-port-button"
+                data-output-port-type={output.type}
+                data-active-output-port={data.activeOutputPortId === output.id}
+                aria-label={`选择${output.label}作为下一步产物`}
+                onClick={() => data.onOutputConnectStart?.(output.type, output.id)}
+                onMouseDownCapture={() => data.onOutputConnectStart?.(output.type, output.id)}
+                onPointerDownCapture={() => data.onOutputConnectStart?.(output.type, output.id)}
+              >
+                <ArtifactPill type={output.type} />
+                <span className="min-w-0 flex-1 truncate text-[11px]">{output.label}</span>
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={outputHandleId(output)}
+                  className="!size-3 !border-2 !border-background"
+                  onMouseDownCapture={() => data.onOutputConnectStart?.(output.type, output.id)}
+                  onPointerDownCapture={() => data.onOutputConnectStart?.(output.type, output.id)}
+                  style={{ backgroundColor: artifactColors[output.type], right: -7 }}
+                />
+              </button>
+            )
+          })}
         </div>
       </div>
 
