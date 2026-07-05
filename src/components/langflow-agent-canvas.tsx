@@ -41,6 +41,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
+import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
 import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
 import {
   agentFlowNodeTemplates,
@@ -374,6 +375,28 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     syncEdgesAfterPortTypeChange(nodeId, direction, portId, nextType)
   }, [setNodes, syncEdgesAfterPortTypeChange])
 
+  const replaceNodePortsForAgent = useCallback((nodeId: string, agent: AgentProfileRow) => {
+    const agentPorts = buildAgentFlowPortsFromContracts(agent)
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                agentId: agent.id,
+                title: agent.name,
+                subtitle: `员工 Agent · ${agent.modelProfileId ?? '未绑定模型'}`,
+                inputs: agentPorts.inputs,
+                outputs: agentPorts.outputs,
+              },
+            }
+          : node,
+      ),
+    )
+    setEdges((current) => keepEdgesWithKnownHandles(current, nodeId, agentPorts.inputs, agentPorts.outputs))
+  }, [setEdges, setNodes])
+
   const deleteNodeById = useCallback((nodeId: string) => {
     setNodes((current) => current.filter((node) => node.id !== nodeId))
     setEdges((current) =>
@@ -638,6 +661,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                 addPortToNode={addPortToNode}
                 removePortFromNode={removePortFromNode}
                 changePortTypeForNode={changePortTypeForNode}
+                replaceNodePortsForAgent={replaceNodePortsForAgent}
               />
             )}
           </div>
@@ -847,6 +871,7 @@ function NodeConfigPanel({
   addPortToNode,
   removePortFromNode,
   changePortTypeForNode,
+  replaceNodePortsForAgent,
 }: {
   node: AgentFlowNode | null
   agents: AgentProfileRow[]
@@ -856,6 +881,7 @@ function NodeConfigPanel({
   addPortToNode: (nodeId: string, direction: 'inputs' | 'outputs') => void
   removePortFromNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string) => void
   changePortTypeForNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string, nextType: ArtifactType) => void
+  replaceNodePortsForAgent: (nodeId: string, agent: AgentProfileRow) => void
 }) {
   if (!node) {
     return (
@@ -902,10 +928,13 @@ function NodeConfigPanel({
               value={node.data.agentId ?? ''}
               onChange={(event) => {
                 const agent = agents.find((item) => item.id === event.target.value)
+                if (agent) {
+                  replaceNodePortsForAgent(node.id, agent)
+                  return
+                }
                 onUpdateNode(node.id, {
-                  agentId: agent?.id,
-                  title: agent?.name ?? node.data.title,
-                  subtitle: agent ? `员工 Agent · ${agent.modelProfileId ?? '未绑定模型'}` : node.data.subtitle,
+                  agentId: undefined,
+                  subtitle: nodeKindLabels.agent,
                 })
               }}
             >
@@ -1286,6 +1315,39 @@ function findPortType(
   const ports = node.data[direction]
   const match = ports.find((port) => (direction === 'inputs' ? inputHandleId(port) : outputHandleId(port)) === handleId)
   return match?.type ?? null
+}
+
+function keepEdgesWithKnownHandles(
+  edges: AgentFlowEdge[],
+  nodeId: string,
+  inputs: AgentFlowPort[],
+  outputs: AgentFlowPort[],
+) {
+  const inputByHandle = new Map(inputs.map((input) => [inputHandleId(input), input]))
+  const outputByHandle = new Map(outputs.map((output) => [outputHandleId(output), output]))
+
+  return edges.flatMap((edge) => {
+    if (edge.source === nodeId) {
+      const output = edge.sourceHandle ? outputByHandle.get(edge.sourceHandle) : null
+      if (!output) return []
+      return [{
+        ...edge,
+        data: {
+          artifactType: output.type,
+          label: artifactLabels[output.type],
+          outputId: output.id,
+        },
+      }]
+    }
+
+    if (edge.target === nodeId) {
+      const input = edge.targetHandle ? inputByHandle.get(edge.targetHandle) : null
+      if (!input) return []
+      if (!canConnect(edge.data?.artifactType ?? 'any', input.type)) return []
+    }
+
+    return [edge]
+  })
 }
 
 function canConnect(sourceType: ArtifactType, targetType: ArtifactType) {

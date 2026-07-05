@@ -68,6 +68,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('template.outputs')
   })
 
+  it('syncs selected Agent contracts into the canvas node ports', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('buildAgentFlowPortsFromContracts')
+    expect(source).toContain('replaceNodePortsForAgent')
+    expect(source).toContain('outputs: agentPorts.outputs')
+    expect(source).toContain('inputs: agentPorts.inputs')
+    expect(source).toContain('keepEdgesWithKnownHandles')
+  })
+
   it('lets the node inspector add and remove input/output artifact ports', () => {
     const source = readCanvasSource()
 
