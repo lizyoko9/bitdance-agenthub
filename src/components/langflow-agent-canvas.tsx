@@ -43,7 +43,7 @@ import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
 import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
 import { applyPreflightStatusToNodes } from '@/lib/agent-flow-node-status'
-import { validateAgentFlowForRun } from '@/lib/agent-flow-run-preflight'
+import { validateAgentFlowForRun, type AgentFlowRunIssue } from '@/lib/agent-flow-run-preflight'
 import { buildSoftwareCommandFlowPorts } from '@/lib/agent-flow-software-command-contracts'
 import {
   agentFlowNodeTemplates,
@@ -184,6 +184,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [selectedEdgeId, setSelectedEdgeId] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const [preflightVisible, setPreflightVisible] = useState(false)
+  const [preflightIssues, setPreflightIssues] = useState<AgentFlowRunIssue[]>([])
   const [activeConnectionType, setActiveConnectionType] = useState<ArtifactType | null>(null)
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
   const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
@@ -196,6 +197,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId(draft.nodes[0]?.id ?? '')
     setSelectedEdgeId('')
     setPreflightVisible(Boolean(draft.handoffSteps?.length))
+    setPreflightIssues([])
     setWorkflowDraftId(draft.workflowDraftId ?? createCanvasDraftId())
     setWorkflowTitle(draft.title?.trim() || '未命名流程')
   }, [setEdges, setNodes])
@@ -534,6 +536,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setPreflightVisible(true)
 
     const preflight = validateAgentFlowForRun({ nodes, edges })
+    setPreflightIssues(preflight.issues)
     setNodes((current) => applyPreflightStatusToNodes({ nodes: current, edges, preflight }))
     if (!preflight.ready) {
       const firstError = preflight.issues.find((issue) => issue.severity === 'error')
@@ -589,6 +592,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId('agent-2')
     setSelectedEdgeId('')
     setPreflightVisible(false)
+    setPreflightIssues([])
     setNotice('已新建空白流程，可直接拖拽节点开始编排。')
   }, [setEdges, setNodes])
 
@@ -759,6 +763,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         </div>
 
         <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
+        <PreflightIssuePanel issues={preflightIssues} nodes={nodes} />
       </main>
       </div>
   )
@@ -1196,6 +1201,40 @@ function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible
       )}
       {steps.length > 6 && (
         <div className="mt-2 text-[11px] text-muted-foreground">还有 {steps.length - 6} 条链路，运行记录里会完整展开。</div>
+      )}
+    </section>
+  )
+}
+
+function PreflightIssuePanel({ issues, nodes }: { issues: AgentFlowRunIssue[]; nodes: AgentFlowNode[] }) {
+  if (issues.length === 0) return null
+
+  const nodeTitleById = new Map(nodes.map((node) => [node.id, node.data.title]))
+  const errors = issues.filter((issue) => issue.severity === 'error').length
+
+  return (
+    <section className="pointer-events-auto absolute right-[23.5rem] top-3 z-10 w-[22rem] rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">预检问题</div>
+        <Badge variant={errors > 0 ? 'destructive' : 'outline'}>
+          {errors > 0 ? `${errors} 个阻塞` : `${issues.length} 个提醒`}
+        </Badge>
+      </div>
+      <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+        {issues.slice(0, 8).map((issue, index) => (
+          <div key={`${issue.code}-${issue.nodeId ?? issue.edgeId ?? index}`} className="rounded-lg border bg-background p-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">{issue.nodeId ? nodeTitleById.get(issue.nodeId) ?? issue.nodeId : issue.edgeId ?? '流程'}</span>
+              <Badge variant={issue.severity === 'error' ? 'destructive' : 'outline'}>
+                {issue.severity === 'error' ? '阻塞' : '提醒'}
+              </Badge>
+            </div>
+            <div className="mt-1 leading-4 text-muted-foreground">{issue.message}</div>
+          </div>
+        ))}
+      </div>
+      {issues.length > 8 && (
+        <div className="mt-2 text-[11px] text-muted-foreground">还有 {issues.length - 8} 条问题，可继续调整节点后重新预检。</div>
       )}
     </section>
   )
