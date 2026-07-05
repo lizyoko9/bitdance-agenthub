@@ -245,12 +245,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       .filter((group) => activeTemplateCategory === '全部' || group.category === activeTemplateCategory)
       .map((group) => ({
         ...group,
-        templates: search
-          ? group.templates.filter((template) => matchesTemplateSearch(template, search))
-          : group.templates,
+        templates: group.templates.filter((template) => {
+          if (activeConnectionType && !templateAcceptsConnectionType(template, activeConnectionType)) return false
+          if (search && !matchesTemplateSearch(template, search)) return false
+          return true
+        }),
       }))
       .filter((group) => group.templates.length > 0)
-  }, [activeTemplateCategory, templateGroups, templateSearchQuery])
+  }, [activeConnectionType, activeTemplateCategory, templateGroups, templateSearchQuery])
 
   const applyCanvasDraft = useCallback((draft: CanvasDraft) => {
     setNodes(cloneCanvasNodes(draft.nodes))
@@ -869,6 +871,15 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             value={templateSearchQuery}
             onChange={(event) => setTemplateSearchQuery(event.target.value)}
           />
+          {activeConnectionType && (
+            <div
+              data-testid="active-connection-filter"
+              className="mb-3 rounded-lg border bg-primary/5 p-2 text-xs text-muted-foreground"
+            >
+              正在连接 <span className="font-medium text-foreground">{artifactLabels[activeConnectionType]}</span>
+              ，这里只显示能接收这种产物的节点。
+            </div>
+          )}
           <div className="mb-3 flex flex-wrap gap-1" data-testid="component-category-filter">
             {(['全部', ...templateGroups.map((group) => group.category)] as Array<AgentFlowNodeTemplateCategory | '全部'>).map((category) => (
               <button
@@ -1644,6 +1655,13 @@ function matchesTemplateSearch(
     .toLowerCase()
 
   return haystack.includes(search)
+}
+
+function templateAcceptsConnectionType(
+  template: (typeof agentFlowNodeTemplates)[number],
+  type: ArtifactType,
+) {
+  return template.inputs.some((input) => canConnect(type, input.type))
 }
 
 function createNodeFromTemplate(

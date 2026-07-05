@@ -108,6 +108,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('matchesTemplateSearch')
   })
 
+  it('filters palette components while a typed output connection is active', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('templateAcceptsConnectionType')
+    expect(source).toContain('activeConnectionType')
+    expect(source).toContain('data-testid="active-connection-filter"')
+    expect(source).toContain('正在连接')
+  })
+
   it('syncs selected Agent contracts into the canvas node ports', () => {
     const source = readCanvasSource()
 
