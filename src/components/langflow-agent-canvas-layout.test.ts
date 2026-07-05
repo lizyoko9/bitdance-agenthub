@@ -515,14 +515,21 @@ describe('Langflow agent canvas layout', () => {
 
   it('shows a dedicated handoff inspector when a workflow edge is selected', () => {
     const source = readCanvasSource()
+    const edgePanelSource = source.slice(
+      source.indexOf('function EdgeConfigPanel'),
+      source.indexOf('function NodeConfigPanel'),
+    )
 
     expect(source).toContain('const selectedEdge = edges.find')
     expect(source).toContain('EdgeConfigPanel')
     expect(source).toContain('describeEdgeRoute')
     expect(source).toContain('data-testid="langflow-agent-edge-panel"')
     expect(source).toContain('onDeleteEdge={() => deleteEdgeById(selectedEdge.id)}')
-    expect(source).toContain('sourceHandle')
-    expect(source).toContain('targetHandle')
+    expect(edgePanelSource).toContain('route.handoffContract')
+    expect(edgePanelSource).toContain('route.sourcePortLabel')
+    expect(edgePanelSource).toContain('route.targetPortLabel')
+    expect(edgePanelSource).not.toContain('sourceHandle:')
+    expect(edgePanelSource).not.toContain('targetHandle:')
   })
 
   it('stores the selected source and target ports as an explicit edge handoff contract', () => {

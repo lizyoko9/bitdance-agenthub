@@ -1605,13 +1605,14 @@ function EdgeConfigPanel({
           <PanelBlock title="来源端口">
             <div className="text-sm font-semibold">{route.sourceTitle}</div>
             <div className="mt-1 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">{route.sourcePortLabel}</div>
-            <div className="mt-2 break-all text-[11px] text-muted-foreground">sourceHandle: {edge.sourceHandle ?? '默认输出'}</div>
           </PanelBlock>
 
           <PanelBlock title="目标端口">
             <div className="text-sm font-semibold">{route.targetTitle}</div>
             <div className="mt-1 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">{route.targetPortLabel}</div>
-            <div className="mt-2 break-all text-[11px] text-muted-foreground">targetHandle: {edge.targetHandle ?? '默认输入'}</div>
+            <div className="mt-2 text-xs leading-5 text-muted-foreground">
+              运行到这条线时，下游只会收到上面显示的这一类产物。
+            </div>
           </PanelBlock>
         </div>
       )}
