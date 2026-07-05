@@ -252,6 +252,14 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('setActiveOutputPort(null)')
   })
 
+  it('labels compatible input ports as clickable while choosing a downstream connection', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('点击接入')
+    expect(source).toContain('data.connectionType && isInputCompatible')
+    expect(source).toContain('data-testid="node-input-port-action-hint"')
+  })
+
   it('leaves artifact connection mode when users click the empty canvas', () => {
     const source = readCanvasSource()
 

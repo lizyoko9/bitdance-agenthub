@@ -1331,6 +1331,14 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
                 />
                 <span className="min-w-0 flex-1 truncate text-[11px]">{input.label}</span>
                 <ArtifactPill type={input.type} />
+                {data.connectionType && isInputCompatible && (
+                  <span
+                    className="rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white"
+                    data-testid="node-input-port-action-hint"
+                  >
+                    点击接入
+                  </span>
+                )}
               </button>
             )
           })}
