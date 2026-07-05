@@ -1153,6 +1153,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
+          onNodeDragStart={pushCanvasHistory}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onConnectStart={handleConnectStart}

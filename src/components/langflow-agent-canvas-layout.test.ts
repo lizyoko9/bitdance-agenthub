@@ -172,6 +172,12 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="canvas-redo-button"')
   })
 
+  it('records node movement before dragging so Ctrl+Z can restore the previous layout', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('onNodeDragStart={pushCanvasHistory}')
+  })
+
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 
