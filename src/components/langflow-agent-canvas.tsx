@@ -1506,6 +1506,23 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 }
 
 function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
+  const nodeIsActiveConnectionSource = Boolean(data.activeOutputPortId)
+  const nodeAcceptsActiveConnection = Boolean(
+    data.connectionType &&
+    !nodeIsActiveConnectionSource &&
+    data.inputs.some((input) => canConnect(data.connectionType as ArtifactType, input.type)),
+  )
+  const nodeRejectsActiveConnection = Boolean(
+    data.connectionType &&
+    !nodeIsActiveConnectionSource &&
+    !nodeAcceptsActiveConnection,
+  )
+  const nodeConnectionHint = nodeAcceptsActiveConnection
+    ? '点击节点接入'
+    : nodeRejectsActiveConnection
+      ? '不接收当前产物'
+      : null
+
   const handleInputPortClick = (input: AgentFlowPort) => {
     if (!data.connectionType) return
     data.onInputConnectComplete?.(id, input.id)
@@ -1535,8 +1552,12 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
       className={cn(
         'relative w-60 rounded-xl border bg-card text-card-foreground shadow-sm transition hover:shadow-md',
         selected && 'border-primary shadow-primary/20',
+        nodeAcceptsActiveConnection && 'border-emerald-400 bg-emerald-500/[0.04] ring-2 ring-emerald-500/20',
+        nodeRejectsActiveConnection && 'opacity-60 grayscale',
       )}
       data-testid="langflow-agent-node"
+      data-node-compatible={nodeAcceptsActiveConnection}
+      data-node-incompatible={nodeRejectsActiveConnection}
     >
       {selected && (
         <div
@@ -1588,6 +1609,19 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
 
       <div className="px-3 py-2">
         <p className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">{data.description}</p>
+        {nodeConnectionHint && (
+          <div
+            className={cn(
+              'mt-2 rounded-md border px-2 py-1 text-[11px] font-medium',
+              nodeAcceptsActiveConnection
+                ? 'border-emerald-400/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                : 'border-muted-foreground/20 bg-muted/40 text-muted-foreground',
+            )}
+            data-testid="node-connection-compatibility-hint"
+          >
+            {nodeConnectionHint}
+          </div>
+        )}
 
         <div className="mt-3 grid gap-2">
           {data.inputs.map((input) => {

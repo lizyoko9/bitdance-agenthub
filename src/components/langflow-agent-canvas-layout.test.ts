@@ -376,6 +376,18 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('if (completeActiveConnectionToNode(node.id)) return')
   })
 
+  it('marks compatible downstream nodes while choosing a connection target', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('nodeAcceptsActiveConnection')
+    expect(source).toContain('nodeRejectsActiveConnection')
+    expect(source).toContain('data-node-compatible={nodeAcceptsActiveConnection}')
+    expect(source).toContain('data-node-incompatible={nodeRejectsActiveConnection}')
+    expect(source).toContain('data-testid="node-connection-compatibility-hint"')
+    expect(source).toContain('点击节点接入')
+    expect(source).toContain('不接收当前产物')
+  })
+
   it('routes incompatible input clicks to the canvas so users get an explanation', () => {
     const source = readCanvasSource()
 
