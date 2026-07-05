@@ -40,6 +40,15 @@ describe('workflow library local canvas drafts', () => {
     expect(source).toContain('workflowDraftId === draftId')
   })
 
+  it('selects the first Agent node after opening a saved canvas workflow', () => {
+    const source = readCanvasSource()
+    const applyDraftStart = source.indexOf('const applyCanvasDraft')
+    const applyDraftEnd = source.indexOf('  useEffect(() => {\n    let cancelled = false', applyDraftStart)
+    const applyDraftSource = source.slice(applyDraftStart, applyDraftEnd)
+
+    expect(applyDraftSource).toContain("draft.nodes.find((node) => node.data.kind === 'agent')?.id ?? draft.nodes[0]?.id ?? ''")
+  })
+
   it('saves a newly created canvas workflow into the local workflow library immediately', () => {
     const source = readCanvasSource()
     const createNewDraftSource = source.slice(source.indexOf('const createNewCanvasDraft'))

@@ -368,7 +368,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const applyCanvasDraft = useCallback((draft: CanvasDraft) => {
     setNodes(cloneCanvasNodes(draft.nodes))
     setEdges(cloneCanvasEdges(draft.edges))
-    setSelectedNodeId(draft.nodes[0]?.id ?? '')
+    setSelectedNodeId(draft.nodes.find((node) => node.data.kind === 'agent')?.id ?? draft.nodes[0]?.id ?? '')
     setSelectedEdgeId('')
     clearActiveConnection()
     setPreflightVisible(Boolean(draft.handoffSteps?.length))
