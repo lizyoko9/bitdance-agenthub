@@ -272,4 +272,21 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('不能形成循环')
     expect(source).toContain('return')
   })
+
+  it('keeps each target input port bound to a single upstream handoff edge', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('replaceEdgesForSingleTargetHandle')
+    expect(source).toContain('setEdges((current) =>')
+    expect(source).toContain('createFlowEdge(')
+  })
+
+  it('validates connection compatibility before React Flow accepts a dropped edge', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('const isConnectionValid = useCallback')
+    expect(source).toContain('isValidConnection={isConnectionValid}')
+    expect(source).toContain('canConnect(output.type, input.type)')
+    expect(source).toContain('wouldCreateDirectedCycle(edges, { source: connection.source, target: connection.target })')
+  })
 })

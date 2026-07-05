@@ -41,7 +41,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
-import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
+import { replaceEdgesForSingleTargetHandle, wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
 import { applyPreflightStatusToNodes } from '@/lib/agent-flow-node-status'
 import { buildAgentFlowRunPlan, type AgentFlowRunPlanStep } from '@/lib/agent-flow-run-plan'
 import { validateAgentFlowForRun, type AgentFlowRunIssue } from '@/lib/agent-flow-run-preflight'
@@ -341,6 +341,18 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setActiveConnectionType(output?.type ?? null)
   }, [nodes])
 
+  const isConnectionValid = useCallback((connection: Connection | AgentFlowEdge) => {
+    if (!connection.source || !connection.target) return false
+    const source = nodes.find((node) => node.id === connection.source)
+    const target = nodes.find((node) => node.id === connection.target)
+    const output = source?.data.outputs.find((item) => outputHandleId(item) === connection.sourceHandle)
+    const input = target?.data.inputs.find((item) => inputHandleId(item) === connection.targetHandle)
+
+    if (!source || !target || !output || !input) return false
+    if (wouldCreateDirectedCycle(edges, { source: connection.source, target: connection.target })) return false
+    return canConnect(output.type, input.type)
+  }, [edges, nodes])
+
   const updateNode = (nodeId: string, patch: Partial<AgentFlowNodeData>) => {
     setNodes((current) =>
       current.map((node) =>
@@ -591,29 +603,23 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         return
       }
 
-      setEdges((current) => [
-        ...current.filter(
-          (edge) =>
-            !(
-              edge.source === connection.source &&
-              edge.sourceHandle === connection.sourceHandle &&
-              edge.target === connection.target &&
-              edge.targetHandle === connection.targetHandle
-            ),
+      setEdges((current) =>
+        replaceEdgesForSingleTargetHandle(
+          current,
+          createFlowEdge(
+            `${connection.source}-${connection.sourceHandle}-${connection.target}-${connection.targetHandle}`,
+            connection.source,
+            connection.target,
+            output.id,
+            output.type,
+            connection.sourceHandle ?? undefined,
+            connection.targetHandle ?? undefined,
+            output.label,
+            input.id,
+            input.label,
+          ),
         ),
-        createFlowEdge(
-          `${connection.source}-${connection.sourceHandle}-${connection.target}-${connection.targetHandle}`,
-          connection.source,
-          connection.target,
-          output.id,
-          output.type,
-          connection.sourceHandle ?? undefined,
-          connection.targetHandle ?? undefined,
-          output.label,
-          input.id,
-          input.label,
-        ),
-      ])
+      )
       setNotice(`${target.data.title} 现在只会收到：${artifactLabels[output.type]}。`)
     },
     [edges, nodes],
@@ -773,6 +779,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onConnect={onConnect}
           onConnectStart={handleConnectStart}
           onConnectEnd={() => setActiveConnectionType(null)}
+          isValidConnection={isConnectionValid}
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
           onNodeClick={(_, node) => {

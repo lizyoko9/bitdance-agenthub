@@ -3,6 +3,11 @@ export interface DirectedWorkflowEdge {
   target: string
 }
 
+export interface TargetInputEdge {
+  target: string
+  targetHandle?: string | null
+}
+
 export function wouldCreateDirectedCycle(
   edges: DirectedWorkflowEdge[],
   nextEdge: DirectedWorkflowEdge,
@@ -27,4 +32,22 @@ export function wouldCreateDirectedCycle(
   }
 
   return false
+}
+
+export function replaceEdgesForSingleTargetHandle<TEdge extends TargetInputEdge>(
+  edges: TEdge[],
+  nextEdge: TEdge,
+): TEdge[] {
+  return [
+    ...edges.filter(
+      (edge) =>
+        edge.target !== nextEdge.target ||
+        normalizeHandle(edge.targetHandle) !== normalizeHandle(nextEdge.targetHandle),
+    ),
+    nextEdge,
+  ]
+}
+
+function normalizeHandle(handle: string | null | undefined) {
+  return handle ?? ''
 }
