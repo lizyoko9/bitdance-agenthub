@@ -505,6 +505,54 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     [activeConnectionType, activeOutputPort, clearActiveConnection, edges, executionStages, nodes, pushCanvasHistory, setEdges, startOutputConnection],
   )
 
+  const completeActiveConnectionToNode = useCallback((targetNodeId: string) => {
+    if (!activeOutputPort) return false
+    const sourceNode = nodes.find((item) => item.id === activeOutputPort.nodeId)
+    const targetNode = nodes.find((item) => item.id === targetNodeId)
+    const sourceOutput = sourceNode?.data.outputs.find((output) => output.id === activeOutputPort.outputId)
+    if (!sourceNode || !targetNode || !sourceOutput) return false
+    if (sourceNode.id === targetNode.id) {
+      setNotice('同一个节点内部不需要连线，选择一个下游节点。')
+      return true
+    }
+
+    const autoPair = findFirstCompatiblePortPair({
+      sourceOutputs: [sourceOutput],
+      targetInputs: targetNode.data.inputs,
+      preferredSourceType: sourceOutput.type,
+      preferredSourceId: sourceOutput.id,
+      canConnect,
+    })
+    if (!autoPair) {
+      setNotice(`${sourceOutput.label} 不能交付给 ${targetNode.data.title}，请换一个节点或点具体输入口。`)
+      return false
+    }
+    if (wouldCreateDirectedCycle(edges, { source: sourceNode.id, target: targetNode.id })) {
+      setNotice('这条连线会让流程回到上游，已经阻止。')
+      return true
+    }
+
+    const edge = createFlowEdge(
+      `node-click-${sourceNode.id}-${targetNode.id}-${Date.now()}`,
+      sourceNode.id,
+      targetNode.id,
+      autoPair.sourcePort.id,
+      autoPair.sourcePort.type,
+      outputHandleId(autoPair.sourcePort),
+      inputHandleId(autoPair.targetPort),
+      autoPair.sourcePort.label,
+      autoPair.targetPort.id,
+      autoPair.targetPort.label,
+    )
+    pushCanvasHistory()
+    setEdges((current) => replaceEdgesForSingleTargetHandle(current, edge))
+    setSelectedNodeId(targetNode.id)
+    setSelectedEdgeId('')
+    clearActiveConnection()
+    setNotice(`已把 ${sourceNode.data.title} 的 ${autoPair.sourcePort.label} 接到 ${targetNode.data.title}。`)
+    return true
+  }, [activeOutputPort, clearActiveConnection, edges, nodes, pushCanvasHistory, setEdges])
+
   const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
     const nextIndex = nodes.length + 1
     if (!getAgentFlowNodeTemplate(templateId)) {
@@ -1182,6 +1230,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
           onNodeClick={(_, node) => {
+            if (completeActiveConnectionToNode(node.id)) return
             selectNodeById(node.id)
           }}
           onEdgeClick={(_, edge) => {

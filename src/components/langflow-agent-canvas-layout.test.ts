@@ -366,6 +366,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('clearActiveConnection()')
   })
 
+  it('lets users click a downstream node itself to finish the active connection', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('completeActiveConnectionToNode')
+    expect(source).toContain('findFirstCompatiblePortPair({')
+    expect(source).toContain('targetInputs: targetNode.data.inputs')
+    expect(source).toContain('onNodeClick={(_, node) => {')
+    expect(source).toContain('if (completeActiveConnectionToNode(node.id)) return')
+  })
+
   it('routes incompatible input clicks to the canvas so users get an explanation', () => {
     const source = readCanvasSource()
 
