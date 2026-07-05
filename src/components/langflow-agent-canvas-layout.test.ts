@@ -20,6 +20,22 @@ describe('Langflow agent canvas layout', () => {
     expect(source).not.toContain('absolute right-3 top-3 bottom-3 z-10 w-[22rem]')
   })
 
+  it('lets users collapse side panels so the canvas becomes the primary work area', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('paletteCollapsed')
+    expect(source).toContain('inspectorCollapsed')
+    expect(source).toContain('data-testid="canvas-left-panel-toggle"')
+    expect(source).toContain('data-testid="canvas-right-panel-toggle"')
+    expect(source).toContain('grid-cols-[3.25rem_minmax(0,1fr)_22rem]')
+    expect(source).toContain('grid-cols-[17rem_minmax(0,1fr)_3.25rem]')
+    expect(source).toContain('grid-cols-[3.25rem_minmax(0,1fr)_3.25rem]')
+    expect(source).toContain('aria-pressed={paletteCollapsed}')
+    expect(source).toContain('aria-pressed={inspectorCollapsed}')
+    expect(source).toContain('if (!paletteCollapsed) fitCanvasView()')
+    expect(source).toContain('if (!inspectorCollapsed) fitCanvasView()')
+  })
+
   it('keeps run plan and handoff details in the right inspector instead of covering the canvas', () => {
     const source = readCanvasSource()
 

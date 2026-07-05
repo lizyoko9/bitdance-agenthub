@@ -26,6 +26,10 @@ import {
   CheckCircle2,
   ClipboardCheck,
   GitBranch,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   Plus,
   Save,
@@ -275,6 +279,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
   const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
   const [savedDrafts, setSavedDrafts] = useState<CanvasDraft[]>([])
+  const [paletteCollapsed, setPaletteCollapsed] = useState(false)
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false)
   const { screenToFlowPosition, fitView } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
   const fitCanvasView = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -283,6 +289,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       })
     })
   }, [fitView])
+  const togglePaletteCollapsed = useCallback(() => {
+    if (!paletteCollapsed) fitCanvasView()
+    setPaletteCollapsed((current) => !current)
+  }, [fitCanvasView, paletteCollapsed])
+  const toggleInspectorCollapsed = useCallback(() => {
+    if (!inspectorCollapsed) fitCanvasView()
+    setInspectorCollapsed((current) => !current)
+  }, [fitCanvasView, inspectorCollapsed])
   const templateGroups = useMemo(() => getAgentFlowNodeTemplateGroups(agentFlowNodeTemplates), [])
   const filteredTemplateGroups = useMemo(() => {
     const search = templateSearchQuery.trim().toLowerCase()
@@ -882,8 +896,19 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       )}
 
       <main
-        className="grid min-h-0 flex-1 grid-cols-[17rem_minmax(0,1fr)_22rem]"
+        className={cn(
+          'grid min-h-0 flex-1',
+          paletteCollapsed && inspectorCollapsed
+            ? 'grid-cols-[3.25rem_minmax(0,1fr)_3.25rem]'
+            : paletteCollapsed
+              ? 'grid-cols-[3.25rem_minmax(0,1fr)_22rem]'
+              : inspectorCollapsed
+                ? 'grid-cols-[17rem_minmax(0,1fr)_3.25rem]'
+                : 'grid-cols-[17rem_minmax(0,1fr)_22rem]',
+        )}
         data-active-connection-type={activeConnectionType ?? ''}
+        data-left-panel-collapsed={paletteCollapsed ? 'true' : 'false'}
+        data-right-panel-collapsed={inspectorCollapsed ? 'true' : 'false'}
       >
         <div className="relative col-start-2 row-start-1 min-h-0" data-testid="canvas-flow-surface">
           <ReactFlow<AgentFlowNode, AgentFlowEdge>
@@ -933,14 +958,39 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
         </div>
 
-        <aside className="col-start-1 row-start-1 min-h-0 overflow-y-auto border-r bg-background p-3">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div>
+        <aside
+          className={cn(
+            'col-start-1 row-start-1 min-h-0 border-r bg-background',
+            paletteCollapsed ? 'overflow-hidden p-2' : 'overflow-y-auto p-3',
+          )}
+          data-testid="canvas-left-panel"
+        >
+          <div className={cn('mb-3 flex items-center justify-between gap-2', paletteCollapsed && 'mb-0 flex-col')}>
+            <div className={cn(paletteCollapsed && 'sr-only')}>
               <div className="text-sm font-semibold">组件库</div>
               <div className="mt-0.5 text-xs text-muted-foreground">先选组件，再拖拽组合流程。</div>
             </div>
-            <Badge variant="outline">{agentFlowNodeTemplates.length} 类</Badge>
+            <Badge variant="outline" className={cn(paletteCollapsed && 'hidden')}>{agentFlowNodeTemplates.length} 类</Badge>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-8 shrink-0"
+              data-testid="canvas-left-panel-toggle"
+              aria-label={paletteCollapsed ? '展开组件库' : '收起组件库'}
+              aria-pressed={paletteCollapsed}
+              onClick={togglePaletteCollapsed}
+              title={paletteCollapsed ? '展开组件库' : '收起组件库'}
+            >
+              {paletteCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+            </Button>
           </div>
+          {paletteCollapsed && (
+            <div className="mt-3 flex justify-center text-[11px] font-medium text-muted-foreground [writing-mode:vertical-rl]">
+              组件库
+            </div>
+          )}
+          <div className={cn(paletteCollapsed && 'hidden')}>
           <div className="mb-3 rounded-lg border bg-background p-2" data-testid="canvas-saved-workflows">
             <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">
               <span>保存的流程</span>
@@ -1075,37 +1125,64 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               </section>
             ))}
           </div>
+          </div>
         </aside>
 
         <div
           className="pointer-events-none col-start-3 row-start-1 min-h-0 border-l bg-background/95"
           data-testid="canvas-right-inspector"
         >
-          <div className="pointer-events-auto flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
-            {selectedEdge ? (
-              <EdgeConfigPanel
-                edge={selectedEdge}
-                nodes={nodes}
-                onDeleteEdge={() => deleteEdgeById(selectedEdge.id)}
-              />
-            ) : (
-              <NodeConfigPanel
-                node={selectedNode}
-                nodes={nodes}
-                edges={edges}
-                agents={agents}
-                softwareCommands={softwareCommands}
-                onUpdateNode={updateNode}
-                onDeleteNode={deleteSelectedNode}
-                addPortToNode={addPortToNode}
-                removePortFromNode={removePortFromNode}
-                changePortTypeForNode={changePortTypeForNode}
-                replaceNodePortsForAgent={replaceNodePortsForAgent}
-                replaceNodePortsForSoftwareCommand={replaceNodePortsForSoftwareCommand}
-              />
+          <div
+            className={cn(
+              'pointer-events-auto flex h-full min-h-0 flex-col',
+              inspectorCollapsed ? 'items-center gap-3 overflow-hidden p-2' : 'gap-3 overflow-y-auto p-3',
             )}
-            <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
-            <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
+          >
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-8 shrink-0"
+              data-testid="canvas-right-panel-toggle"
+              aria-label={inspectorCollapsed ? '展开节点检查器' : '收起节点检查器'}
+              aria-pressed={inspectorCollapsed}
+              onClick={toggleInspectorCollapsed}
+              title={inspectorCollapsed ? '展开节点检查器' : '收起节点检查器'}
+            >
+              {inspectorCollapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
+            </Button>
+            {inspectorCollapsed ? (
+              <div className="mt-3 flex justify-center text-[11px] font-medium text-muted-foreground [writing-mode:vertical-rl]">
+                节点检查器
+              </div>
+            ) : (
+              <>
+                {selectedEdge ? (
+                  <EdgeConfigPanel
+                    edge={selectedEdge}
+                    nodes={nodes}
+                    onDeleteEdge={() => deleteEdgeById(selectedEdge.id)}
+                  />
+                ) : (
+                  <NodeConfigPanel
+                    node={selectedNode}
+                    nodes={nodes}
+                    edges={edges}
+                    agents={agents}
+                    softwareCommands={softwareCommands}
+                    onUpdateNode={updateNode}
+                    onDeleteNode={deleteSelectedNode}
+                    addPortToNode={addPortToNode}
+                    removePortFromNode={removePortFromNode}
+                    changePortTypeForNode={changePortTypeForNode}
+                    replaceNodePortsForAgent={replaceNodePortsForAgent}
+                    replaceNodePortsForSoftwareCommand={replaceNodePortsForSoftwareCommand}
+                  />
+                )}
+                <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
+                <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
+              </>
+            )}
           </div>
         </div>
 
