@@ -1408,16 +1408,16 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               variant="ghost"
               className="size-8 shrink-0"
               data-testid="canvas-right-panel-toggle"
-              aria-label={inspectorCollapsed ? '展开节点检查器' : '收起节点检查器'}
+              aria-label={inspectorCollapsed ? '展开节点设置' : '收起节点设置'}
               aria-pressed={inspectorCollapsed}
               onClick={toggleInspectorCollapsed}
-              title={inspectorCollapsed ? '展开节点检查器' : '收起节点检查器'}
+              title={inspectorCollapsed ? '展开节点设置' : '收起节点设置'}
             >
               {inspectorCollapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
             </Button>
             {inspectorCollapsed ? (
               <div className="mt-3 flex justify-center text-[11px] font-medium text-muted-foreground [writing-mode:vertical-rl]">
-                节点检查器
+                节点设置
               </div>
             ) : (
               <>
@@ -1795,7 +1795,7 @@ function NodeConfigPanel({
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Settings2 className="size-4 text-primary" />
-            节点检查器
+            节点设置
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{nodeKindLabels[node.data.kind]}</div>
         </div>
