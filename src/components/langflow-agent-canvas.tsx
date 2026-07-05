@@ -1733,9 +1733,9 @@ function NodeConfigPanel({
           </PanelBlock>
         )}
 
-        <NodeSetupGuide node={node} />
+        <NodeBusinessSetup node={node} />
         <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
-        <NodePortSummary node={node} />
+        <NodeSetupGuide node={node} />
 
         <details
           data-testid="advanced-port-settings"
@@ -1787,15 +1787,54 @@ function NodeConfigPanel({
   )
 }
 
-function NodePortSummary({ node }: { node: AgentFlowNode }) {
+function NodeBusinessSetup({ node }: { node: AgentFlowNode }) {
+  const executor = describeNodeExecutor(node)
+
   return (
-    <PanelBlock title="节点输入与产物">
-      <div data-testid="node-port-summary" className="grid gap-2">
-        <PortPreviewList title="接收输入" ports={node.data.inputs} emptyText="这个节点不需要上游输入。" />
-        <PortPreviewList title="输出产物" ports={node.data.outputs} emptyText="这个节点暂时没有产物。" />
+    <PanelBlock title="业务设置">
+      <div data-testid="node-business-setup" className="grid gap-2">
+        <section data-testid="node-business-executor" className="rounded-md border bg-primary/5 p-2">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold">执行者</div>
+            <Badge variant="outline" className="text-[10px]">
+              {nodeKindLabels[node.data.kind]}
+            </Badge>
+          </div>
+          <div className="text-xs leading-5 text-muted-foreground">{executor}</div>
+        </section>
+        <div data-testid="node-port-summary" className="grid gap-2">
+          <PortPreviewList
+            title="接收输入"
+            ports={node.data.inputs}
+            emptyText="这个节点不需要上游输入。"
+            testId="node-business-inputs"
+          />
+          <PortPreviewList
+            title="输出产物"
+            ports={node.data.outputs}
+            emptyText="这个节点暂时没有产物。"
+            testId="node-business-outputs"
+          />
+        </div>
       </div>
     </PanelBlock>
   )
+}
+
+function describeNodeExecutor(node: AgentFlowNode) {
+  if (node.data.kind === 'agent') {
+    return node.data.agentId
+      ? `由 ${node.data.subtitle} 执行，按它配置好的模型、技能、MCP 和 CLI 去完成任务。`
+      : '还没有指定员工，运行前可以自动匹配，也可以在上方选择一个具体 Agent。'
+  }
+  if (node.data.kind === 'tool') {
+    return node.data.softwareCommandId
+      ? `调用 ${node.data.subtitle}，把命令结果作为下游可接收的产物。`
+      : '还没有选择软件命令，可以绑定已经接入的 CLI、MCP 或软件能力。'
+  }
+  if (node.data.kind === 'artifact') return '这是客户可见的交付节点，只接收上游连线指定的产物类型。'
+  if (node.data.kind === 'input') return '这是流程入口，负责把客户目标、素材或上一轮消息交给下游。'
+  return `这是${nodeKindLabels[node.data.kind]}节点，负责把输入整理成下游能继续处理的产物。`
 }
 
 function NodeHandoffSummary({
@@ -1977,13 +2016,15 @@ function PortPreviewList({
   title,
   ports,
   emptyText,
+  testId,
 }: {
   title: string
   ports: AgentFlowPort[]
   emptyText: string
+  testId?: string
 }) {
   return (
-    <section className="rounded-md border bg-muted/20 p-2">
+    <section className="rounded-md border bg-muted/20 p-2" data-testid={testId}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="text-xs font-semibold">{title}</div>
         <Badge variant="outline" className="text-[10px]">

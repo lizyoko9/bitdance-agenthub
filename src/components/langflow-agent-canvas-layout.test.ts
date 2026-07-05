@@ -375,6 +375,18 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('PortPreviewList')
   })
 
+  it('shows business-first node setup cards before low-level port forms', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodeBusinessSetup node={node}')
+    expect(source).toContain('data-testid="node-business-setup"')
+    expect(source).toContain('data-testid="node-business-executor"')
+    expect(source).toContain('testId="node-business-inputs"')
+    expect(source).toContain('testId="node-business-outputs"')
+    expect(source).toContain('data-testid={testId}')
+    expect(source).toContain('describeNodeExecutor')
+  })
+
   it('shows a plain-language setup guide before advanced node settings', () => {
     const source = readCanvasSource()
 
