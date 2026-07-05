@@ -44,10 +44,15 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { fetchAgentProfiles, fetchSoftwareCommands } from '@/lib/api'
+import {
+  LANGFLOW_PORT_KIND_LABELS,
+  canConnectPortKinds,
+  type LangflowPortKind,
+} from '@/lib/langflow-port-contracts'
 import { cn } from '@/lib/utils'
 
 type AgentFlowNodeKind = 'input' | 'agent' | 'tool' | 'approval' | 'artifact'
-type ArtifactType = 'message' | 'document' | 'report' | 'code' | 'image' | 'video' | 'file_bundle' | 'any'
+type ArtifactType = LangflowPortKind | 'any'
 
 interface AgentFlowPort {
   id: string
@@ -71,25 +76,25 @@ interface AgentFlowNodeData extends Record<string, unknown> {
 type AgentFlowNode = Node<AgentFlowNodeData>
 type AgentFlowEdge = Edge<{ artifactType: ArtifactType; label: string; outputId: string }>
 
-const artifactLabels: Record<ArtifactType, string> = {
-  message: '消息',
-  document: '文档',
-  report: '报告',
-  code: '代码',
-  image: '图片',
-  video: '视频',
-  file_bundle: '文件包',
-  any: '任意',
-}
+const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
 
 const artifactColors: Record<ArtifactType, string> = {
   message: '#14b8a6',
+  prompt: '#0ea5e9',
+  model: '#8b5cf6',
+  tool: '#f59e0b',
+  memory: '#84cc16',
   document: '#3b82f6',
   report: '#6366f1',
   code: '#a855f7',
+  data: '#06b6d4',
+  result: '#10b981',
   image: '#f97316',
   video: '#ef4444',
+  audio: '#ec4899',
+  spreadsheet: '#22c55e',
   file_bundle: '#22c55e',
+  structured_data: '#64748b',
   any: '#94a3b8',
 }
 
@@ -926,7 +931,9 @@ function findPortType(
 }
 
 function canConnect(sourceType: ArtifactType, targetType: ArtifactType) {
-  return targetType === 'any' || sourceType === targetType
+  if (targetType === 'any') return true
+  if (sourceType === 'any') return false
+  return canConnectPortKinds(sourceType, targetType)
 }
 
 function isEditableElement(target: EventTarget | null) {

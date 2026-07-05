@@ -55,4 +55,12 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('label: artifactLabels[nextType]')
     expect(source).toContain('canConnect(edge.data?.artifactType ??')
   })
+
+  it('uses the shared Langflow port contract instead of a private canvas-only type list', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+
+    expect(source).toContain('LANGFLOW_PORT_KIND_LABELS')
+    expect(source).toContain('canConnectPortKinds')
+    expect(source).toContain("type ArtifactType = LangflowPortKind | 'any'")
+  })
 })
