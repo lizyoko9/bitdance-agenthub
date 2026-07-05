@@ -456,6 +456,20 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     )
   }, [edges, handoffSteps.length, nodes])
 
+  const saveCanvasDraft = useCallback(() => {
+    const draft = {
+      schema: 'agenthub.langflow_agent_canvas.v1',
+      savedAt: new Date().toISOString(),
+      initialWorkflowId: initialWorkflowId ?? null,
+      nodes,
+      edges,
+      handoffSteps,
+    }
+
+    window.localStorage.setItem('agenthub.langflow-agent-canvas.draft', JSON.stringify(draft))
+    setNotice(`草稿已保存：${nodes.length} 个节点、${edges.length} 条连线。`)
+  }, [edges, handoffSteps, initialWorkflowId, nodes])
+
   return (
     <div className="flex h-full min-h-[720px] flex-col bg-background" data-testid="langflow-agent-canvas">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
@@ -476,7 +490,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             <RefreshCw className="size-3.5" />
             重排
           </Button>
-          <Button type="button" size="sm" variant="outline" className="gap-1">
+          <Button type="button" size="sm" variant="outline" className="gap-1" onClick={saveCanvasDraft}>
             <Save className="size-3.5" />
             保存草稿
           </Button>

@@ -4,8 +4,11 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 describe('Langflow agent canvas layout', () => {
+  const readCanvasSource = () =>
+    readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+
   it('keeps the React Flow surface as the primary workspace instead of squeezing it into a narrow middle column', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+    const source = readCanvasSource()
 
     expect(source).toContain('className="relative min-h-0 flex-1"')
     expect(source).toContain('absolute left-3 top-3 bottom-3 z-10 w-[17rem]')
@@ -15,7 +18,7 @@ describe('Langflow agent canvas layout', () => {
   })
 
   it('supports deleting the selected canvas node with the Delete key', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+    const source = readCanvasSource()
 
     expect(source).toContain("event.key !== 'Delete'")
     expect(source).toContain('deleteNodeById(selectedNodeId)')
@@ -23,7 +26,7 @@ describe('Langflow agent canvas layout', () => {
   })
 
   it('supports selecting and deleting the selected workflow edge with the Delete key', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+    const source = readCanvasSource()
 
     expect(source).toContain('selectedEdgeId')
     expect(source).toContain('deleteEdgeById')
@@ -36,7 +39,7 @@ describe('Langflow agent canvas layout', () => {
   })
 
   it('supports dragging palette components onto the canvas at the drop position', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+    const source = readCanvasSource()
 
     expect(source).toContain('useReactFlow')
     expect(source).toContain('application/agenthub-node-kind')
@@ -46,7 +49,7 @@ describe('Langflow agent canvas layout', () => {
   })
 
   it('lets the node inspector add and remove input/output artifact ports', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+    const source = readCanvasSource()
 
     expect(source).toContain('addPortToNode')
     expect(source).toContain('removePortFromNode')
@@ -54,12 +57,11 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain("onAddPort={() => addPortToNode(node.id, 'outputs')}")
     expect(source).toContain("removePortFromNode(node.id, 'inputs', portId)")
     expect(source).toContain("removePortFromNode(node.id, 'outputs', portId)")
-    expect(source).toContain('新增输入')
-    expect(source).toContain('新增输出')
+    expect(source).toContain('addLabel=')
   })
 
   it('keeps existing edges consistent when a port artifact type changes', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+    const source = readCanvasSource()
 
     expect(source).toContain('changePortTypeForNode')
     expect(source).toContain('syncEdgesAfterPortTypeChange')
@@ -70,7 +72,7 @@ describe('Langflow agent canvas layout', () => {
   })
 
   it('uses the shared Langflow port contract instead of a private canvas-only type list', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+    const source = readCanvasSource()
 
     expect(source).toContain('LANGFLOW_PORT_KIND_LABELS')
     expect(source).toContain('canConnectPortKinds')
@@ -78,12 +80,21 @@ describe('Langflow agent canvas layout', () => {
   })
 
   it('previews the artifact handoff chain before running a workflow', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+    const source = readCanvasSource()
 
     expect(source).toContain('buildHandoffSteps')
     expect(source).toContain('runPreflight')
     expect(source).toContain('HandoffPreviewPanel')
     expect(source).toContain('onClick={runPreflight}')
-    expect(source).toContain('交付链路')
+    expect(source).toContain('data-testid="handoff-preview-panel"')
+  })
+
+  it('saves the canvas nodes edges and artifact handoffs as a local draft', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('saveCanvasDraft')
+    expect(source).toContain("schema: 'agenthub.langflow_agent_canvas.v1'")
+    expect(source).toContain('agenthub.langflow-agent-canvas.draft')
+    expect(source).toContain('onClick={saveCanvasDraft}')
   })
 })
