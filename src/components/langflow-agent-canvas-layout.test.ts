@@ -142,6 +142,14 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('issue.nodeId && onSelectNode(issue.nodeId)')
   })
 
+  it('clears the visual node selection when users select an edge or the blank canvas', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('clearSelectedNodes')
+    expect(source).toContain('clearSelectedNodes()')
+    expect(source).toContain('setNodes((current) => current.map((item) => item.selected ? { ...item, selected: false } : item))')
+  })
+
   it('shows an execution plan panel with each node incoming and outgoing handoff contracts', () => {
     const source = readCanvasSource()
 

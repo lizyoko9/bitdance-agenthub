@@ -509,6 +509,10 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedEdgeId('')
   }, [setEdges])
 
+  const clearSelectedNodes = useCallback(() => {
+    setNodes((current) => current.map((item) => item.selected ? { ...item, selected: false } : item))
+  }, [setNodes])
+
   const selectNodeById = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId)
     setSelectedEdgeId('')
@@ -519,8 +523,9 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const selectEdgeById = useCallback((edgeId: string) => {
     setSelectedEdgeId(edgeId)
     setSelectedNodeId('')
+    clearSelectedNodes()
     setEdges((current) => current.map((item) => ({ ...item, selected: item.id === edgeId })))
-  }, [setEdges])
+  }, [clearSelectedNodes, setEdges])
 
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNode) return
@@ -765,6 +770,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onPaneClick={() => {
             setSelectedNodeId('')
             setSelectedEdgeId('')
+            clearSelectedNodes()
             setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
           }}
           panOnDrag
