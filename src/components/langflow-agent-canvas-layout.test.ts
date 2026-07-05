@@ -17,6 +17,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).not.toContain('grid-cols-[17rem_minmax(0,1fr)]')
   })
 
+  it('keeps the canvas background draggable and zoomable like a visual workflow editor', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('panOnDrag')
+    expect(source).toContain('panOnScroll')
+    expect(source).toContain('zoomOnScroll')
+    expect(source).toContain('zoomOnPinch')
+    expect(source).toContain('selectionOnDrag={false}')
+  })
+
   it('supports deleting the selected canvas node with the Delete key', () => {
     const source = readCanvasSource()
 

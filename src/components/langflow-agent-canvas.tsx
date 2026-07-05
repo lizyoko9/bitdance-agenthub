@@ -559,6 +559,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             setSelectedEdgeId('')
             setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
           }}
+          panOnDrag
+          panOnScroll
+          zoomOnScroll
+          zoomOnPinch
+          selectionOnDrag={false}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           defaultEdgeOptions={{
