@@ -366,13 +366,19 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       ...node,
       data: {
         ...node.data,
-        connectionType: activeConnectionType,
-        executionStage: executionStages.get(node.id),
-        onOutputConnectStart: setActiveConnectionType,
-      },
-    })),
-    [activeConnectionType, executionStages, nodes],
-  )
+         connectionType: activeConnectionType,
+         executionStage: executionStages.get(node.id),
+         onOutputConnectStart: (type: ArtifactType) => {
+           setSelectedNodeId(node.id)
+           setSelectedEdgeId('')
+           setActiveConnectionType(type)
+           setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })))
+           setEdges((current) => current.map((item) => ({ ...item, selected: false })))
+         },
+       },
+     })),
+     [activeConnectionType, executionStages, nodes, setEdges, setNodes],
+   )
 
   const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
     const nextIndex = nodes.length + 1
@@ -1255,10 +1261,14 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
           })}
 
           {data.outputs.map((output) => (
-            <div
+            <button
               key={output.id}
-              className="relative flex items-center gap-2 rounded-md border bg-background px-2 py-1.5"
+              type="button"
+              className="nodrag nopan relative flex w-full items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-left transition hover:border-primary hover:bg-primary/5"
+              data-testid="node-output-port-button"
               data-output-port-type={output.type}
+              aria-label={`选择${output.label}作为下一步产物`}
+              onClick={() => data.onOutputConnectStart?.(output.type)}
               onMouseDownCapture={() => data.onOutputConnectStart?.(output.type)}
               onPointerDownCapture={() => data.onOutputConnectStart?.(output.type)}
             >
@@ -1273,7 +1283,7 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
                 onPointerDownCapture={() => data.onOutputConnectStart?.(output.type)}
                 style={{ backgroundColor: artifactColors[output.type], right: -7 }}
               />
-            </div>
+            </button>
           ))}
         </div>
       </div>

@@ -210,6 +210,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('正在连接')
   })
 
+  it('lets users click a node output port to choose the exact artifact type for the next node', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="node-output-port-button"')
+    expect(source).toContain('onOutputConnectStart: (type: ArtifactType) => {')
+    expect(source).toContain('setSelectedNodeId(node.id)')
+    expect(source).toContain('setActiveConnectionType(type)')
+    expect(source).toContain('aria-label={`选择${output.label}作为下一步产物`}')
+    expect(source).toContain('className="nodrag nopan')
+  })
+
   it('syncs selected Agent contracts into the canvas node ports', () => {
     const source = readCanvasSource()
 
