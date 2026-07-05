@@ -46,6 +46,14 @@ describe('Langflow agent canvas layout', () => {
     expect(source).not.toContain('absolute bottom-3 left-[18.5rem]')
   })
 
+  it('keeps preflight issue overlays inside the flow surface after the inspector moved to its own column', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="preflight-issues-panel"')
+    expect(source).toContain('absolute right-3 top-3')
+    expect(source).not.toContain('right-[23.5rem]')
+  })
+
   it('uses product-facing canvas copy instead of exposing implementation names in the title', () => {
     const source = readCanvasSource()
 
