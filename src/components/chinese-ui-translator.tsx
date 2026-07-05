@@ -456,7 +456,11 @@ function shouldSkipAttributes(element: Element): boolean {
 }
 
 function looksLikeRuntimeSource(value: string): boolean {
-  if (value.length > 500) return true
+  if (value.length > 500 && looksLikeCodeLikeText(value)) return true
+  return looksLikeCodeLikeText(value)
+}
+
+function looksLikeCodeLikeText(value: string): boolean {
   return (
     value.includes('@font-face') ||
     value.includes('__nextjs') ||

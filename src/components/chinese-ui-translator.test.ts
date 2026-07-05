@@ -14,4 +14,11 @@ describe('ChineseUiTranslator runtime source guard', () => {
     expect(source).toContain('looksLikeRuntimeSource(node.textContent)')
     expect(source).toContain('node.remove()')
   })
+
+  it('does not delete normal long business copy just because it is long', () => {
+    const source = readTranslatorSource()
+
+    expect(source).not.toContain('if (value.length > 500) return true')
+    expect(source).toContain('value.length > 500 && looksLikeCodeLikeText(value)')
+  })
 })
