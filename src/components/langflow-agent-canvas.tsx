@@ -734,7 +734,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       )
       setNotice(`${target.data.title} 现在只会收到：${artifactLabels[output.type]}。`)
     },
-    [edges, nodes],
+    [edges, nodes, setEdges],
   )
 
   const runPreflight = useCallback(() => {
@@ -779,7 +779,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         firstWarning ? `，${preflight.warningCount} 个提醒：${firstWarning.message}` : '。'
       }`,
     )
-  }, [edges, executionPlan, handoffSteps.length, nodes, workflowDraftId, workflowTitle])
+  }, [edges, executionPlan, handoffSteps.length, nodes, setNodes, workflowDraftId, workflowTitle])
 
   const saveWorkflowDraftToLibrary = useCallback((draft: CanvasDraft) => {
     window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
@@ -787,7 +787,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     saveCanvasDraftLibrary(nextLibrary)
     setSavedDrafts(nextLibrary)
     return nextLibrary
-  }, [])
+  }, [setSavedDrafts])
 
   const saveCanvasDraft = useCallback(() => {
     const title = workflowTitle.trim() || '未命名流程'
@@ -941,6 +941,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onPaneClick={() => {
             setSelectedNodeId('')
             setSelectedEdgeId('')
+            setActiveConnectionType(null)
             clearSelectedNodes()
             setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
           }}

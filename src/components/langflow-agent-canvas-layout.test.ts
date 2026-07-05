@@ -221,6 +221,14 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('className="nodrag nopan')
   })
 
+  it('leaves artifact connection mode when users click the empty canvas', () => {
+    const source = readCanvasSource()
+
+    expect(source).toMatch(
+      /onPaneClick=\{\(\) => \{\s+setSelectedNodeId\(''\)\s+setSelectedEdgeId\(''\)\s+setActiveConnectionType\(null\)/,
+    )
+  })
+
   it('syncs selected Agent contracts into the canvas node ports', () => {
     const source = readCanvasSource()
 
