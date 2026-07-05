@@ -28,7 +28,6 @@ import {
   GitBranch,
   Play,
   Plus,
-  RefreshCw,
   Save,
   Settings2,
   Sparkles,
@@ -98,6 +97,8 @@ interface HandoffStep {
 
 interface CanvasDraft {
   schema: 'agenthub.langflow_agent_canvas.v1'
+  workflowDraftId?: string
+  title?: string
   savedAt: string
   initialWorkflowId: string | null
   nodes: AgentFlowNode[]
@@ -114,6 +115,7 @@ interface EdgeRoute {
 }
 
 const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
+const CANVAS_DRAFT_LIBRARY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.library'
 const NODE_TEMPLATE_MIME = 'application/agenthub-node-template'
 
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
@@ -175,14 +177,27 @@ export function LangflowAgentCanvas({ initialWorkflowId }: { initialWorkflowId?:
 function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: string }) {
   const [agents, setAgents] = useState<AgentProfileRow[]>([])
   const [softwareCommands, setSoftwareCommands] = useState<SoftwareCommandRow[]>([])
-  const [nodes, setNodes, onNodesChange] = useNodesState<AgentFlowNode>(initialNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState<AgentFlowEdge>(initialEdges)
+  const [nodes, setNodes, onNodesChange] = useNodesState<AgentFlowNode>(cloneCanvasNodes(initialNodes))
+  const [edges, setEdges, onEdgesChange] = useEdgesState<AgentFlowEdge>(cloneCanvasEdges(initialEdges))
   const [selectedNodeId, setSelectedNodeId] = useState('agent-2')
   const [selectedEdgeId, setSelectedEdgeId] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const [preflightVisible, setPreflightVisible] = useState(false)
   const [activeConnectionType, setActiveConnectionType] = useState<ArtifactType | null>(null)
+  const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
+  const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
+  const [savedDrafts, setSavedDrafts] = useState<CanvasDraft[]>([])
   const { screenToFlowPosition } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
+
+  const applyCanvasDraft = useCallback((draft: CanvasDraft) => {
+    setNodes(cloneCanvasNodes(draft.nodes))
+    setEdges(cloneCanvasEdges(draft.edges))
+    setSelectedNodeId(draft.nodes[0]?.id ?? '')
+    setSelectedEdgeId('')
+    setPreflightVisible(Boolean(draft.handoffSteps?.length))
+    setWorkflowDraftId(draft.workflowDraftId ?? createCanvasDraftId())
+    setWorkflowTitle(draft.title?.trim() || '未命名流程')
+  }, [setEdges, setNodes])
 
   useEffect(() => {
     let cancelled = false
@@ -202,16 +217,15 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   }, [])
 
   useEffect(() => {
-    const draft = loadCanvasDraft()
+    const library = loadCanvasDraftLibrary()
+    setSavedDrafts(library)
+
+    const draft = loadCanvasDraft() ?? library[0]
     if (!draft) return
 
-    setNodes(draft.nodes)
-    setEdges(draft.edges)
-    setSelectedNodeId(draft.nodes[0]?.id ?? '')
-    setSelectedEdgeId('')
-    setPreflightVisible(Boolean(draft.handoffSteps?.length))
+    applyCanvasDraft(draft)
     setNotice(`已恢复本地草稿：${draft.nodes.length} 个节点、${draft.edges.length} 条连线。`)
-  }, [setEdges, setNodes])
+  }, [applyCanvasDraft])
 
   const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) ?? null
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
@@ -534,8 +548,12 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   }, [edges, handoffSteps.length, nodes])
 
   const saveCanvasDraft = useCallback(() => {
+    const title = workflowTitle.trim() || '未命名流程'
+    const draftId = workflowDraftId || createCanvasDraftId()
     const draft: CanvasDraft = {
       schema: 'agenthub.langflow_agent_canvas.v1',
+      workflowDraftId: draftId,
+      title,
       savedAt: new Date().toISOString(),
       initialWorkflowId: initialWorkflowId ?? null,
       nodes,
@@ -544,8 +562,33 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     }
 
     window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
-    setNotice(`草稿已保存：${nodes.length} 个节点、${edges.length} 条连线。`)
-  }, [edges, handoffSteps, initialWorkflowId, nodes])
+    const nextLibrary = upsertCanvasDraft(loadCanvasDraftLibrary(), draft)
+    saveCanvasDraftLibrary(nextLibrary)
+    setSavedDrafts(nextLibrary)
+    setWorkflowDraftId(draftId)
+    setWorkflowTitle(title)
+    setNotice(`流程已保存：${title}，${nodes.length} 个节点、${edges.length} 条连线。`)
+  }, [edges, handoffSteps, initialWorkflowId, nodes, workflowDraftId, workflowTitle])
+
+  const loadSavedCanvasDraft = useCallback((draftId: string) => {
+    const draft = savedDrafts.find((item) => item.workflowDraftId === draftId)
+    if (!draft) return
+    applyCanvasDraft(draft)
+    window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
+    setNotice(`已打开流程：${draft.title ?? '未命名流程'}。`)
+  }, [applyCanvasDraft, savedDrafts])
+
+  const createNewCanvasDraft = useCallback(() => {
+    const nextId = createCanvasDraftId()
+    setWorkflowDraftId(nextId)
+    setWorkflowTitle('新建流程')
+    setNodes(cloneCanvasNodes(initialNodes))
+    setEdges(cloneCanvasEdges(initialEdges))
+    setSelectedNodeId('agent-2')
+    setSelectedEdgeId('')
+    setPreflightVisible(false)
+    setNotice('已新建空白流程，可直接拖拽节点开始编排。')
+  }, [setEdges, setNodes])
 
   return (
     <div className="flex h-full min-h-[720px] flex-col bg-background" data-testid="langflow-agent-canvas">
@@ -562,14 +605,33 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             {initialWorkflowId ? ` 当前流程：${initialWorkflowId}` : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button type="button" size="sm" variant="outline" className="gap-1">
-            <RefreshCw className="size-3.5" />
-            重排
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Input
+            className="h-9 w-44"
+            aria-label="流程名称"
+            value={workflowTitle}
+            onChange={(event) => setWorkflowTitle(event.target.value)}
+          />
+          <select
+            className="h-9 w-44 rounded-md border bg-background px-2 text-sm"
+            aria-label="打开已保存流程"
+            value={savedDrafts.some((draft) => draft.workflowDraftId === workflowDraftId) ? workflowDraftId : ''}
+            onChange={(event) => loadSavedCanvasDraft(event.target.value)}
+          >
+            <option value="">打开已保存流程</option>
+            {savedDrafts.map((draft) => (
+              <option key={draft.workflowDraftId ?? draft.savedAt} value={draft.workflowDraftId}>
+                {draft.title ?? '未命名流程'}
+              </option>
+            ))}
+          </select>
+          <Button type="button" size="sm" variant="outline" className="gap-1" onClick={createNewCanvasDraft}>
+            <Plus className="size-3.5" />
+            新建
           </Button>
           <Button type="button" size="sm" variant="outline" className="gap-1" onClick={saveCanvasDraft}>
             <Save className="size-3.5" />
-            保存草稿
+            保存流程
           </Button>
           <Button type="button" size="sm" className="gap-1" onClick={runPreflight}>
             <Play className="size-3.5" />
@@ -1334,6 +1396,68 @@ function loadCanvasDraft(): CanvasDraft | null {
   } catch {
     return null
   }
+}
+
+function loadCanvasDraftLibrary(): CanvasDraft[] {
+  const raw = window.localStorage.getItem(CANVAS_DRAFT_LIBRARY_STORAGE_KEY)
+  if (!raw) return []
+
+  try {
+    const drafts = JSON.parse(raw) as unknown
+    if (!Array.isArray(drafts)) return []
+    return drafts
+      .filter(isValidCanvasDraft)
+      .sort((a, b) => b.savedAt.localeCompare(a.savedAt))
+  } catch {
+    return []
+  }
+}
+
+function saveCanvasDraftLibrary(drafts: CanvasDraft[]) {
+  window.localStorage.setItem(CANVAS_DRAFT_LIBRARY_STORAGE_KEY, JSON.stringify(drafts))
+}
+
+function upsertCanvasDraft(library: CanvasDraft[], draft: CanvasDraft) {
+  const draftId = draft.workflowDraftId ?? createCanvasDraftId()
+  return [
+    { ...draft, workflowDraftId: draftId },
+    ...library.filter((item) => item.workflowDraftId !== draftId),
+  ].slice(0, 50)
+}
+
+function isValidCanvasDraft(value: unknown): value is CanvasDraft {
+  if (!value || typeof value !== 'object') return false
+  const draft = value as Partial<CanvasDraft>
+  return (
+    draft.schema === 'agenthub.langflow_agent_canvas.v1' &&
+    Array.isArray(draft.nodes) &&
+    Array.isArray(draft.edges) &&
+    typeof draft.savedAt === 'string'
+  )
+}
+
+function createCanvasDraftId() {
+  return `flow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function cloneCanvasNodes(nodes: AgentFlowNode[]) {
+  return nodes.map((node) => ({
+    ...node,
+    position: { ...node.position },
+    data: {
+      ...node.data,
+      inputs: node.data.inputs.map((input) => ({ ...input })),
+      outputs: node.data.outputs.map((output) => ({ ...output })),
+    },
+  }))
+}
+
+function cloneCanvasEdges(edges: AgentFlowEdge[]) {
+  return edges.map((edge) => ({
+    ...edge,
+    data: edge.data ? { ...edge.data } : edge.data,
+    markerEnd: edge.markerEnd && typeof edge.markerEnd === 'object' ? { ...edge.markerEnd } : edge.markerEnd,
+  }))
 }
 
 function findPortType(

@@ -137,6 +137,9 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('saveCanvasDraft')
     expect(source).toContain("schema: 'agenthub.langflow_agent_canvas.v1'")
     expect(source).toContain('agenthub.langflow-agent-canvas.draft')
+    expect(source).toContain('agenthub.langflow-agent-canvas.library')
+    expect(source).toContain('workflowTitle')
+    expect(source).toContain('savedDrafts')
     expect(source).toContain('onClick={saveCanvasDraft}')
   })
 
@@ -144,9 +147,11 @@ describe('Langflow agent canvas layout', () => {
     const source = readCanvasSource()
 
     expect(source).toContain('loadCanvasDraft')
+    expect(source).toContain('loadCanvasDraftLibrary')
+    expect(source).toContain('loadSavedCanvasDraft')
     expect(source).toContain("draft?.schema !== 'agenthub.langflow_agent_canvas.v1'")
-    expect(source).toContain('setNodes(draft.nodes)')
-    expect(source).toContain('setEdges(draft.edges)')
+    expect(source).toContain('setNodes(cloneCanvasNodes(draft.nodes))')
+    expect(source).toContain('setEdges(cloneCanvasEdges(draft.edges))')
     expect(source).toContain('setNotice(`已恢复本地草稿')
   })
 
