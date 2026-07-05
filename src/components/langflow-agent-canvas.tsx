@@ -1458,6 +1458,38 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                           </Badge>
                         </span>
                         <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{template.description}</span>
+                        <span className="mt-2 block space-y-1" data-testid="palette-template-ports">
+                          <span className="flex flex-wrap items-center gap-1" data-testid="palette-template-input-types">
+                            <span className="text-[10px] font-medium text-muted-foreground">输入</span>
+                            {template.inputs.length === 0 ? (
+                              <span className="rounded-full border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">无</span>
+                            ) : (
+                              template.inputs.map((input) => (
+                                <span
+                                  key={input.id}
+                                  className="rounded-full border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                >
+                                  {artifactLabels[input.type]}
+                                </span>
+                              ))
+                            )}
+                          </span>
+                          <span className="flex flex-wrap items-center gap-1" data-testid="palette-template-output-types">
+                            <span className="text-[10px] font-medium text-muted-foreground">输出</span>
+                            {template.outputs.length === 0 ? (
+                              <span className="rounded-full border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">无</span>
+                            ) : (
+                              template.outputs.map((output) => (
+                                <span
+                                  key={output.id}
+                                  className="rounded-full border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                >
+                                  {artifactLabels[output.type]}
+                                </span>
+                              ))
+                            )}
+                          </span>
+                        </span>
                         <span className="mt-2 inline-flex flex-wrap items-center gap-1 text-xs font-medium text-primary">
                           <Plus className="size-3" />
                           添加节点

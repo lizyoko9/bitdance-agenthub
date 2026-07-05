@@ -281,6 +281,18 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-category={group.category}')
   })
 
+  it('shows each palette component input and output artifact types before adding it', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="palette-template-ports"')
+    expect(source).toContain('data-testid="palette-template-input-types"')
+    expect(source).toContain('data-testid="palette-template-output-types"')
+    expect(source).toContain('template.inputs.map((input) =>')
+    expect(source).toContain('template.outputs.map((output) =>')
+    expect(source).toContain('artifactLabels[input.type]')
+    expect(source).toContain('artifactLabels[output.type]')
+  })
+
   it('lets users search the component palette before adding nodes', () => {
     const source = readCanvasSource()
 
