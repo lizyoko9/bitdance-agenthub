@@ -148,6 +148,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('event.preventDefault()')
   })
 
+  it('supports saving the workflow with Ctrl+S like a desktop canvas editor', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain("event.key.toLowerCase() === 's'")
+    expect(source).toContain('(event.ctrlKey || event.metaKey)')
+    expect(source).toContain('saveCanvasDraft()')
+    expect(source).toContain('onClick={saveCanvasDraft}')
+  })
+
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 

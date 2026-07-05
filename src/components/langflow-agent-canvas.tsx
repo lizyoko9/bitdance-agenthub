@@ -788,36 +788,6 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     return () => window.removeEventListener('agenthub:canvas-node-duplicate', handleNodeDuplicate)
   }, [duplicateNodeById])
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (isEditableElement(event.target)) return
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
-        if (!selectedNodeId) return
-        event.preventDefault()
-        duplicateNodeById(selectedNodeId)
-        return
-      }
-      if (event.key === 'Escape') {
-        if (!activeConnectionType && !activeOutputPort) return
-        event.preventDefault()
-        setActiveConnectionType(null)
-        setActiveOutputPort(null)
-        return
-      }
-      if (!['Delete', 'Backspace'].includes(event.key)) return
-      if (!selectedNodeId && !selectedEdgeId) return
-      event.preventDefault()
-      if (selectedEdgeId) {
-        deleteEdgeById(selectedEdgeId)
-        return
-      }
-      deleteNodeById(selectedNodeId)
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeConnectionType, activeOutputPort, deleteEdgeById, deleteNodeById, duplicateNodeById, selectedEdgeId, selectedNodeId])
-
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return
@@ -930,6 +900,41 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setWorkflowTitle(title)
     setNotice(`流程已保存：${title}，${nodes.length} 个节点、${edges.length} 条连线。`)
   }, [edges, handoffSteps, initialWorkflowId, nodes, saveWorkflowDraftToLibrary, workflowDraftId, workflowTitle])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableElement(event.target)) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        saveCanvasDraft()
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
+        if (!selectedNodeId) return
+        event.preventDefault()
+        duplicateNodeById(selectedNodeId)
+        return
+      }
+      if (event.key === 'Escape') {
+        if (!activeConnectionType && !activeOutputPort) return
+        event.preventDefault()
+        setActiveConnectionType(null)
+        setActiveOutputPort(null)
+        return
+      }
+      if (!['Delete', 'Backspace'].includes(event.key)) return
+      if (!selectedNodeId && !selectedEdgeId) return
+      event.preventDefault()
+      if (selectedEdgeId) {
+        deleteEdgeById(selectedEdgeId)
+        return
+      }
+      deleteNodeById(selectedNodeId)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeConnectionType, activeOutputPort, deleteEdgeById, deleteNodeById, duplicateNodeById, saveCanvasDraft, selectedEdgeId, selectedNodeId])
 
   const openSavedCanvasDraft = useCallback((draftId: string) => {
     const draft = savedDrafts.find((item) => item.workflowDraftId === draftId)
