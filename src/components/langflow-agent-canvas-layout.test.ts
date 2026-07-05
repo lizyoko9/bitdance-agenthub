@@ -108,6 +108,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('matchesTemplateSearch')
   })
 
+  it('lets users start from business workflow presets instead of a blank canvas', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('canvasWorkflowPresets')
+    expect(source).toContain('applyWorkflowPreset')
+    expect(source).toContain('createCanvasWorkflowPresetDraft')
+    expect(source).toContain('data-testid="canvas-workflow-presets"')
+    expect(source).toContain('data-testid="canvas-workflow-preset"')
+    expect(source).toContain('content-video')
+    expect(source).toContain('code-delivery')
+    expect(source).toContain('report-delivery')
+  })
+
   it('filters palette components while a typed output connection is active', () => {
     const source = readCanvasSource()
 

@@ -156,6 +156,15 @@ interface EdgeRoute {
   handoffContract: string
 }
 
+interface CanvasWorkflowPreset {
+  id: 'report-delivery' | 'content-video' | 'code-delivery'
+  name: string
+  description: string
+  deliverableTemplateId: string
+  artifactType: ArtifactType
+  badge: string
+}
+
 const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
 const CANVAS_DRAFT_LIBRARY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.library'
 const CANVAS_RUN_HISTORY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.runs'
@@ -210,6 +219,33 @@ const initialNodes: AgentFlowNode[] = [
 const initialEdges: AgentFlowEdge[] = [
   createFlowEdge('customer-to-agent', 'input-1', 'agent-2', 'message', 'message'),
   createFlowEdge('agent-to-delivery', 'agent-2', 'artifact-3', 'report', 'report'),
+]
+
+const canvasWorkflowPresets: CanvasWorkflowPreset[] = [
+  {
+    id: 'report-delivery',
+    name: '报告交付流程',
+    description: '客户需求进来后，让员工 Agent 产出一份客户可见报告。',
+    deliverableTemplateId: 'customer-deliverable',
+    artifactType: 'report',
+    badge: '报告',
+  },
+  {
+    id: 'content-video',
+    name: '视频交付流程',
+    description: '客户给目标和素材，员工 Agent 只把视频产物交给下游。',
+    deliverableTemplateId: 'video-deliverable',
+    artifactType: 'video',
+    badge: '视频',
+  },
+  {
+    id: 'code-delivery',
+    name: '代码交付流程',
+    description: '客户提出开发目标，员工 Agent 交付源码、Diff 或脚本。',
+    deliverableTemplateId: 'code-deliverable',
+    artifactType: 'code',
+    badge: '代码',
+  },
 ]
 
 export function LangflowAgentCanvas({ initialWorkflowId }: { initialWorkflowId?: string }) {
@@ -757,6 +793,21 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setNotice('已新建空白流程，可直接拖拽节点开始编排。')
   }, [setEdges, setNodes])
 
+  const applyWorkflowPreset = useCallback((presetId: CanvasWorkflowPreset['id']) => {
+    const draft = createCanvasWorkflowPresetDraft(presetId, initialWorkflowId ?? null)
+    setWorkflowDraftId(draft.workflowDraftId ?? createCanvasDraftId())
+    setWorkflowTitle(draft.title ?? '新建流程')
+    setNodes(cloneCanvasNodes(draft.nodes))
+    setEdges(cloneCanvasEdges(draft.edges))
+    setSelectedNodeId(draft.nodes.find((node) => node.data.kind === 'agent')?.id ?? draft.nodes[0]?.id ?? '')
+    setSelectedEdgeId('')
+    setPreflightVisible(true)
+    setPreflightIssues([])
+    setLastRun(null)
+    window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
+    setNotice(`已载入流程模板：${draft.title}。你可以直接修改节点、连线和交付物。`)
+  }, [initialWorkflowId, setEdges, setNodes])
+
   return (
     <div className="flex h-full min-h-[720px] flex-col bg-background" data-testid="langflow-agent-canvas">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
@@ -863,6 +914,33 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               <div className="mt-0.5 text-xs text-muted-foreground">先选组件，再拖拽组合流程。</div>
             </div>
             <Badge variant="outline">{agentFlowNodeTemplates.length} 类</Badge>
+          </div>
+          <div className="mb-3 rounded-lg border bg-muted/30 p-2" data-testid="canvas-workflow-presets">
+            <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">
+              <span>常用流程</span>
+              <span>一键生成</span>
+            </div>
+            <div className="space-y-1.5">
+              {canvasWorkflowPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid="canvas-workflow-preset"
+                  className="flex w-full items-start justify-between gap-2 rounded-md border bg-background px-2.5 py-2 text-left transition hover:border-primary hover:bg-primary/5"
+                  onClick={() => applyWorkflowPreset(preset.id)}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-semibold">{preset.name}</span>
+                    <span className="mt-0.5 line-clamp-2 block text-[11px] leading-4 text-muted-foreground">
+                      {preset.description}
+                    </span>
+                  </span>
+                  <Badge variant="secondary" className="shrink-0 text-[10px]">
+                    {preset.badge}
+                  </Badge>
+                </button>
+              ))}
+            </div>
           </div>
           <Input
             data-testid="component-palette-search"
@@ -1756,6 +1834,44 @@ function buildHandoffSteps(nodes: AgentFlowNode[], edges: AgentFlowEdge[]): Hand
       handoffContract: edge.data?.handoffContract ?? `${artifactLabels[artifactType]}: ${artifactLabels[artifactType]} -> ${artifactLabels[artifactType]}`,
     }]
   })
+}
+
+function createCanvasWorkflowPresetDraft(
+  presetId: CanvasWorkflowPreset['id'],
+  initialWorkflowId: string | null,
+): CanvasDraft {
+  const preset = canvasWorkflowPresets.find((item) => item.id === presetId) ?? canvasWorkflowPresets[0]
+  const inputId = `${preset.id}-input`
+  const agentId = `${preset.id}-agent`
+  const artifactId = `${preset.id}-artifact`
+  const nodes = [
+    createNodeFromTemplate('customer-request', { x: 40, y: 140 }, {
+      description: '客户目标、素材、约束和上一轮消息都会从这里进入流程。',
+    }, inputId),
+    createNodeFromTemplate('employee-agent', { x: 420, y: 140 }, {
+      title: `${preset.badge} Agent`,
+      description: `根据客户目标完成任务，并产出${artifactLabels[preset.artifactType]}。`,
+    }, agentId),
+    createNodeFromTemplate(preset.deliverableTemplateId, { x: 820, y: 140 }, {
+      description: `这个节点只接收上游连过来的${artifactLabels[preset.artifactType]}，作为客户可见交付物。`,
+      customerVisible: true,
+    }, artifactId),
+  ]
+  const edges = [
+    createFlowEdge(`${preset.id}-customer-to-agent`, inputId, agentId, 'message', 'message'),
+    createFlowEdge(`${preset.id}-agent-to-artifact`, agentId, artifactId, preset.artifactType, preset.artifactType),
+  ]
+
+  return {
+    schema: 'agenthub.langflow_agent_canvas.v1',
+    workflowDraftId: createCanvasDraftId(),
+    title: preset.name,
+    savedAt: new Date().toISOString(),
+    initialWorkflowId,
+    nodes,
+    edges,
+    handoffSteps: buildHandoffSteps(nodes, edges),
+  }
 }
 
 function buildExecutionStages(nodes: AgentFlowNode[], edges: AgentFlowEdge[]) {
