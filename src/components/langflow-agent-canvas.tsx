@@ -25,6 +25,7 @@ import {
   Bot,
   CheckCircle2,
   ClipboardCheck,
+  Copy,
   GitBranch,
   PanelLeftClose,
   PanelLeftOpen,
@@ -695,6 +696,30 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId('')
   }, [setEdges, setNodes])
 
+  const duplicateNodeById = useCallback((nodeId: string) => {
+    const source = nodes.find((node) => node.id === nodeId)
+    if (!source) return
+
+    const duplicate: AgentFlowNode = {
+      ...source,
+      id: `${source.data.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      selected: true,
+      position: { x: source.position.x + 48, y: source.position.y + 48 },
+      data: {
+        ...source.data,
+        title: `${source.data.title} 副本`,
+        inputs: source.data.inputs.map((input) => ({ ...input })),
+        outputs: source.data.outputs.map((output) => ({ ...output })),
+      },
+    }
+
+    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), duplicate])
+    setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+    setSelectedNodeId(duplicate.id)
+    setSelectedEdgeId('')
+    setNotice(`已复制节点：${source.data.title}`)
+  }, [nodes, setEdges, setNodes])
+
   const deleteEdgeById = useCallback((edgeId: string) => {
     setEdges((current) => current.filter((edge) => edge.id !== edgeId))
     setSelectedEdgeId('')
@@ -742,6 +767,16 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     window.addEventListener('agenthub:canvas-node-delete', handleNodeDelete)
     return () => window.removeEventListener('agenthub:canvas-node-delete', handleNodeDelete)
   }, [deleteNodeById])
+
+  useEffect(() => {
+    const handleNodeDuplicate = (event: Event) => {
+      const nodeId = (event as CustomEvent<{ nodeId?: string }>).detail?.nodeId
+      if (nodeId) duplicateNodeById(nodeId)
+    }
+
+    window.addEventListener('agenthub:canvas-node-duplicate', handleNodeDuplicate)
+    return () => window.removeEventListener('agenthub:canvas-node-duplicate', handleNodeDuplicate)
+  }, [duplicateNodeById])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1292,6 +1327,12 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
     window.dispatchEvent(new CustomEvent('agenthub:canvas-node-delete', { detail: { nodeId: id } }))
   }
 
+  const handleToolbarDuplicate = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    window.dispatchEvent(new CustomEvent('agenthub:canvas-node-duplicate', { detail: { nodeId: id } }))
+  }
+
   return (
     <div
       className={cn(
@@ -1305,6 +1346,16 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
           className="nodrag nopan absolute -top-10 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-lg"
           data-testid="node-floating-toolbar"
         >
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] transition hover:bg-accent"
+            onPointerDownCapture={handleToolbarDuplicate}
+            data-testid="node-toolbar-duplicate"
+            aria-label="复制节点"
+          >
+            <Copy className="size-3.5" />
+            复制
+          </button>
           <button
             type="button"
             className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-destructive transition hover:bg-destructive/10"

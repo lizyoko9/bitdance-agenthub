@@ -127,6 +127,18 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('deleteNodeById(nodeId)')
   })
 
+  it('lets users duplicate a selected node from the floating toolbar without copying its handoff edges', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('duplicateNodeById')
+    expect(source).toContain('agenthub:canvas-node-duplicate')
+    expect(source).toContain('handleNodeDuplicate')
+    expect(source).toContain('data-testid="node-toolbar-duplicate"')
+    expect(source).toContain('position: { x: source.position.x + 48, y: source.position.y + 48 }')
+    expect(source).toContain('outputs: source.data.outputs.map((output) => ({ ...output }))')
+    expect(source).toContain('setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))')
+  })
+
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 
