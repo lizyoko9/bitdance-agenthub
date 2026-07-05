@@ -144,4 +144,13 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-port-compatible')
     expect(source).toContain('canConnect(data.connectionType, input.type)')
   })
+
+  it('prevents workflow edges that would create an execution cycle', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('wouldCreateDirectedCycle')
+    expect(source).toContain("source: connection.source, target: connection.target")
+    expect(source).toContain('不能形成循环')
+    expect(source).toContain('return')
+  })
 })

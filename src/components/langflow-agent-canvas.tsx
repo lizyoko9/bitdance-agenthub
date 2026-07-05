@@ -44,6 +44,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
+import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
 import { fetchAgentProfiles, fetchSoftwareCommands } from '@/lib/api'
 import {
   LANGFLOW_PORT_KIND_LABELS,
@@ -471,6 +472,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       const input = target?.data.inputs.find((item) => inputHandleId(item) === connection.targetHandle)
 
       if (!source || !target || !output || !input) return
+      if (wouldCreateDirectedCycle(edges, { source: connection.source, target: connection.target })) {
+        setNotice('这条连线不能形成循环：Agent 工作流需要保持从上游到下游的执行顺序。')
+        return
+      }
+
       if (!canConnect(output.type, input.type)) {
         setNotice(`${source.data.title} 的 ${artifactLabels[output.type]} 不能交给只接收 ${artifactLabels[input.type]} 的节点。`)
         return
@@ -498,7 +504,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       ])
       setNotice(`${target.data.title} 现在只会收到：${artifactLabels[output.type]}。`)
     },
-    [nodes],
+    [edges, nodes],
   )
 
   const runPreflight = useCallback(() => {
