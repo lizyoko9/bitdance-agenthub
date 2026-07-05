@@ -58,7 +58,12 @@ describe('Langflow agent canvas layout', () => {
   it('uses product-facing canvas copy instead of exposing implementation names in the title', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain('<span>智能体编排画布</span>')
+    expect(source).toContain('<span>编排工作流</span>')
+    expect(source).toContain('把员工 Agent、工具和交付物连成一条工作流。')
+    expect(source).toContain('新建流程')
+    expect(source).toContain('检查并试运行')
+    expect(source).not.toContain('<Badge variant="secondary">节点编排</Badge>')
+    expect(source).not.toContain('<Badge variant="outline">免费</Badge>')
     expect(source).not.toContain('<span>Langflow 式 Agent 编排画布</span>')
     expect(source).not.toContain('<Badge variant="secondary">React Flow</Badge>')
     expect(source).toContain('proOptions={{ hideAttribution: true }}')

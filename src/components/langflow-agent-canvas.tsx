@@ -915,12 +915,10 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-base font-semibold">
             <GitBranch className="size-4 text-primary" />
-            <span>智能体编排画布</span>
-            <Badge variant="secondary">节点编排</Badge>
-            <Badge variant="outline">免费</Badge>
+            <span>编排工作流</span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            左侧选组件，中间拖拽连线，右侧配置节点。连线从某个产物端口发出，下游只接收这一类产物。
+            把员工 Agent、工具和交付物连成一条工作流。每条线都代表一种明确产物，下游只接收这条线上的内容。
             {initialWorkflowId ? ` 当前流程：${initialWorkflowId}` : ''}
           </p>
         </div>
@@ -946,7 +944,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           </select>
           <Button type="button" size="sm" variant="outline" className="gap-1" onClick={createNewCanvasDraft}>
             <Plus className="size-3.5" />
-            新建
+            新建流程
           </Button>
           <Button type="button" size="sm" variant="outline" className="gap-1" onClick={saveCanvasDraft}>
             <Save className="size-3.5" />
@@ -954,7 +952,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           </Button>
           <Button type="button" size="sm" className="gap-1" onClick={runPreflight}>
             <Play className="size-3.5" />
-            预检运行
+            检查并试运行
           </Button>
         </div>
       </header>
