@@ -246,10 +246,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="node-input-port-button"')
     expect(source).toContain('data-input-port-compatible={isInputCompatible}')
     expect(source).toContain('data.onInputConnectComplete?.(id, input.id)')
+    expect(source).toContain('onPointerDownCapture={(event) => handleInputPortPointerDown(event, input)}')
     expect(source).toContain('activeOutputPort?.nodeId')
     expect(source).toContain('targetInput.id')
     expect(source).toContain('setActiveConnectionType(null)')
     expect(source).toContain('setActiveOutputPort(null)')
+  })
+
+  it('routes incompatible input clicks to the canvas so users get an explanation', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('不能交付给')
+    expect(source).toContain('if (!data.connectionType) return')
+    expect(source).not.toContain('if (!data.connectionType || !isInputCompatible) return')
   })
 
   it('labels compatible input ports as clickable while choosing a downstream connection', () => {

@@ -1265,9 +1265,16 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 }
 
 function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
-  const handleInputPortClick = (input: AgentFlowPort, isInputCompatible: boolean) => {
-    if (!data.connectionType || !isInputCompatible) return
+  const handleInputPortClick = (input: AgentFlowPort) => {
+    if (!data.connectionType) return
     data.onInputConnectComplete?.(id, input.id)
+  }
+
+  const handleInputPortPointerDown = (event: PointerEvent<HTMLButtonElement>, input: AgentFlowPort) => {
+    if (!data.connectionType) return
+    event.preventDefault()
+    event.stopPropagation()
+    handleInputPortClick(input)
   }
 
   return (
@@ -1319,8 +1326,9 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
                 data-port-compatible={isInputCompatible}
                 data-testid="node-input-port-button"
                 data-input-port-compatible={isInputCompatible}
+                onPointerDownCapture={(event) => handleInputPortPointerDown(event, input)}
                 aria-label={`连接到${input.label}`}
-                onClick={() => handleInputPortClick(input, isInputCompatible)}
+                onClick={() => handleInputPortClick(input)}
               >
                 <Handle
                   type="target"
