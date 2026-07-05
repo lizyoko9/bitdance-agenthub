@@ -90,4 +90,25 @@ describe('findFirstCompatiblePortPair', () => {
       targetPort: { id: 'incoming', label: 'incoming', type: 'any' },
     })
   })
+
+  it('prefers the exact selected output port before other outputs of the same type', () => {
+    const result = findFirstCompatiblePortPair({
+      sourceOutputs: [
+        { id: 'video-draft', label: 'draft video', type: 'video' },
+        { id: 'video-final', label: 'final video', type: 'video' },
+        { id: 'report', label: 'report', type: 'report' },
+      ],
+      targetInputs: [
+        { id: 'incoming', label: 'incoming', type: 'any' },
+      ],
+      preferredSourceType: 'video',
+      preferredSourceId: 'video-final',
+      canConnect: (_sourceType, targetType) => targetType === 'any',
+    })
+
+    expect(result).toEqual({
+      sourcePort: { id: 'video-final', label: 'final video', type: 'video' },
+      targetPort: { id: 'incoming', label: 'incoming', type: 'any' },
+    })
+  })
 })

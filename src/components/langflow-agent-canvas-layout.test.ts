@@ -142,6 +142,7 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('findFirstCompatiblePortPair({')
     expect(source).toContain('selectedNodeId')
     expect(source).toContain('preferredSourceType: activeConnectionType ?? undefined')
+    expect(source).toContain('preferredSourceId: activeOutputPort?.nodeId === sourceNode.id ? activeOutputPort.outputId : undefined')
     expect(source).toContain('auto-${sourceNode.id}-${node.id}')
     expect(source).toContain('replaceEdgesForSingleTargetHandle(current, edge)')
   })

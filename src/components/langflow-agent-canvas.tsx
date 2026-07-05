@@ -405,6 +405,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           sourceOutputs: sourceNode.data.outputs,
           targetInputs: node.data.inputs,
           preferredSourceType: activeConnectionType ?? undefined,
+          preferredSourceId: activeOutputPort?.nodeId === sourceNode.id ? activeOutputPort.outputId : undefined,
           canConnect,
         })
       : null
@@ -431,7 +432,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId(node.id)
     setSelectedEdgeId('')
     if (!position) fitCanvasView()
-  }, [activeConnectionType, fitCanvasView, nodes, selectedNodeId, setEdges, setNodes])
+  }, [activeConnectionType, activeOutputPort, fitCanvasView, nodes, selectedNodeId, setEdges, setNodes])
 
   const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, templateId: string) => {
     event.dataTransfer.setData(NODE_TEMPLATE_MIME, templateId)

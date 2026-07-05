@@ -23,19 +23,31 @@ export function findFirstCompatiblePortPair<TPort extends ConnectablePort>({
   sourceOutputs,
   targetInputs,
   preferredSourceType,
+  preferredSourceId,
   canConnect,
 }: {
   sourceOutputs: TPort[]
   targetInputs: TPort[]
   preferredSourceType?: TPort['type'] | null
+  preferredSourceId?: string | null
   canConnect: (sourceType: TPort['type'], targetType: TPort['type']) => boolean
 }): CompatiblePortPair<TPort> | null {
+  const exactPreferredSourceOutputs = preferredSourceId
+    ? sourceOutputs.filter((port) => port.id === preferredSourceId)
+    : []
+  const remainingSourceOutputs = preferredSourceId
+    ? sourceOutputs.filter((port) => port.id !== preferredSourceId)
+    : sourceOutputs
   const orderedSourceOutputs = preferredSourceType
     ? [
-        ...sourceOutputs.filter((port) => port.type === preferredSourceType),
-        ...sourceOutputs.filter((port) => port.type !== preferredSourceType),
+        ...exactPreferredSourceOutputs,
+        ...remainingSourceOutputs.filter((port) => port.type === preferredSourceType),
+        ...remainingSourceOutputs.filter((port) => port.type !== preferredSourceType),
       ]
-    : sourceOutputs
+    : [
+        ...exactPreferredSourceOutputs,
+        ...remainingSourceOutputs,
+      ]
 
   for (const sourcePort of orderedSourceOutputs) {
     for (const targetPort of targetInputs) {
