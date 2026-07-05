@@ -183,6 +183,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('setupGuide.handoffHint')
   })
 
+  it('shows the selected node actual incoming and outgoing handoffs', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodeHandoffSummary')
+    expect(source).toContain('data-testid="node-handoff-summary"')
+    expect(source).toContain('getNodeHandoffSummary')
+    expect(source).toContain('incomingHandoffs')
+    expect(source).toContain('outgoingHandoffs')
+    expect(source).toContain('edge.data?.handoffContract')
+  })
+
   it('keeps existing edges consistent when a port artifact type changes', () => {
     const source = readCanvasSource()
 

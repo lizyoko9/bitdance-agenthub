@@ -1031,6 +1031,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             ) : (
               <NodeConfigPanel
                 node={selectedNode}
+                nodes={nodes}
+                edges={edges}
                 agents={agents}
                 softwareCommands={softwareCommands}
                 onUpdateNode={updateNode}
@@ -1245,6 +1247,8 @@ function EdgeConfigPanel({
 
 function NodeConfigPanel({
   node,
+  nodes,
+  edges,
   agents,
   softwareCommands,
   onUpdateNode,
@@ -1256,6 +1260,8 @@ function NodeConfigPanel({
   replaceNodePortsForSoftwareCommand,
 }: {
   node: AgentFlowNode | null
+  nodes: AgentFlowNode[]
+  edges: AgentFlowEdge[]
   agents: AgentProfileRow[]
   softwareCommands: SoftwareCommandRow[]
   onUpdateNode: (nodeId: string, patch: Partial<AgentFlowNodeData>) => void
@@ -1359,6 +1365,7 @@ function NodeConfigPanel({
         )}
 
         <NodeSetupGuide node={node} />
+        <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
         <NodePortSummary node={node} />
 
         <details
@@ -1420,6 +1427,94 @@ function NodePortSummary({ node }: { node: AgentFlowNode }) {
       </div>
     </PanelBlock>
   )
+}
+
+function NodeHandoffSummary({
+  node,
+  nodes,
+  edges,
+}: {
+  node: AgentFlowNode
+  nodes: AgentFlowNode[]
+  edges: AgentFlowEdge[]
+}) {
+  const { incomingHandoffs, outgoingHandoffs } = getNodeHandoffSummary(node, nodes, edges)
+
+  return (
+    <PanelBlock title="实际交付关系">
+      <div data-testid="node-handoff-summary" className="grid gap-2 text-xs">
+        <HandoffList title="收到的交付" emptyText="还没有上游连到这个节点。" handoffs={incomingHandoffs} />
+        <HandoffList title="交出去的交付" emptyText="还没有把这个节点的产物交给下游。" handoffs={outgoingHandoffs} />
+      </div>
+    </PanelBlock>
+  )
+}
+
+function HandoffList({
+  title,
+  emptyText,
+  handoffs,
+}: {
+  title: string
+  emptyText: string
+  handoffs: Array<{
+    id: string
+    peerTitle: string
+    contract: string
+    artifactType: ArtifactType
+  }>
+}) {
+  return (
+    <section className="rounded-md border bg-muted/20 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold">{title}</div>
+        <Badge variant="outline" className="text-[10px]">
+          {handoffs.length} 条
+        </Badge>
+      </div>
+      {handoffs.length === 0 ? (
+        <div className="text-[11px] text-muted-foreground">{emptyText}</div>
+      ) : (
+        <div className="space-y-1">
+          {handoffs.map((handoff) => (
+            <div key={handoff.id} className="rounded-md border bg-background px-2 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate font-medium">{handoff.peerTitle}</span>
+                <ArtifactPill type={handoff.artifactType} />
+              </div>
+              <div className="mt-1 truncate text-[11px] text-muted-foreground">{handoff.contract}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function getNodeHandoffSummary(
+  node: AgentFlowNode,
+  nodes: AgentFlowNode[],
+  edges: AgentFlowEdge[],
+) {
+  const nodeTitleById = new Map(nodes.map((item) => [item.id, item.data.title]))
+  const incomingHandoffs = edges
+    .filter((edge) => edge.target === node.id)
+    .map((edge) => ({
+      id: edge.id,
+      peerTitle: nodeTitleById.get(edge.source) ?? '上游节点',
+      contract: edge.data?.handoffContract ?? edge.data?.label ?? '交付关系',
+      artifactType: edge.data?.artifactType ?? 'any',
+    }))
+  const outgoingHandoffs = edges
+    .filter((edge) => edge.source === node.id)
+    .map((edge) => ({
+      id: edge.id,
+      peerTitle: nodeTitleById.get(edge.target) ?? '下游节点',
+      contract: edge.data?.handoffContract ?? edge.data?.label ?? '交付关系',
+      artifactType: edge.data?.artifactType ?? 'any',
+    }))
+
+  return { incomingHandoffs, outgoingHandoffs }
 }
 
 function NodeSetupGuide({ node }: { node: AgentFlowNode }) {
