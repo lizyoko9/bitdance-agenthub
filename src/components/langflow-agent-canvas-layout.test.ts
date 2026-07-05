@@ -238,6 +238,20 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain("'nodrag nopan")
   })
 
+  it('lets users click a compatible input port on an existing node to finish a connection', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('onInputConnectComplete?: (targetNodeId: string, targetInputId: string) => void')
+    expect(source).toContain('handleInputPortClick')
+    expect(source).toContain('data-testid="node-input-port-button"')
+    expect(source).toContain('data-input-port-compatible={isInputCompatible}')
+    expect(source).toContain('data.onInputConnectComplete?.(id, input.id)')
+    expect(source).toContain('activeOutputPort?.nodeId')
+    expect(source).toContain('targetInput.id')
+    expect(source).toContain('setActiveConnectionType(null)')
+    expect(source).toContain('setActiveOutputPort(null)')
+  })
+
   it('leaves artifact connection mode when users click the empty canvas', () => {
     const source = readCanvasSource()
 

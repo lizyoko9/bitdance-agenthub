@@ -93,6 +93,7 @@ interface AgentFlowNodeData extends Record<string, unknown> {
   connectionType?: ArtifactType | null
   activeOutputPortId?: string
   onOutputConnectStart?: (type: ArtifactType, outputId: string) => void
+  onInputConnectComplete?: (targetNodeId: string, targetInputId: string) => void
 }
 
 type AgentFlowNode = Node<AgentFlowNodeData>
@@ -384,9 +385,48 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })))
           setEdges((current) => current.map((item) => ({ ...item, selected: false })))
         },
+        onInputConnectComplete: (targetNodeId: string, targetInputId: string) => {
+          if (!activeOutputPort) return
+          const sourceNode = nodes.find((item) => item.id === activeOutputPort.nodeId)
+          const targetNode = nodes.find((item) => item.id === targetNodeId)
+          const sourceOutput = sourceNode?.data.outputs.find((output) => output.id === activeOutputPort.outputId)
+          const targetInput = targetNode?.data.inputs.find((input) => input.id === targetInputId)
+          if (!sourceNode || !targetNode || !sourceOutput || !targetInput) return
+          if (sourceNode.id === targetNode.id) {
+            setNotice('同一个节点内部不需要连线，选择一个下游节点的输入口。')
+            return
+          }
+          if (!canConnect(sourceOutput.type, targetInput.type)) {
+            setNotice(`${sourceOutput.label} 不能交付给 ${targetInput.label}，请换一个输入口。`)
+            return
+          }
+          if (wouldCreateDirectedCycle(edges, { source: sourceNode.id, target: targetNode.id })) {
+            setNotice('这条连线会让流程回到上游，已经阻止。')
+            return
+          }
+
+          const edge = createFlowEdge(
+            `click-${sourceNode.id}-${targetNode.id}-${Date.now()}`,
+            sourceNode.id,
+            targetNode.id,
+            sourceOutput.id,
+            sourceOutput.type,
+            outputHandleId(sourceOutput),
+            inputHandleId(targetInput),
+            sourceOutput.label,
+            targetInput.id,
+            targetInput.label,
+          )
+          setEdges((current) => replaceEdgesForSingleTargetHandle(current, edge))
+          setSelectedNodeId(targetNode.id)
+          setSelectedEdgeId('')
+          setActiveConnectionType(null)
+          setActiveOutputPort(null)
+          setNotice(`已把 ${sourceNode.data.title} 的 ${sourceOutput.label} 接到 ${targetNode.data.title}。`)
+        },
       },
     })),
-    [activeConnectionType, activeOutputPort, executionStages, nodes, setEdges, setNodes],
+    [activeConnectionType, activeOutputPort, edges, executionStages, nodes, setEdges, setNodes],
   )
 
   const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
@@ -1224,7 +1264,12 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   )
 }
 
-function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
+function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
+  const handleInputPortClick = (input: AgentFlowPort, isInputCompatible: boolean) => {
+    if (!data.connectionType || !isInputCompatible) return
+    data.onInputConnectComplete?.(id, input.id)
+  }
+
   return (
     <div
       className={cn(
@@ -1263,14 +1308,19 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
             const isInputCompatible = !data.connectionType || canConnect(data.connectionType, input.type)
 
             return (
-              <div
+              <button
                 key={input.id}
+                type="button"
                 className={cn(
-                  'relative flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 transition',
-                  data.connectionType && isInputCompatible && 'border-emerald-400 bg-emerald-500/10',
+                  'nodrag nopan relative flex w-full items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-left transition',
+                  data.connectionType && isInputCompatible && 'border-emerald-400 bg-emerald-500/10 hover:border-emerald-500 hover:bg-emerald-500/15',
                   data.connectionType && !isInputCompatible && 'opacity-35 grayscale',
                 )}
                 data-port-compatible={isInputCompatible}
+                data-testid="node-input-port-button"
+                data-input-port-compatible={isInputCompatible}
+                aria-label={`连接到${input.label}`}
+                onClick={() => handleInputPortClick(input, isInputCompatible)}
               >
                 <Handle
                   type="target"
@@ -1281,7 +1331,7 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
                 />
                 <span className="min-w-0 flex-1 truncate text-[11px]">{input.label}</span>
                 <ArtifactPill type={input.type} />
-              </div>
+              </button>
             )
           })}
 
