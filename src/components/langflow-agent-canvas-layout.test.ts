@@ -308,6 +308,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('matchesTemplateSearch')
   })
 
+  it('explains that palette cards can be clicked or dragged onto the canvas', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="component-palette-add-node"')
+    expect(source).toContain('点击添加到当前节点旁边，也可以拖到画布指定位置')
+    expect(source).toContain('onClick={() => addNodeFromTemplate(template.id)}')
+    expect(source).toContain('onDragStart={(event) => handlePaletteDragStart(event, template.id)}')
+  })
+
   it('lets users start from business workflow presets instead of a blank canvas', () => {
     const source = readCanvasSource()
 

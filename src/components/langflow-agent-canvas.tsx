@@ -1487,6 +1487,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                       draggable
                       className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary hover:bg-primary/5"
                       data-template-id={template.id}
+                      title="点击添加到当前节点旁边，也可以拖到画布指定位置"
                       onClick={() => addNodeFromTemplate(template.id)}
                       onDragStart={(event) => handlePaletteDragStart(event, template.id)}
                     >
@@ -1533,7 +1534,10 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                             )}
                           </span>
                         </span>
-                        <span className="mt-2 inline-flex flex-wrap items-center gap-1 text-xs font-medium text-primary">
+                        <span
+                          className="mt-2 inline-flex flex-wrap items-center gap-1 text-xs font-medium text-primary"
+                          data-testid="component-palette-add-node"
+                        >
                           <Plus className="size-3" />
                           添加节点
                           <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
