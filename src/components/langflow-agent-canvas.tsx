@@ -43,6 +43,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
 import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
+import { buildSoftwareCommandFlowPorts } from '@/lib/agent-flow-software-command-contracts'
 import {
   agentFlowNodeTemplates,
   cloneTemplatePorts,
@@ -397,6 +398,28 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setEdges((current) => keepEdgesWithKnownHandles(current, nodeId, agentPorts.inputs, agentPorts.outputs))
   }, [setEdges, setNodes])
 
+  const replaceNodePortsForSoftwareCommand = useCallback((nodeId: string, command: SoftwareCommandRow) => {
+    const commandPorts = buildSoftwareCommandFlowPorts(command)
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                softwareCommandId: command.id,
+                title: command.name,
+                subtitle: `软件命令 · ${command.riskLevel}`,
+                inputs: commandPorts.inputs,
+                outputs: commandPorts.outputs,
+              },
+            }
+          : node,
+      ),
+    )
+    setEdges((current) => keepEdgesWithKnownHandles(current, nodeId, commandPorts.inputs, commandPorts.outputs))
+  }, [setEdges, setNodes])
+
   const deleteNodeById = useCallback((nodeId: string) => {
     setNodes((current) => current.filter((node) => node.id !== nodeId))
     setEdges((current) =>
@@ -662,6 +685,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                 removePortFromNode={removePortFromNode}
                 changePortTypeForNode={changePortTypeForNode}
                 replaceNodePortsForAgent={replaceNodePortsForAgent}
+                replaceNodePortsForSoftwareCommand={replaceNodePortsForSoftwareCommand}
               />
             )}
           </div>
@@ -872,6 +896,7 @@ function NodeConfigPanel({
   removePortFromNode,
   changePortTypeForNode,
   replaceNodePortsForAgent,
+  replaceNodePortsForSoftwareCommand,
 }: {
   node: AgentFlowNode | null
   agents: AgentProfileRow[]
@@ -882,6 +907,7 @@ function NodeConfigPanel({
   removePortFromNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string) => void
   changePortTypeForNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string, nextType: ArtifactType) => void
   replaceNodePortsForAgent: (nodeId: string, agent: AgentProfileRow) => void
+  replaceNodePortsForSoftwareCommand: (nodeId: string, command: SoftwareCommandRow) => void
 }) {
   if (!node) {
     return (
@@ -955,10 +981,13 @@ function NodeConfigPanel({
               value={node.data.softwareCommandId ?? ''}
               onChange={(event) => {
                 const command = softwareCommands.find((item) => item.id === event.target.value)
+                if (command) {
+                  replaceNodePortsForSoftwareCommand(node.id, command)
+                  return
+                }
                 onUpdateNode(node.id, {
-                  softwareCommandId: command?.id,
-                  title: command?.name ?? node.data.title,
-                  subtitle: command ? `软件命令 · ${command.riskLevel}` : node.data.subtitle,
+                  softwareCommandId: undefined,
+                  subtitle: nodeKindLabels.tool,
                 })
               }}
             >

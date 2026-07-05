@@ -78,6 +78,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('keepEdgesWithKnownHandles')
   })
 
+  it('syncs selected software command schemas into the canvas node ports', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('buildSoftwareCommandFlowPorts')
+    expect(source).toContain('replaceNodePortsForSoftwareCommand')
+    expect(source).toContain('outputs: commandPorts.outputs')
+    expect(source).toContain('inputs: commandPorts.inputs')
+    expect(source).toContain('keepEdgesWithKnownHandles')
+  })
+
   it('lets the node inspector add and remove input/output artifact ports', () => {
     const source = readCanvasSource()
 
