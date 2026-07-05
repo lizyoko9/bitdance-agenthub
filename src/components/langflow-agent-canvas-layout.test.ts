@@ -32,8 +32,9 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('grid-cols-[3.25rem_minmax(0,1fr)_3.25rem]')
     expect(source).toContain('aria-pressed={paletteCollapsed}')
     expect(source).toContain('aria-pressed={inspectorCollapsed}')
-    expect(source).toContain('if (!paletteCollapsed) fitCanvasView()')
-    expect(source).toContain('if (!inspectorCollapsed) fitCanvasView()')
+    expect(source).toContain('useEffect(() => {\n    fitCanvasView()\n  }, [fitCanvasView, inspectorCollapsed, paletteCollapsed])')
+    expect(source).not.toContain('if (!paletteCollapsed) fitCanvasView()')
+    expect(source).not.toContain('if (!inspectorCollapsed) fitCanvasView()')
   })
 
   it('keeps run plan and handoff details in the right inspector instead of covering the canvas', () => {
@@ -140,6 +141,7 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('findFirstCompatiblePortPair')
     expect(source).toContain('findFirstCompatiblePortPair({')
     expect(source).toContain('selectedNodeId')
+    expect(source).toContain('preferredSourceType: activeConnectionType ?? undefined')
     expect(source).toContain('auto-${sourceNode.id}-${node.id}')
     expect(source).toContain('replaceEdgesForSingleTargetHandle(current, edge)')
   })

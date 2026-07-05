@@ -22,13 +22,22 @@ export interface CompatiblePortPair<TPort extends ConnectablePort = ConnectableP
 export function findFirstCompatiblePortPair<TPort extends ConnectablePort>({
   sourceOutputs,
   targetInputs,
+  preferredSourceType,
   canConnect,
 }: {
   sourceOutputs: TPort[]
   targetInputs: TPort[]
+  preferredSourceType?: TPort['type'] | null
   canConnect: (sourceType: TPort['type'], targetType: TPort['type']) => boolean
 }): CompatiblePortPair<TPort> | null {
-  for (const sourcePort of sourceOutputs) {
+  const orderedSourceOutputs = preferredSourceType
+    ? [
+        ...sourceOutputs.filter((port) => port.type === preferredSourceType),
+        ...sourceOutputs.filter((port) => port.type !== preferredSourceType),
+      ]
+    : sourceOutputs
+
+  for (const sourcePort of orderedSourceOutputs) {
     for (const targetPort of targetInputs) {
       if (canConnect(sourcePort.type, targetPort.type)) {
         return { sourcePort, targetPort }

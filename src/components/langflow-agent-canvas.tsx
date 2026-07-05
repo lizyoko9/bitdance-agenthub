@@ -290,13 +290,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     })
   }, [fitView])
   const togglePaletteCollapsed = useCallback(() => {
-    if (!paletteCollapsed) fitCanvasView()
     setPaletteCollapsed((current) => !current)
-  }, [fitCanvasView, paletteCollapsed])
+  }, [])
   const toggleInspectorCollapsed = useCallback(() => {
-    if (!inspectorCollapsed) fitCanvasView()
     setInspectorCollapsed((current) => !current)
-  }, [fitCanvasView, inspectorCollapsed])
+  }, [])
+  useEffect(() => {
+    fitCanvasView()
+  }, [fitCanvasView, inspectorCollapsed, paletteCollapsed])
   const templateGroups = useMemo(() => getAgentFlowNodeTemplateGroups(agentFlowNodeTemplates), [])
   const filteredTemplateGroups = useMemo(() => {
     const search = templateSearchQuery.trim().toLowerCase()
@@ -388,6 +389,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       ? findFirstCompatiblePortPair({
           sourceOutputs: sourceNode.data.outputs,
           targetInputs: node.data.inputs,
+          preferredSourceType: activeConnectionType ?? undefined,
           canConnect,
         })
       : null
@@ -414,7 +416,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId(node.id)
     setSelectedEdgeId('')
     if (!position) fitCanvasView()
-  }, [fitCanvasView, nodes, selectedNodeId, setEdges, setNodes])
+  }, [activeConnectionType, fitCanvasView, nodes, selectedNodeId, setEdges, setNodes])
 
   const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, templateId: string) => {
     event.dataTransfer.setData(NODE_TEMPLATE_MIME, templateId)

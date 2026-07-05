@@ -70,4 +70,24 @@ describe('findFirstCompatiblePortPair', () => {
       targetPort: { id: 'clip', label: '视频素材', type: 'video' },
     })
   })
+
+  it('prefers the currently selected output type when auto-linking a new downstream node', () => {
+    const result = findFirstCompatiblePortPair({
+      sourceOutputs: [
+        { id: 'report', label: 'report', type: 'report' },
+        { id: 'video', label: 'video', type: 'video' },
+        { id: 'code', label: 'code', type: 'code' },
+      ],
+      targetInputs: [
+        { id: 'incoming', label: 'incoming', type: 'any' },
+      ],
+      preferredSourceType: 'video',
+      canConnect: (_sourceType, targetType) => targetType === 'any',
+    })
+
+    expect(result).toEqual({
+      sourcePort: { id: 'video', label: 'video', type: 'video' },
+      targetPort: { id: 'incoming', label: 'incoming', type: 'any' },
+    })
+  })
 })
