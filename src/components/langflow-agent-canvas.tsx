@@ -66,6 +66,7 @@ import {
   type AgentFlowTemplatePortKind,
 } from '@/lib/agent-flow-node-templates'
 import { fetchAgentProfiles, fetchSoftwareCommands } from '@/lib/api'
+import { resolveCanvasKeyboardAction } from '@/lib/canvas-keyboard-actions'
 import {
   LANGFLOW_PORT_KIND_LABELS,
   canConnectPortKinds,
@@ -903,26 +904,27 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isEditableElement(event.target)) return
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      const action = resolveCanvasKeyboardAction(event)
+      if (!action) return
+      if (action === 'save-workflow') {
         event.preventDefault()
         saveCanvasDraft()
         return
       }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
+      if (action === 'duplicate-selected-node') {
         if (!selectedNodeId) return
         event.preventDefault()
         duplicateNodeById(selectedNodeId)
         return
       }
-      if (event.key === 'Escape') {
+      if (action === 'cancel-connection') {
         if (!activeConnectionType && !activeOutputPort) return
         event.preventDefault()
         setActiveConnectionType(null)
         setActiveOutputPort(null)
         return
       }
-      if (!['Delete', 'Backspace'].includes(event.key)) return
+      if (action !== 'delete-selected-node') return
       if (!selectedNodeId && !selectedEdgeId) return
       event.preventDefault()
       if (selectedEdgeId) {
@@ -2739,11 +2741,6 @@ function canConnect(sourceType: ArtifactType, targetType: ArtifactType) {
   if (targetType === 'any') return true
   if (sourceType === 'any') return false
   return canConnectPortKinds(sourceType, targetType)
-}
-
-function isEditableElement(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false
-  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
 }
 
 const nodeTypes = { agentFlowNode: AgentFlowNodeCard }

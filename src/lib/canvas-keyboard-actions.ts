@@ -1,4 +1,8 @@
-export type CanvasKeyboardAction = 'delete-selected-node'
+export type CanvasKeyboardAction =
+  | 'cancel-connection'
+  | 'delete-selected-node'
+  | 'duplicate-selected-node'
+  | 'save-workflow'
 
 type KeyboardShortcutEvent = {
   key: string
@@ -10,9 +14,19 @@ type KeyboardShortcutEvent = {
 }
 
 export function resolveCanvasKeyboardAction(event: KeyboardShortcutEvent): CanvasKeyboardAction | null {
-  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null
-  if (event.key !== 'Delete' && event.key !== 'Backspace') return null
   if (isEditableShortcutTarget(event.target ?? null)) return null
+
+  const key = event.key.toLowerCase()
+  const hasCommandModifier = Boolean(event.ctrlKey || event.metaKey)
+  if (event.altKey || event.shiftKey) return null
+  if (hasCommandModifier) {
+    if (key === 's') return 'save-workflow'
+    if (key === 'd') return 'duplicate-selected-node'
+    return null
+  }
+
+  if (key === 'escape') return 'cancel-connection'
+  if (event.key !== 'Delete' && event.key !== 'Backspace') return null
   return 'delete-selected-node'
 }
 

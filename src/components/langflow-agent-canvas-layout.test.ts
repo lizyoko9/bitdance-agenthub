@@ -112,9 +112,11 @@ describe('Langflow agent canvas layout', () => {
   it('supports deleting the selected canvas node with the Delete key', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain("['Delete', 'Backspace'].includes(event.key)")
+    expect(source).toContain("import { resolveCanvasKeyboardAction } from '@/lib/canvas-keyboard-actions'")
+    expect(source).toContain('const action = resolveCanvasKeyboardAction(event)')
+    expect(source).toContain("action !== 'delete-selected-node'")
     expect(source).toContain('deleteNodeById(selectedNodeId)')
-    expect(source).toContain('isEditableElement(event.target)')
+    expect(source).not.toContain('isEditableElement(event.target)')
   })
 
   it('shows a Langflow-style floating toolbar on the selected node for obvious node actions', () => {
@@ -142,8 +144,7 @@ describe('Langflow agent canvas layout', () => {
   it('supports duplicating the selected node with Ctrl+D like a visual canvas editor', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain("event.key.toLowerCase() === 'd'")
-    expect(source).toContain('(event.ctrlKey || event.metaKey)')
+    expect(source).toContain("action === 'duplicate-selected-node'")
     expect(source).toContain('duplicateNodeById(selectedNodeId)')
     expect(source).toContain('event.preventDefault()')
   })
@@ -151,8 +152,7 @@ describe('Langflow agent canvas layout', () => {
   it('supports saving the workflow with Ctrl+S like a desktop canvas editor', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain("event.key.toLowerCase() === 's'")
-    expect(source).toContain('(event.ctrlKey || event.metaKey)')
+    expect(source).toContain("action === 'save-workflow'")
     expect(source).toContain('saveCanvasDraft()')
     expect(source).toContain('onClick={saveCanvasDraft}')
   })
@@ -160,7 +160,7 @@ describe('Langflow agent canvas layout', () => {
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain("event.key === 'Escape'")
+    expect(source).toContain("action === 'cancel-connection'")
     expect(source).toContain('activeConnectionType')
     expect(source).toContain('activeOutputPort')
     expect(source).toContain('setActiveConnectionType(null)')
@@ -183,7 +183,8 @@ describe('Langflow agent canvas layout', () => {
   it('treats Backspace like Delete for selected canvas objects', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain("['Delete', 'Backspace'].includes(event.key)")
+    expect(source).toContain('const action = resolveCanvasKeyboardAction(event)')
+    expect(source).toContain("action !== 'delete-selected-node'")
     expect(source).toContain('deleteEdgeById(selectedEdgeId)')
     expect(source).toContain('deleteNodeById(selectedNodeId)')
   })

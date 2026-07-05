@@ -8,6 +8,14 @@ describe('resolveCanvasKeyboardAction', () => {
     expect(resolveCanvasKeyboardAction({ key: 'Backspace' })).toBe('delete-selected-node')
   })
 
+  it('resolves desktop canvas shortcuts for save, duplicate, and cancel', () => {
+    expect(resolveCanvasKeyboardAction({ key: 's', ctrlKey: true })).toBe('save-workflow')
+    expect(resolveCanvasKeyboardAction({ key: 'S', metaKey: true })).toBe('save-workflow')
+    expect(resolveCanvasKeyboardAction({ key: 'd', ctrlKey: true })).toBe('duplicate-selected-node')
+    expect(resolveCanvasKeyboardAction({ key: 'D', metaKey: true })).toBe('duplicate-selected-node')
+    expect(resolveCanvasKeyboardAction({ key: 'Escape' })).toBe('cancel-connection')
+  })
+
   it('ignores delete shortcuts while the user is editing text', () => {
     const input = editableTarget('input')
     const textarea = editableTarget('textarea')
@@ -16,11 +24,15 @@ describe('resolveCanvasKeyboardAction', () => {
     expect(resolveCanvasKeyboardAction({ key: 'Delete', target: input })).toBeNull()
     expect(resolveCanvasKeyboardAction({ key: 'Backspace', target: textarea })).toBeNull()
     expect(resolveCanvasKeyboardAction({ key: 'Delete', target: contentEditable })).toBeNull()
+    expect(resolveCanvasKeyboardAction({ key: 's', ctrlKey: true, target: input })).toBeNull()
+    expect(resolveCanvasKeyboardAction({ key: 'Escape', target: textarea })).toBeNull()
   })
 
   it('ignores modified shortcuts and unrelated keys', () => {
     expect(resolveCanvasKeyboardAction({ key: 'Delete', ctrlKey: true })).toBeNull()
     expect(resolveCanvasKeyboardAction({ key: 'Backspace', metaKey: true })).toBeNull()
+    expect(resolveCanvasKeyboardAction({ key: 's', ctrlKey: true, shiftKey: true })).toBeNull()
+    expect(resolveCanvasKeyboardAction({ key: 'd', metaKey: true, altKey: true })).toBeNull()
     expect(resolveCanvasKeyboardAction({ key: 'Enter' })).toBeNull()
   })
 })
