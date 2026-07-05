@@ -145,6 +145,15 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="execution-plan-panel"')
   })
 
+  it('shows the latest local dry-run result directly on the canvas', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('lastRun')
+    expect(source).toContain('setLastRun(run)')
+    expect(source).toContain('RunResultSummary')
+    expect(source).toContain('data-testid="run-result-summary"')
+  })
+
   it('saves the canvas nodes edges and artifact handoffs as a local draft', () => {
     const source = readCanvasSource()
 

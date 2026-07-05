@@ -221,6 +221,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [notice, setNotice] = useState<string | null>(null)
   const [preflightVisible, setPreflightVisible] = useState(false)
   const [preflightIssues, setPreflightIssues] = useState<AgentFlowRunIssue[]>([])
+  const [lastRun, setLastRun] = useState<CanvasRunRecord | null>(null)
   const [activeConnectionType, setActiveConnectionType] = useState<ArtifactType | null>(null)
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
   const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
@@ -234,6 +235,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedEdgeId('')
     setPreflightVisible(Boolean(draft.handoffSteps?.length))
     setPreflightIssues([])
+    setLastRun(findLatestCanvasRunForDraft(loadCanvasRunHistory(), draft.workflowDraftId))
     setWorkflowDraftId(draft.workflowDraftId ?? createCanvasDraftId())
     setWorkflowTitle(draft.title?.trim() || '未命名流程')
   }, [setEdges, setNodes])
@@ -625,6 +627,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       })),
     }
     saveCanvasRunHistory(upsertCanvasRunHistory(loadCanvasRunHistory(), run))
+    setLastRun(run)
 
     const firstWarning = preflight.issues.find((issue) => issue.severity === 'warning')
     setNotice(
@@ -675,6 +678,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedEdgeId('')
     setPreflightVisible(false)
     setPreflightIssues([])
+    setLastRun(null)
     setNotice('已新建空白流程，可直接拖拽节点开始编排。')
   }, [setEdges, setNodes])
 
@@ -844,7 +848,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           </div>
         </div>
 
-        <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} />
+        <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
         <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
         <PreflightIssuePanel issues={preflightIssues} nodes={nodes} />
       </main>
@@ -1248,7 +1252,15 @@ function PortEditor({
   )
 }
 
-function ExecutionPlanPanel({ steps, visible }: { steps: AgentFlowRunPlanStep[]; visible: boolean }) {
+function ExecutionPlanPanel({
+  steps,
+  visible,
+  lastRun,
+}: {
+  steps: AgentFlowRunPlanStep[]
+  visible: boolean
+  lastRun: CanvasRunRecord | null
+}) {
   if (!visible) return null
 
   return (
@@ -1263,6 +1275,7 @@ function ExecutionPlanPanel({ steps, visible }: { steps: AgentFlowRunPlanStep[];
         </div>
         <Badge variant="outline">{steps.length} 个节点</Badge>
       </div>
+      <RunResultSummary run={lastRun} />
       <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
         {steps.map((step) => (
           <div key={step.nodeId} className="rounded-lg border bg-background p-2 text-xs">
@@ -1276,6 +1289,22 @@ function ExecutionPlanPanel({ steps, visible }: { steps: AgentFlowRunPlanStep[];
         ))}
       </div>
     </section>
+  )
+}
+
+function RunResultSummary({ run }: { run: CanvasRunRecord | null }) {
+  if (!run) return null
+
+  return (
+    <div
+      data-testid="run-result-summary"
+      className="mb-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-700 dark:text-emerald-300"
+    >
+      <div className="font-semibold">本地试运行已完成</div>
+      <div className="mt-1 text-[11px]">
+        {run.nodeCount} 个节点 / {run.edgeCount} 条连线 / {run.handoffCount} 个交付，{formatRunTime(run.finishedAt)}
+      </div>
+    </div>
   )
 }
 
@@ -1628,6 +1657,19 @@ function loadCanvasRunHistory(): CanvasRunRecord[] {
   } catch {
     return []
   }
+}
+
+function findLatestCanvasRunForDraft(history: CanvasRunRecord[], draftId?: string): CanvasRunRecord | null {
+  if (!draftId) return null
+  return history.find((run) => run.workflowDraftId === draftId) ?? null
+}
+
+function formatRunTime(value: number) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(value))
 }
 
 function saveCanvasRunHistory(runs: CanvasRunRecord[]) {
