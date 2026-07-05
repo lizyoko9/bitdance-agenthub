@@ -372,6 +372,9 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
            setSelectedNodeId(node.id)
            setSelectedEdgeId('')
            setActiveConnectionType(type)
+           setPaletteCollapsed(false)
+           setActiveTemplateCategory('全部')
+           setTemplateSearchQuery('')
            setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })))
            setEdges((current) => current.map((item) => ({ ...item, selected: false })))
          },
