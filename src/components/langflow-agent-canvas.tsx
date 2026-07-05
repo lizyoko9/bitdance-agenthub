@@ -76,6 +76,16 @@ interface AgentFlowNodeData extends Record<string, unknown> {
 type AgentFlowNode = Node<AgentFlowNodeData>
 type AgentFlowEdge = Edge<{ artifactType: ArtifactType; label: string; outputId: string }>
 
+interface HandoffStep {
+  id: string
+  sourceId: string
+  targetId: string
+  sourceTitle: string
+  targetTitle: string
+  artifactType: ArtifactType
+  artifactLabel: string
+}
+
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
 
 const artifactColors: Record<ArtifactType, string> = {
@@ -185,6 +195,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [edges, setEdges, onEdgesChange] = useEdgesState<AgentFlowEdge>(initialEdges)
   const [selectedNodeId, setSelectedNodeId] = useState('agent-2')
   const [notice, setNotice] = useState<string | null>(null)
+  const [preflightVisible, setPreflightVisible] = useState(false)
   const { screenToFlowPosition } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
 
   useEffect(() => {
@@ -205,6 +216,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   }, [])
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
+  const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
 
   const addNode = useCallback((kind: AgentFlowNodeKind, position?: { x: number; y: number }) => {
     const nextIndex = nodes.length + 1
@@ -402,6 +414,22 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     [nodes],
   )
 
+  const runPreflight = useCallback(() => {
+    setPreflightVisible(true)
+    if (handoffSteps.length === 0) {
+      setNotice('预检未通过：画布里还没有可执行的节点连线。')
+      return
+    }
+
+    const connectedNodeIds = new Set(edges.flatMap((edge) => [edge.source, edge.target]))
+    const disconnectedCount = nodes.filter((node) => !connectedNodeIds.has(node.id)).length
+    setNotice(
+      `预检完成：${handoffSteps.length} 条交付链路可运行${
+        disconnectedCount > 0 ? `，${disconnectedCount} 个节点还没有接入。` : '。'
+      }`,
+    )
+  }, [edges, handoffSteps.length, nodes])
+
   return (
     <div className="flex h-full min-h-[720px] flex-col bg-background" data-testid="langflow-agent-canvas">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
@@ -426,7 +454,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             <Save className="size-3.5" />
             保存草稿
           </Button>
-          <Button type="button" size="sm" className="gap-1">
+          <Button type="button" size="sm" className="gap-1" onClick={runPreflight}>
             <Play className="size-3.5" />
             预检运行
           </Button>
@@ -510,6 +538,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             />
           </div>
         </div>
+
+        <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
       </main>
       </div>
   )
@@ -793,6 +823,48 @@ function PortEditor({
   )
 }
 
+function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible: boolean }) {
+  return (
+    <section
+      className={cn(
+        'pointer-events-auto absolute bottom-3 left-[18.5rem] right-[23.5rem] z-10 rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur',
+        !visible && 'opacity-95',
+      )}
+      data-testid="handoff-preview-panel"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <GitBranch className="size-4 text-primary" />
+          交付链路
+        </div>
+        <Badge variant="outline">{steps.length} 条</Badge>
+      </div>
+      {steps.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+          从一个输出端口拖到下游输入端口后，这里会显示真实交付关系。
+        </div>
+      ) : (
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {steps.slice(0, 6).map((step) => (
+            <div key={step.id} className="rounded-lg border bg-background p-2 text-xs">
+              <div className="truncate font-medium">{step.sourceTitle}</div>
+              <div className="my-1 flex items-center gap-2 text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                <ArtifactPill type={step.artifactType} />
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <div className="truncate font-medium">{step.targetTitle}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {steps.length > 6 && (
+        <div className="mt-2 text-[11px] text-muted-foreground">还有 {steps.length - 6} 条链路，运行记录里会完整展开。</div>
+      )}
+    </section>
+  )
+}
+
 function PanelBlock({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="rounded-lg border bg-background p-3">
@@ -915,6 +987,25 @@ function inputHandleId(port: AgentFlowPort) {
 
 function outputHandleId(port: AgentFlowPort) {
   return `out:${port.id}`
+}
+
+function buildHandoffSteps(nodes: AgentFlowNode[], edges: AgentFlowEdge[]): HandoffStep[] {
+  return edges.flatMap((edge) => {
+    const source = nodes.find((node) => node.id === edge.source)
+    const target = nodes.find((node) => node.id === edge.target)
+    const artifactType = edge.data?.artifactType
+    if (!source || !target || !artifactType) return []
+
+    return [{
+      id: edge.id,
+      sourceId: source.id,
+      targetId: target.id,
+      sourceTitle: source.data.title,
+      targetTitle: target.data.title,
+      artifactType,
+      artifactLabel: artifactLabels[artifactType],
+    }]
+  })
 }
 
 function findPortType(

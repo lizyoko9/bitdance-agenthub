@@ -63,4 +63,14 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('canConnectPortKinds')
     expect(source).toContain("type ArtifactType = LangflowPortKind | 'any'")
   })
+
+  it('previews the artifact handoff chain before running a workflow', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
+
+    expect(source).toContain('buildHandoffSteps')
+    expect(source).toContain('runPreflight')
+    expect(source).toContain('HandoffPreviewPanel')
+    expect(source).toContain('onClick={runPreflight}')
+    expect(source).toContain('交付链路')
+  })
 })
