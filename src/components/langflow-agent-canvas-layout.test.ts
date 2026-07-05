@@ -17,6 +17,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).not.toContain('grid-cols-[17rem_minmax(0,1fr)]')
   })
 
+  it('uses product-facing canvas copy instead of exposing implementation names in the title', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('<span>智能体编排画布</span>')
+    expect(source).not.toContain('<span>Langflow 式 Agent 编排画布</span>')
+    expect(source).not.toContain('<Badge variant="secondary">React Flow</Badge>')
+    expect(source).toContain('proOptions={{ hideAttribution: true }}')
+    expect(source).not.toContain('像 Langflow 一样先选节点再组合。')
+  })
+
   it('keeps the canvas background draggable and zoomable like a visual workflow editor', () => {
     const source = readCanvasSource()
 
@@ -62,10 +72,21 @@ describe('Langflow agent canvas layout', () => {
     const source = readCanvasSource()
 
     expect(source).toContain('agentFlowNodeTemplates')
+    expect(source).toContain('getAgentFlowNodeTemplateGroups')
     expect(source).toContain('createNodeFromTemplate')
     expect(source).toContain('getAgentFlowNodeTemplate')
     expect(source).toContain('templateId')
     expect(source).toContain('template.outputs')
+  })
+
+  it('organizes the component palette by category before users add nodes', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('templateGroups')
+    expect(source).toContain('activeTemplateCategory')
+    expect(source).toContain('data-testid="component-category-filter"')
+    expect(source).toContain('filteredTemplateGroups')
+    expect(source).toContain('data-category={group.category}')
   })
 
   it('syncs selected Agent contracts into the canvas node ports', () => {

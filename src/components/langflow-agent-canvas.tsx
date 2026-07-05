@@ -50,7 +50,9 @@ import {
   agentFlowNodeTemplates,
   cloneTemplatePorts,
   getAgentFlowNodeTemplate,
+  getAgentFlowNodeTemplateGroups,
   type AgentFlowNodeKind,
+  type AgentFlowNodeTemplateCategory,
   type AgentFlowTemplatePortKind,
 } from '@/lib/agent-flow-node-templates'
 import { fetchAgentProfiles, fetchSoftwareCommands } from '@/lib/api'
@@ -179,6 +181,9 @@ const artifactColors: Record<ArtifactType, string> = {
 
 const nodeKindLabels: Record<AgentFlowNodeKind, string> = {
   input: '客户输入',
+  prompt: '提示词',
+  model: '模型',
+  memory: '记忆',
   agent: '员工 Agent',
   tool: '工具 / 软件',
   approval: '人工确认',
@@ -223,10 +228,19 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [preflightIssues, setPreflightIssues] = useState<AgentFlowRunIssue[]>([])
   const [lastRun, setLastRun] = useState<CanvasRunRecord | null>(null)
   const [activeConnectionType, setActiveConnectionType] = useState<ArtifactType | null>(null)
+  const [activeTemplateCategory, setActiveTemplateCategory] = useState<AgentFlowNodeTemplateCategory | '全部'>('全部')
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
   const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
   const [savedDrafts, setSavedDrafts] = useState<CanvasDraft[]>([])
   const { screenToFlowPosition } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
+  const templateGroups = useMemo(() => getAgentFlowNodeTemplateGroups(agentFlowNodeTemplates), [])
+  const filteredTemplateGroups = useMemo(
+    () =>
+      activeTemplateCategory === '全部'
+        ? templateGroups
+        : templateGroups.filter((group) => group.category === activeTemplateCategory),
+    [activeTemplateCategory, templateGroups],
+  )
 
   const applyCanvasDraft = useCallback((draft: CanvasDraft) => {
     setNodes(cloneCanvasNodes(draft.nodes))
@@ -700,8 +714,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-base font-semibold">
             <GitBranch className="size-4 text-primary" />
-            <span>Langflow 式 Agent 编排画布</span>
-            <Badge variant="secondary">React Flow</Badge>
+            <span>智能体编排画布</span>
+            <Badge variant="secondary">节点编排</Badge>
             <Badge variant="outline">免费</Badge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -780,6 +794,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           selectionOnDrag={false}
           fitView
           fitViewOptions={{ padding: 0.2 }}
+          proOptions={{ hideAttribution: true }}
           defaultEdgeOptions={{
             type: 'agentArtifact',
             markerEnd: { type: MarkerType.ArrowClosed },
@@ -795,41 +810,68 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
               <div className="text-sm font-semibold">组件库</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">像 Langflow 一样先选节点再组合。</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">先选组件，再拖拽组合流程。</div>
             </div>
             <Badge variant="outline">{agentFlowNodeTemplates.length} 类</Badge>
           </div>
-          <div className="space-y-2">
-            {agentFlowNodeTemplates.map((template) => (
+          <div className="mb-3 flex flex-wrap gap-1" data-testid="component-category-filter">
+            {(['全部', ...templateGroups.map((group) => group.category)] as Array<AgentFlowNodeTemplateCategory | '全部'>).map((category) => (
               <button
-                key={template.id}
+                key={category}
                 type="button"
-                draggable
-                className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary hover:bg-primary/5"
-                data-template-id={template.id}
-                onClick={() => addNodeFromTemplate(template.id)}
-                onDragStart={(event) => handlePaletteDragStart(event, template.id)}
+                className={cn(
+                  'rounded-full border px-2 py-1 text-[11px] font-medium transition',
+                  activeTemplateCategory === category
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'bg-background text-muted-foreground hover:border-primary hover:text-foreground',
+                )}
+                onClick={() => setActiveTemplateCategory(category)}
               >
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  {nodeIcon(template.kind)}
-                </span>
-                <span className="min-w-0">
-                  <span className="flex items-center gap-2">
-                    <span className="block truncate text-sm font-semibold">{template.title}</span>
-                    <Badge variant="secondary" className="shrink-0 text-[10px]">
-                      {template.category}
-                    </Badge>
-                  </span>
-                  <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{template.description}</span>
-                  <span className="mt-2 inline-flex flex-wrap items-center gap-1 text-xs font-medium text-primary">
-                    <Plus className="size-3" />
-                    添加节点
-                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                      {template.inputs.length} 入 / {template.outputs.length} 出
-                    </span>
-                  </span>
-                </span>
+                {category}
               </button>
+            ))}
+          </div>
+          <div className="space-y-3">
+            {filteredTemplateGroups.map((group) => (
+              <section key={group.category} data-category={group.category}>
+                <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+                  <span>{group.category}</span>
+                  <span>{group.templates.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {group.templates.map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      draggable
+                      className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary hover:bg-primary/5"
+                      data-template-id={template.id}
+                      onClick={() => addNodeFromTemplate(template.id)}
+                      onDragStart={(event) => handlePaletteDragStart(event, template.id)}
+                    >
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        {nodeIcon(template.kind)}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-2">
+                          <span className="block truncate text-sm font-semibold">{template.title}</span>
+                          <Badge variant="secondary" className="shrink-0 text-[10px]">
+                            {template.category}
+                          </Badge>
+                        </span>
+                        <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{template.description}</span>
+                        <span className="mt-2 inline-flex flex-wrap items-center gap-1 text-xs font-medium text-primary">
+                          <Plus className="size-3" />
+                          添加节点
+                          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {template.inputs.length} 入 / {template.outputs.length} 出
+                          </span>
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         </aside>
