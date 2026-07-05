@@ -84,7 +84,16 @@ interface AgentFlowNodeData extends Record<string, unknown> {
 }
 
 type AgentFlowNode = Node<AgentFlowNodeData>
-type AgentFlowEdge = Edge<{ artifactType: ArtifactType; label: string; outputId: string }>
+type AgentFlowEdge = Edge<{
+  artifactType: ArtifactType
+  label: string
+  outputId: string
+  sourcePortId: string
+  targetPortId: string
+  sourcePortLabel: string
+  targetPortLabel: string
+  handoffContract: string
+}>
 
 interface HandoffStep {
   id: string
@@ -94,6 +103,9 @@ interface HandoffStep {
   targetTitle: string
   artifactType: ArtifactType
   artifactLabel: string
+  sourcePortLabel: string
+  targetPortLabel: string
+  handoffContract: string
 }
 
 interface CanvasDraft {
@@ -113,6 +125,7 @@ interface EdgeRoute {
   targetTitle: string
   targetPortLabel: string
   artifactType: ArtifactType
+  handoffContract: string
 }
 
 const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
@@ -357,12 +370,30 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               artifactType: nextType,
               label: artifactLabels[nextType],
               outputId: edge.data?.outputId ?? portId,
+              sourcePortId: edge.data?.sourcePortId ?? portId,
+              targetPortId: edge.data?.targetPortId ?? edge.targetHandle?.replace(/^in:/, '') ?? nextType,
+              sourcePortLabel: artifactLabels[nextType],
+              targetPortLabel: edge.data?.targetPortLabel ?? artifactLabels[targetInputType ?? nextType],
+              handoffContract: `${artifactLabels[nextType]}: ${artifactLabels[nextType]} -> ${
+                edge.data?.targetPortLabel ?? artifactLabels[targetInputType ?? nextType]
+              }`,
             },
           }]
         }
 
         if (direction === 'inputs' && edge.target === nodeId && edge.targetHandle === changedHandle) {
-          return canConnect(edge.data?.artifactType ?? 'any', nextType) ? [edge] : []
+          if (!canConnect(edge.data?.artifactType ?? 'any', nextType)) return []
+          return [{
+            ...edge,
+            data: edge.data
+              ? {
+                  ...edge.data,
+                  targetPortId: portId,
+                  targetPortLabel: artifactLabels[nextType],
+                  handoffContract: `${artifactLabels[edge.data.artifactType]}: ${edge.data.sourcePortLabel} -> ${artifactLabels[nextType]}`,
+                }
+              : edge.data,
+          }]
         }
 
         return [edge]
@@ -525,6 +556,9 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           output.type,
           connection.sourceHandle ?? undefined,
           connection.targetHandle ?? undefined,
+          output.label,
+          input.id,
+          input.label,
         ),
       ])
       setNotice(`${target.data.title} 现在只会收到：${artifactLabels[output.type]}。`)
@@ -936,6 +970,7 @@ function EdgeConfigPanel({
               <div className="text-sm font-semibold">{artifactLabels[route.artifactType]}</div>
               <ArtifactPill type={route.artifactType} />
             </div>
+            <div className="mt-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">{route.handoffContract}</div>
             <div className="mt-2 text-xs leading-5 text-muted-foreground">
               下游节点只会收到这个产物类型，不会自动拿到上游节点的其他文件、视频、代码或报告。
             </div>
@@ -1194,6 +1229,8 @@ function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible
                 <ArtifactPill type={step.artifactType} />
                 <span className="h-px flex-1 bg-border" />
               </div>
+              <div className="truncate text-[11px] text-muted-foreground">{step.sourcePortLabel}</div>
+              <div className="truncate text-[11px] text-muted-foreground">{`-> ${step.targetPortLabel}`}</div>
               <div className="truncate font-medium">{step.targetTitle}</div>
             </div>
           ))}
@@ -1314,7 +1351,12 @@ function createFlowEdge(
   artifactType: ArtifactType,
   sourceHandle = `out:${outputId}`,
   targetHandle = `in:${artifactType}`,
+  sourcePortLabel: string = artifactLabels[artifactType],
+  targetPortId: string = artifactType,
+  targetPortLabel: string = artifactLabels[artifactType],
 ): AgentFlowEdge {
+  const handoffContract = `${artifactLabels[artifactType]}: ${sourcePortLabel} -> ${targetPortLabel}`
+
   return {
     id,
     source,
@@ -1327,6 +1369,11 @@ function createFlowEdge(
     data: {
       artifactType,
       outputId,
+      sourcePortId: outputId,
+      targetPortId,
+      sourcePortLabel,
+      targetPortLabel,
+      handoffContract,
       label: artifactLabels[artifactType],
     },
   }
@@ -1355,6 +1402,9 @@ function buildHandoffSteps(nodes: AgentFlowNode[], edges: AgentFlowEdge[]): Hand
       targetTitle: target.data.title,
       artifactType,
       artifactLabel: artifactLabels[artifactType],
+      sourcePortLabel: edge.data?.sourcePortLabel ?? artifactLabels[artifactType],
+      targetPortLabel: edge.data?.targetPortLabel ?? artifactLabels[artifactType],
+      handoffContract: edge.data?.handoffContract ?? `${artifactLabels[artifactType]}: ${artifactLabels[artifactType]} -> ${artifactLabels[artifactType]}`,
     }]
   })
 }
@@ -1404,13 +1454,16 @@ function describeEdgeRoute(edge: AgentFlowEdge, nodes: AgentFlowNode[]): EdgeRou
   const sourcePort = findPortByHandle(source, 'outputs', edge.sourceHandle)
   const targetPort = findPortByHandle(target, 'inputs', edge.targetHandle)
   const artifactType = edge.data?.artifactType ?? sourcePort?.type ?? 'any'
+  const sourcePortLabel = edge.data?.sourcePortLabel ?? sourcePort?.label ?? edge.data?.label ?? artifactLabels[artifactType]
+  const targetPortLabel = edge.data?.targetPortLabel ?? targetPort?.label ?? artifactLabels[artifactType]
 
   return {
     sourceTitle: source.data.title,
-    sourcePortLabel: sourcePort?.label ?? edge.data?.label ?? artifactLabels[artifactType],
+    sourcePortLabel,
     targetTitle: target.data.title,
-    targetPortLabel: targetPort?.label ?? artifactLabels[artifactType],
+    targetPortLabel,
     artifactType,
+    handoffContract: edge.data?.handoffContract ?? `${artifactLabels[artifactType]}: ${sourcePortLabel} -> ${targetPortLabel}`,
   }
 }
 
@@ -1527,12 +1580,18 @@ function keepEdgesWithKnownHandles(
     if (edge.source === nodeId) {
       const output = edge.sourceHandle ? outputByHandle.get(edge.sourceHandle) : null
       if (!output) return []
+      const targetPortLabel = edge.data?.targetPortLabel ?? artifactLabels[output.type]
       return [{
         ...edge,
         data: {
           artifactType: output.type,
           label: artifactLabels[output.type],
           outputId: output.id,
+          sourcePortId: output.id,
+          targetPortId: edge.data?.targetPortId ?? edge.targetHandle?.replace(/^in:/, '') ?? output.type,
+          sourcePortLabel: output.label,
+          targetPortLabel,
+          handoffContract: `${artifactLabels[output.type]}: ${output.label} -> ${targetPortLabel}`,
         },
       }]
     }
@@ -1541,6 +1600,17 @@ function keepEdgesWithKnownHandles(
       const input = edge.targetHandle ? inputByHandle.get(edge.targetHandle) : null
       if (!input) return []
       if (!canConnect(edge.data?.artifactType ?? 'any', input.type)) return []
+      return [{
+        ...edge,
+        data: edge.data
+          ? {
+              ...edge.data,
+              targetPortId: input.id,
+              targetPortLabel: input.label,
+              handoffContract: `${artifactLabels[edge.data.artifactType]}: ${edge.data.sourcePortLabel} -> ${input.label}`,
+            }
+          : edge.data,
+      }]
     }
 
     return [edge]

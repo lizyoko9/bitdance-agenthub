@@ -170,6 +170,18 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('targetHandle')
   })
 
+  it('stores the selected source and target ports as an explicit edge handoff contract', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('sourcePortId')
+    expect(source).toContain('targetPortId')
+    expect(source).toContain('sourcePortLabel')
+    expect(source).toContain('targetPortLabel')
+    expect(source).toContain('handoffContract')
+    expect(source).toContain('output.label')
+    expect(source).toContain('input.label')
+  })
+
   it('shows computed execution stages on canvas nodes', () => {
     const source = readCanvasSource()
 
