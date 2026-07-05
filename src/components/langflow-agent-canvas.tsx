@@ -43,6 +43,7 @@ import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
 import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
 import { applyPreflightStatusToNodes } from '@/lib/agent-flow-node-status'
+import { buildAgentFlowRunPlan, type AgentFlowRunPlanStep } from '@/lib/agent-flow-run-plan'
 import { validateAgentFlowForRun, type AgentFlowRunIssue } from '@/lib/agent-flow-run-preflight'
 import { buildSoftwareCommandFlowPorts } from '@/lib/agent-flow-software-command-contracts'
 import {
@@ -246,6 +247,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) ?? null
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
   const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
+  const executionPlan = useMemo(() => buildAgentFlowRunPlan({ nodes, edges }), [edges, nodes])
   const executionStages = useMemo(() => buildExecutionStages(nodes, edges), [edges, nodes])
   const nodesForCanvas = useMemo(
     () => nodes.map((node) => ({
@@ -796,6 +798,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           </div>
         </div>
 
+        <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} />
         <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
         <PreflightIssuePanel issues={preflightIssues} nodes={nodes} />
       </main>
@@ -1195,6 +1198,56 @@ function PortEditor({
         <Plus className="size-3" />
         {addLabel}
       </Button>
+    </div>
+  )
+}
+
+function ExecutionPlanPanel({ steps, visible }: { steps: AgentFlowRunPlanStep[]; visible: boolean }) {
+  if (!visible) return null
+
+  return (
+    <section
+      className="pointer-events-auto absolute left-[18.5rem] top-3 z-10 w-[24rem] rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur"
+      data-testid="execution-plan-panel"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Play className="size-4 text-primary" />
+          运行计划
+        </div>
+        <Badge variant="outline">{steps.length} 个节点</Badge>
+      </div>
+      <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+        {steps.map((step) => (
+          <div key={step.nodeId} className="rounded-lg border bg-background p-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <div className="truncate font-semibold">{step.title}</div>
+              <Badge variant="outline">第 {step.stage} 步</Badge>
+            </div>
+            <ContractList title="收到" contracts={step.incomingContracts} emptyText="起点节点，等待用户目标或上游触发。" />
+            <ContractList title="交出" contracts={step.outgoingContracts} emptyText="终点节点，负责沉淀最终产物。" />
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ContractList({ title, contracts, emptyText }: { title: string; contracts: string[]; emptyText: string }) {
+  return (
+    <div className="mt-2 rounded-md border bg-muted/20 p-2">
+      <div className="mb-1 text-[11px] font-medium text-muted-foreground">{title}</div>
+      {contracts.length === 0 ? (
+        <div className="text-[11px] text-muted-foreground">{emptyText}</div>
+      ) : (
+        <div className="space-y-1">
+          {contracts.slice(0, 3).map((contract, index) => (
+            <div key={`${contract}-${index}`} className="truncate text-[11px]">
+              {contract}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

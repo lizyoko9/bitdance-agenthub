@@ -134,6 +134,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="handoff-preview-panel"')
   })
 
+  it('shows an execution plan panel with each node incoming and outgoing handoff contracts', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('buildAgentFlowRunPlan')
+    expect(source).toContain('executionPlan')
+    expect(source).toContain('ExecutionPlanPanel')
+    expect(source).toContain('incomingContracts')
+    expect(source).toContain('outgoingContracts')
+    expect(source).toContain('data-testid="execution-plan-panel"')
+  })
+
   it('saves the canvas nodes edges and artifact handoffs as a local draft', () => {
     const source = readCanvasSource()
 
