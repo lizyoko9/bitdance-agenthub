@@ -388,6 +388,24 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('不接收当前产物')
   })
 
+  it('keeps connection mode active when users click an incompatible node', () => {
+    const source = readCanvasSource()
+    const completeNodeConnectionSource = source.slice(
+      source.indexOf('const completeActiveConnectionToNode'),
+      source.indexOf('const addNodeFromTemplate'),
+    )
+    const incompatibleBranch = completeNodeConnectionSource.slice(
+      completeNodeConnectionSource.indexOf('if (!autoPair) {'),
+      completeNodeConnectionSource.indexOf('if (wouldCreateDirectedCycle'),
+    )
+
+    expect(incompatibleBranch).toContain('targetNode.data.inputs.map')
+    expect(incompatibleBranch).toContain('artifactLabels[sourceOutput.type]')
+    expect(incompatibleBranch).toContain('不接收')
+    expect(incompatibleBranch).toContain('return true')
+    expect(incompatibleBranch).not.toContain('return false')
+  })
+
   it('routes incompatible input clicks to the canvas so users get an explanation', () => {
     const source = readCanvasSource()
 

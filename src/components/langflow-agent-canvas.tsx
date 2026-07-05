@@ -524,8 +524,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       canConnect,
     })
     if (!autoPair) {
-      setNotice(`${sourceOutput.label} 不能交付给 ${targetNode.data.title}，请换一个节点或点具体输入口。`)
-      return false
+      const acceptedInputLabels = targetNode.data.inputs.map((input) => artifactLabels[input.type]).join('、') || '暂无输入口'
+      setNotice(
+        `${targetNode.data.title} 不接收「${artifactLabels[sourceOutput.type]}」。它当前只接收：${acceptedInputLabels}。请换一个节点或改这个节点的输入类型。`,
+      )
+      return true
     }
     if (wouldCreateDirectedCycle(edges, { source: sourceNode.id, target: targetNode.id })) {
       setNotice('这条连线会让流程回到上游，已经阻止。')
