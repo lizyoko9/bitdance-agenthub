@@ -86,6 +86,17 @@ interface HandoffStep {
   artifactLabel: string
 }
 
+interface CanvasDraft {
+  schema: 'agenthub.langflow_agent_canvas.v1'
+  savedAt: string
+  initialWorkflowId: string | null
+  nodes: AgentFlowNode[]
+  edges: AgentFlowEdge[]
+  handoffSteps?: HandoffStep[]
+}
+
+const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
+
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
 
 const artifactColors: Record<ArtifactType, string> = {
@@ -215,6 +226,18 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    const draft = loadCanvasDraft()
+    if (!draft) return
+
+    setNodes(draft.nodes)
+    setEdges(draft.edges)
+    setSelectedNodeId(draft.nodes[0]?.id ?? '')
+    setSelectedEdgeId('')
+    setPreflightVisible(Boolean(draft.handoffSteps?.length))
+    setNotice(`已恢复本地草稿：${draft.nodes.length} 个节点、${draft.edges.length} 条连线。`)
+  }, [setEdges, setNodes])
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
   const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
@@ -457,7 +480,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   }, [edges, handoffSteps.length, nodes])
 
   const saveCanvasDraft = useCallback(() => {
-    const draft = {
+    const draft: CanvasDraft = {
       schema: 'agenthub.langflow_agent_canvas.v1',
       savedAt: new Date().toISOString(),
       initialWorkflowId: initialWorkflowId ?? null,
@@ -466,7 +489,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       handoffSteps,
     }
 
-    window.localStorage.setItem('agenthub.langflow-agent-canvas.draft', JSON.stringify(draft))
+    window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
     setNotice(`草稿已保存：${nodes.length} 个节点、${edges.length} 条连线。`)
   }, [edges, handoffSteps, initialWorkflowId, nodes])
 
@@ -1076,6 +1099,21 @@ function buildHandoffSteps(nodes: AgentFlowNode[], edges: AgentFlowEdge[]): Hand
       artifactLabel: artifactLabels[artifactType],
     }]
   })
+}
+
+function loadCanvasDraft(): CanvasDraft | null {
+  const raw = window.localStorage.getItem(CANVAS_DRAFT_STORAGE_KEY)
+  if (!raw) return null
+
+  try {
+    const draft = JSON.parse(raw) as Partial<CanvasDraft> | null
+    if (draft?.schema !== 'agenthub.langflow_agent_canvas.v1') return null
+    if (!Array.isArray(draft.nodes) || !Array.isArray(draft.edges)) return null
+
+    return draft as CanvasDraft
+  } catch {
+    return null
+  }
 }
 
 function findPortType(
