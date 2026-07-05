@@ -125,6 +125,7 @@ describe('Langflow agent canvas layout', () => {
 
     expect(source).toContain('buildHandoffSteps')
     expect(source).toContain('validateAgentFlowForRun')
+    expect(source).toContain('applyPreflightStatusToNodes')
     expect(source).toContain('runPreflight')
     expect(source).toContain('HandoffPreviewPanel')
     expect(source).toContain('onClick={runPreflight}')

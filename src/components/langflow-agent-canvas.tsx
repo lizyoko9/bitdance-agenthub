@@ -42,6 +42,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
 import { wouldCreateDirectedCycle } from '@/lib/agent-flow-graph'
+import { applyPreflightStatusToNodes } from '@/lib/agent-flow-node-status'
 import { validateAgentFlowForRun } from '@/lib/agent-flow-run-preflight'
 import { buildSoftwareCommandFlowPorts } from '@/lib/agent-flow-software-command-contracts'
 import {
@@ -533,6 +534,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setPreflightVisible(true)
 
     const preflight = validateAgentFlowForRun({ nodes, edges })
+    setNodes((current) => applyPreflightStatusToNodes({ nodes: current, edges, preflight }))
     if (!preflight.ready) {
       const firstError = preflight.issues.find((issue) => issue.severity === 'error')
       setNotice(`预检未通过：${firstError?.message ?? '流程配置还有阻塞项。'}`)
