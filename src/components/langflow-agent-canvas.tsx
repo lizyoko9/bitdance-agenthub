@@ -1125,18 +1125,32 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
   const createNewCanvasDraft = useCallback(() => {
     const nextId = createCanvasDraftId()
+    const nextNodes = cloneCanvasNodes(initialNodes)
+    const nextEdges = cloneCanvasEdges(initialEdges)
+    const draft: CanvasDraft = {
+      schema: 'agenthub.langflow_agent_canvas.v1',
+      workflowDraftId: nextId,
+      title: '新建流程',
+      savedAt: new Date().toISOString(),
+      initialWorkflowId: initialWorkflowId ?? null,
+      nodes: nextNodes,
+      edges: nextEdges,
+      handoffSteps: buildHandoffSteps(nextNodes, nextEdges),
+    }
+
+    saveWorkflowDraftToLibrary(draft)
     setWorkflowDraftId(nextId)
     setWorkflowTitle('新建流程')
-    setNodes(cloneCanvasNodes(initialNodes))
-    setEdges(cloneCanvasEdges(initialEdges))
+    setNodes(cloneCanvasNodes(nextNodes))
+    setEdges(cloneCanvasEdges(nextEdges))
     setSelectedNodeId('agent-2')
     setSelectedEdgeId('')
     setPreflightVisible(false)
     setPreflightIssues([])
     setLastRun(null)
-    setNotice('已新建空白流程，可直接拖拽节点开始编排。')
+    setNotice('已新建基础流程，并保存到工作流列表。可以直接拖拽节点继续编排。')
     fitCanvasView()
-  }, [fitCanvasView, setEdges, setNodes])
+  }, [fitCanvasView, initialWorkflowId, saveWorkflowDraftToLibrary, setEdges, setNodes])
 
   const applyWorkflowPreset = useCallback((presetId: CanvasWorkflowPreset['id']) => {
     const draft = createCanvasWorkflowPresetDraft(presetId, initialWorkflowId ?? null)

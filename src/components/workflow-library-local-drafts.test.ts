@@ -40,6 +40,18 @@ describe('workflow library local canvas drafts', () => {
     expect(source).toContain('workflowDraftId === draftId')
   })
 
+  it('saves a newly created canvas workflow into the local workflow library immediately', () => {
+    const source = readCanvasSource()
+    const createNewDraftSource = source.slice(source.indexOf('const createNewCanvasDraft'))
+
+    expect(createNewDraftSource).toContain('const nextNodes = cloneCanvasNodes(initialNodes)')
+    expect(createNewDraftSource).toContain('const nextEdges = cloneCanvasEdges(initialEdges)')
+    expect(createNewDraftSource).toContain('const draft: CanvasDraft = {')
+    expect(createNewDraftSource).toContain("title: '新建流程'")
+    expect(createNewDraftSource).toContain('handoffSteps: buildHandoffSteps(nextNodes, nextEdges)')
+    expect(createNewDraftSource).toContain('saveWorkflowDraftToLibrary(draft)')
+  })
+
   it('persists a local canvas dry-run record when preflight succeeds', () => {
     const source = readCanvasSource()
 
