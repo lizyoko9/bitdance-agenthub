@@ -1358,6 +1358,7 @@ function NodeConfigPanel({
           </PanelBlock>
         )}
 
+        <NodeSetupGuide node={node} />
         <NodePortSummary node={node} />
 
         <details
@@ -1419,6 +1420,93 @@ function NodePortSummary({ node }: { node: AgentFlowNode }) {
       </div>
     </PanelBlock>
   )
+}
+
+function NodeSetupGuide({ node }: { node: AgentFlowNode }) {
+  const setupGuide = getNodeSetupGuide(node)
+
+  return (
+    <PanelBlock title="怎么设置这个节点">
+      <div data-testid="node-setup-guide" className="space-y-2 text-xs leading-5">
+        <div className="rounded-md border bg-primary/5 px-2 py-1.5">
+          <span className="font-semibold">先做：</span>
+          {setupGuide.primaryAction}
+        </div>
+        <div className="rounded-md border bg-muted/30 px-2 py-1.5">
+          <span className="font-semibold">交付：</span>
+          {setupGuide.handoffHint}
+        </div>
+        <div className="space-y-1 text-muted-foreground">
+          {setupGuide.steps.map((step) => (
+            <div key={step} className="flex gap-2">
+              <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
+              <span>{step}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </PanelBlock>
+  )
+}
+
+function getNodeSetupGuide(node: AgentFlowNode) {
+  if (node.data.kind === 'agent') {
+    return {
+      primaryAction: '选择这个节点由哪个员工 Agent 执行；不选时运行前会自动匹配合适员工。',
+      handoffHint: '从右侧某个输出产物端口拉线，例如视频、代码或报告，下游只会收到这一类产物。',
+      steps: [
+        '先确认这个员工负责的任务目标。',
+        '再看输出产物里有没有你要交给下游的类型。',
+        '需要复杂输入输出时再展开高级端口设置。',
+      ],
+    }
+  }
+
+  if (node.data.kind === 'artifact') {
+    return {
+      primaryAction: '确认这个交付物是否给客户看，以及它应该接收哪一种文件或结果。',
+      handoffHint: '把上游对应类型的输出线接进来；比如视频交付物只接收视频，不会混进代码或报告。',
+      steps: [
+        '改名称，让客户知道这个结果是什么。',
+        '检查接收输入是否就是你要的产物类型。',
+        '需要换成图片、代码或文件包时，优先从左侧选择对应交付物节点。',
+      ],
+    }
+  }
+
+  if (node.data.kind === 'tool') {
+    return {
+      primaryAction: '选择已经接入的软件、CLI 或 MCP 命令。',
+      handoffHint: '工具节点会把运行结果、数据或文件包交给下游 Agent 或交付物节点。',
+      steps: [
+        '先在工具连接里接入软件能力。',
+        '再回到这里绑定具体命令。',
+        '运行前先预检，确认命令输入输出能接上。',
+      ],
+    }
+  }
+
+  if (node.data.kind === 'approval') {
+    return {
+      primaryAction: '把高风险步骤放到这里，让用户确认后再继续。',
+      handoffHint: '审批通过后的产物会继续流向下游；拒绝时流程应该停下或回到上游修改。',
+      steps: [
+        '用于登录、发送消息、删除文件、付款等敏感动作前。',
+        '描述清楚用户需要确认什么。',
+        '确认后再让下游 Agent 执行。',
+      ],
+    }
+  }
+
+  return {
+    primaryAction: '确认这个节点提供给下游的内容是什么。',
+    handoffHint: '把它的输出端口连到下游兼容输入端口，系统会按产物类型限制传递内容。',
+    steps: [
+      '左侧节点负责产生或整理内容。',
+      '中间连线表示实际交付关系。',
+      '右侧只保留必要设置，复杂端口放到高级区。',
+    ],
+  }
 }
 
 function PortPreviewList({

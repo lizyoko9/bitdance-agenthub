@@ -173,6 +173,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('PortPreviewList')
   })
 
+  it('shows a plain-language setup guide before advanced node settings', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodeSetupGuide')
+    expect(source).toContain('data-testid="node-setup-guide"')
+    expect(source).toContain('getNodeSetupGuide')
+    expect(source).toContain('setupGuide.primaryAction')
+    expect(source).toContain('setupGuide.handoffHint')
+  })
+
   it('keeps existing edges consistent when a port artifact type changes', () => {
     const source = readCanvasSource()
 
