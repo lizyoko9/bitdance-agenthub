@@ -1502,15 +1502,20 @@ function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
           {steps.slice(0, 6).map((step) => (
             <div key={step.id} className="rounded-lg border bg-background p-2 text-xs">
-              <div className="truncate font-medium">{step.sourceTitle}</div>
+              <div className="truncate font-medium" data-testid="handoff-route-line">
+                {`${step.sourceTitle} -> ${step.targetTitle}`}
+              </div>
               <div className="my-1 flex items-center gap-2 text-muted-foreground">
                 <span className="h-px flex-1 bg-border" />
                 <ArtifactPill type={step.artifactType} />
                 <span className="h-px flex-1 bg-border" />
               </div>
-              <div className="truncate text-[11px] text-muted-foreground">{step.sourcePortLabel}</div>
-              <div className="truncate text-[11px] text-muted-foreground">{`-> ${step.targetPortLabel}`}</div>
-              <div className="truncate font-medium">{step.targetTitle}</div>
+              <div className="truncate text-[11px] text-muted-foreground" data-testid="handoff-artifact-contract">
+                {`${step.sourcePortLabel} -> ${step.targetPortLabel}`}
+              </div>
+              <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                下游只会收到：{step.artifactLabel}
+              </div>
             </div>
           ))}
         </div>
