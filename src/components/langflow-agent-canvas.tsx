@@ -155,6 +155,12 @@ interface CustomerDeliverySummary {
   handoffContract: string
 }
 
+type NodeConfigurationState = {
+  status: 'missing' | 'ready' | 'neutral'
+  label: string
+  detail: string
+}
+
 interface CanvasDraft {
   schema: 'agenthub.langflow_agent_canvas.v1'
   workflowDraftId?: string
@@ -1587,6 +1593,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 }
 
 function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
+  const configurationState = getNodeConfigurationState({ data })
   const nodeIsActiveConnectionSource = Boolean(data.activeOutputPortId)
   const nodeAcceptsActiveConnection = Boolean(
     data.connectionType &&
@@ -1645,6 +1652,7 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
       data-testid="langflow-agent-node"
       data-node-compatible={nodeAcceptsActiveConnection}
       data-node-incompatible={nodeRejectsActiveConnection}
+      data-node-configuration-status={configurationState.status}
     >
       {selected && (
         <div
@@ -1691,6 +1699,7 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
             </Badge>
           )}
           <StatusBadge status={data.status} />
+          <NodeConfigurationBadge state={configurationState} />
         </div>
       </div>
 
@@ -2814,6 +2823,72 @@ function StatusBadge({ status }: { status: AgentFlowNodeData['status'] }) {
     blocked: '卡住',
   }
   return <Badge variant={status === 'blocked' ? 'destructive' : status === 'done' ? 'default' : 'outline'}>{labels[status]}</Badge>
+}
+
+function NodeConfigurationBadge({ state }: { state: NodeConfigurationState }) {
+  return (
+    <Badge
+      variant={state.status === 'missing' ? 'destructive' : 'outline'}
+      className={cn(
+        'max-w-24 truncate text-[10px]',
+        state.status === 'ready' && 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+        state.status === 'neutral' && 'text-muted-foreground',
+      )}
+      title={state.detail}
+      data-testid="node-configuration-badge"
+      data-configuration-status={state.status}
+    >
+      {state.label}
+    </Badge>
+  )
+}
+
+function getNodeConfigurationState(node: { data: AgentFlowNodeData }): NodeConfigurationState {
+  if (node.data.kind === 'agent' && !node.data.agentId) {
+    return {
+      status: 'missing',
+      label: '待选择员工',
+      detail: '运行前需要绑定一个员工 Agent。',
+    }
+  }
+
+  if (node.data.kind === 'tool' && !node.data.softwareCommandId) {
+    return {
+      status: 'missing',
+      label: '待选择工具',
+      detail: '运行前需要绑定 CLI、MCP 或软件命令。',
+    }
+  }
+
+  if (node.data.kind === 'agent') {
+    return {
+      status: 'ready',
+      label: '员工已选',
+      detail: node.data.subtitle,
+    }
+  }
+
+  if (node.data.kind === 'tool') {
+    return {
+      status: 'ready',
+      label: '工具已选',
+      detail: node.data.subtitle,
+    }
+  }
+
+  if (node.data.customerVisible) {
+    return {
+      status: 'ready',
+      label: '客户可见',
+      detail: '客户会看到这个节点的产物。',
+    }
+  }
+
+  return {
+    status: 'neutral',
+    label: nodeKindLabels[node.data.kind],
+    detail: '按流程位置执行。',
+  }
 }
 
 function nodeIcon(kind: AgentFlowNodeKind) {

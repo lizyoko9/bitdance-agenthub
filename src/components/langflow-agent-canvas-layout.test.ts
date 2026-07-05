@@ -545,6 +545,17 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('describeNodeExecutor')
   })
 
+  it('shows missing Agent and tool bindings directly on canvas node cards', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodeConfigurationBadge')
+    expect(source).toContain('data-testid="node-configuration-badge"')
+    expect(source).toContain('getNodeConfigurationState')
+    expect(source).toContain("node.data.kind === 'agent' && !node.data.agentId")
+    expect(source).toContain("node.data.kind === 'tool' && !node.data.softwareCommandId")
+    expect(source).toContain('configurationState.status')
+  })
+
   it('shows clickable delivery outlets in the node inspector before advanced port settings', () => {
     const source = readCanvasSource()
 
