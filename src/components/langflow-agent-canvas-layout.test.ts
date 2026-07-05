@@ -17,6 +17,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).not.toContain('grid-cols-[17rem_minmax(0,1fr)]')
   })
 
+  it('keeps run plan and handoff details in the right inspector instead of covering the canvas', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="canvas-right-inspector"')
+    expect(source).toContain('<ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />')
+    expect(source).toContain('<HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />')
+    expect(source).not.toContain('absolute left-[18.5rem] top-3')
+    expect(source).not.toContain('absolute bottom-3 left-[18.5rem]')
+  })
+
   it('uses product-facing canvas copy instead of exposing implementation names in the title', () => {
     const source = readCanvasSource()
 

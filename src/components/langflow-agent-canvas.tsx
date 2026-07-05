@@ -1057,8 +1057,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           </div>
         </aside>
 
-        <div className="pointer-events-none absolute right-3 top-3 bottom-3 z-10 w-[22rem]">
-          <div className="pointer-events-auto h-full">
+        <div
+          className="pointer-events-none absolute right-3 top-3 bottom-3 z-10 w-[22rem]"
+          data-testid="canvas-right-inspector"
+        >
+          <div className="pointer-events-auto flex h-full min-h-0 flex-col gap-3 overflow-y-auto rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur">
             {selectedEdge ? (
               <EdgeConfigPanel
                 edge={selectedEdge}
@@ -1081,11 +1084,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                 replaceNodePortsForSoftwareCommand={replaceNodePortsForSoftwareCommand}
               />
             )}
+            <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
+            <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
           </div>
         </div>
 
-        <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
-        <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
         <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
       </main>
       </div>
@@ -1232,7 +1235,7 @@ function EdgeConfigPanel({
 
   return (
     <aside
-      className="h-full min-h-0 overflow-y-auto rounded-xl border bg-background/95 p-4 shadow-xl backdrop-blur"
+      className="rounded-xl border bg-background p-3"
       data-testid="langflow-agent-edge-panel"
     >
       <div className="mb-3 flex items-start justify-between gap-2">
@@ -1311,7 +1314,7 @@ function NodeConfigPanel({
 }) {
   if (!node) {
     return (
-      <aside className="h-full rounded-xl border bg-background/95 p-4 shadow-xl backdrop-blur">
+      <aside className="rounded-xl border bg-background p-3">
         <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
           选中一个节点后，这里会显示它接收什么、产出什么，以及需要绑定哪个 Agent 或工具。
         </div>
@@ -1321,7 +1324,7 @@ function NodeConfigPanel({
 
   return (
     <aside
-      className="h-full min-h-0 overflow-y-auto rounded-xl border bg-background/95 p-4 shadow-xl backdrop-blur"
+      className="rounded-xl border bg-background p-3"
       data-testid="langflow-agent-node-panel"
     >
       <div className="mb-3 flex items-start justify-between gap-2">
@@ -1738,7 +1741,7 @@ function ExecutionPlanPanel({
 
   return (
     <section
-      className="pointer-events-auto absolute left-[18.5rem] top-3 z-10 w-[24rem] rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur"
+      className="rounded-xl border bg-background p-3"
       data-testid="execution-plan-panel"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -1803,10 +1806,7 @@ function ContractList({ title, contracts, emptyText }: { title: string; contract
 function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible: boolean }) {
   return (
     <section
-      className={cn(
-        'pointer-events-auto absolute bottom-3 left-[18.5rem] right-[23.5rem] z-10 rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur',
-        !visible && 'opacity-95',
-      )}
+      className={cn('rounded-xl border bg-background p-3', !visible && 'opacity-95')}
       data-testid="handoff-preview-panel"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
