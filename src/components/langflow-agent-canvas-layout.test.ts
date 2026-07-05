@@ -7,14 +7,16 @@ describe('Langflow agent canvas layout', () => {
   const readCanvasSource = () =>
     readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
 
-  it('keeps the React Flow surface as the primary workspace instead of squeezing it into a narrow middle column', () => {
+  it('uses a Langflow-style three-column workspace so panels do not cover canvas nodes', () => {
     const source = readCanvasSource()
 
-    expect(source).toContain('className="relative min-h-0 flex-1"')
-    expect(source).toContain('absolute left-3 top-3 bottom-3 z-10 w-[17rem]')
-    expect(source).toContain('absolute right-3 top-3 bottom-3 z-10 w-[22rem]')
-    expect(source).not.toContain('grid-cols-[17rem_minmax(0,1fr)_22rem]')
-    expect(source).not.toContain('grid-cols-[17rem_minmax(0,1fr)]')
+    expect(source).toContain('grid-cols-[17rem_minmax(0,1fr)_22rem]')
+    expect(source).toContain('data-testid="canvas-flow-surface"')
+    expect(source).toContain('col-start-1 row-start-1')
+    expect(source).toContain('col-start-2 row-start-1')
+    expect(source).toContain('col-start-3 row-start-1')
+    expect(source).not.toContain('absolute left-3 top-3 bottom-3 z-10 w-[17rem]')
+    expect(source).not.toContain('absolute right-3 top-3 bottom-3 z-10 w-[22rem]')
   })
 
   it('keeps run plan and handoff details in the right inspector instead of covering the canvas', () => {
@@ -45,6 +47,23 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('zoomOnScroll')
     expect(source).toContain('zoomOnPinch')
     expect(source).toContain('selectionOnDrag={false}')
+  })
+
+  it('pads automatic fit view so workflow nodes are not hidden under the palette or inspector', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('const CANVAS_FIT_VIEW_PADDING = 0.42')
+    expect(source).toContain('const CANVAS_FIT_VIEW_MAX_ZOOM = 0.5')
+    expect(source).toContain('fitViewOptions={{ padding: CANVAS_FIT_VIEW_PADDING, maxZoom: CANVAS_FIT_VIEW_MAX_ZOOM }}')
+    expect(source).toContain('maxZoom={CANVAS_FIT_VIEW_MAX_ZOOM}')
+    expect(source).not.toContain('fitViewOptions={{ padding: 0.2 }}')
+  })
+
+  it('uses compact node cards so three workflow nodes fit inside the middle canvas column', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('w-60 rounded-xl border bg-card')
+    expect(source).not.toContain('min-w-72 rounded-xl border bg-card')
   })
 
   it('supports deleting the selected canvas node with the Delete key', () => {

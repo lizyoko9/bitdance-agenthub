@@ -169,6 +169,8 @@ const CANVAS_DRAFT_STORAGE_KEY = 'agenthub.langflow-agent-canvas.draft'
 const CANVAS_DRAFT_LIBRARY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.library'
 const CANVAS_RUN_HISTORY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.runs'
 const NODE_TEMPLATE_MIME = 'application/agenthub-node-template'
+const CANVAS_FIT_VIEW_PADDING = 0.42
+const CANVAS_FIT_VIEW_MAX_ZOOM = 0.5
 
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
 
@@ -868,8 +870,12 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         <div className="shrink-0 border-b bg-primary/5 px-4 py-2 text-xs text-primary">{notice}</div>
       )}
 
-      <main className="relative min-h-0 flex-1" data-active-connection-type={activeConnectionType ?? ''}>
-        <ReactFlow<AgentFlowNode, AgentFlowEdge>
+      <main
+        className="grid min-h-0 flex-1 grid-cols-[17rem_minmax(0,1fr)_22rem]"
+        data-active-connection-type={activeConnectionType ?? ''}
+      >
+        <div className="relative col-start-2 row-start-1 min-h-0" data-testid="canvas-flow-surface">
+          <ReactFlow<AgentFlowNode, AgentFlowEdge>
           nodes={nodesForCanvas}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -900,7 +906,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           zoomOnPinch
           selectionOnDrag={false}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
+          fitViewOptions={{ padding: CANVAS_FIT_VIEW_PADDING, maxZoom: CANVAS_FIT_VIEW_MAX_ZOOM }}
+          maxZoom={CANVAS_FIT_VIEW_MAX_ZOOM}
           proOptions={{ hideAttribution: true }}
           defaultEdgeOptions={{
             type: 'agentArtifact',
@@ -911,9 +918,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           <Background gap={18} size={1} />
           <Controls />
           <MiniMap pannable zoomable nodeStrokeWidth={3} />
-        </ReactFlow>
+          </ReactFlow>
+          <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
+        </div>
 
-        <aside className="absolute left-3 top-3 bottom-3 z-10 w-[17rem] overflow-y-auto rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur">
+        <aside className="col-start-1 row-start-1 min-h-0 overflow-y-auto border-r bg-background p-3">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
               <div className="text-sm font-semibold">组件库</div>
@@ -1058,10 +1067,10 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         </aside>
 
         <div
-          className="pointer-events-none absolute right-3 top-3 bottom-3 z-10 w-[22rem]"
+          className="pointer-events-none col-start-3 row-start-1 min-h-0 border-l bg-background/95"
           data-testid="canvas-right-inspector"
         >
-          <div className="pointer-events-auto flex h-full min-h-0 flex-col gap-3 overflow-y-auto rounded-xl border bg-background/95 p-3 shadow-xl backdrop-blur">
+          <div className="pointer-events-auto flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
             {selectedEdge ? (
               <EdgeConfigPanel
                 edge={selectedEdge}
@@ -1089,7 +1098,6 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           </div>
         </div>
 
-        <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
       </main>
       </div>
   )
@@ -1099,7 +1107,7 @@ function AgentFlowNodeCard({ data, selected }: NodeProps<AgentFlowNode>) {
   return (
     <div
       className={cn(
-        'min-w-72 rounded-xl border bg-card text-card-foreground shadow-sm transition hover:shadow-md',
+        'w-60 rounded-xl border bg-card text-card-foreground shadow-sm transition hover:shadow-md',
         selected && 'border-primary shadow-primary/20',
       )}
       data-testid="langflow-agent-node"
