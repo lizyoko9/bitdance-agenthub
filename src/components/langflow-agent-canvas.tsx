@@ -509,6 +509,13 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedEdgeId('')
   }, [setEdges])
 
+  const selectNodeById = useCallback((nodeId: string) => {
+    setSelectedNodeId(nodeId)
+    setSelectedEdgeId('')
+    setNodes((current) => current.map((item) => ({ ...item, selected: item.id === nodeId })))
+    setEdges((current) => current.map((item) => ({ ...item, selected: false })))
+  }, [setEdges, setNodes])
+
   const selectEdgeById = useCallback((edgeId: string) => {
     setSelectedEdgeId(edgeId)
     setSelectedNodeId('')
@@ -750,9 +757,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
           onNodeClick={(_, node) => {
-            setSelectedNodeId(node.id)
-            setSelectedEdgeId('')
-            setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+            selectNodeById(node.id)
           }}
           onEdgeClick={(_, edge) => {
             selectEdgeById(edge.id)
@@ -850,7 +855,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
         <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
         <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
-        <PreflightIssuePanel issues={preflightIssues} nodes={nodes} />
+        <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
       </main>
       </div>
   )
@@ -1371,7 +1376,15 @@ function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible
   )
 }
 
-function PreflightIssuePanel({ issues, nodes }: { issues: AgentFlowRunIssue[]; nodes: AgentFlowNode[] }) {
+function PreflightIssuePanel({
+  issues,
+  nodes,
+  onSelectNode,
+}: {
+  issues: AgentFlowRunIssue[]
+  nodes: AgentFlowNode[]
+  onSelectNode: (nodeId: string) => void
+}) {
   if (issues.length === 0) return null
 
   const nodeTitleById = new Map(nodes.map((node) => [node.id, node.data.title]))
@@ -1387,7 +1400,14 @@ function PreflightIssuePanel({ issues, nodes }: { issues: AgentFlowRunIssue[]; n
       </div>
       <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
         {issues.slice(0, 8).map((issue, index) => (
-          <div key={`${issue.code}-${issue.nodeId ?? issue.edgeId ?? index}`} className="rounded-lg border bg-background p-2 text-xs">
+          <button
+            key={`${issue.code}-${issue.nodeId ?? issue.edgeId ?? index}`}
+            type="button"
+            data-testid="preflight-issue-card"
+            className="w-full rounded-lg border bg-background p-2 text-left text-xs transition hover:border-primary disabled:cursor-default disabled:hover:border-border"
+            disabled={!issue.nodeId}
+            onClick={() => issue.nodeId && onSelectNode(issue.nodeId)}
+          >
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{issue.nodeId ? nodeTitleById.get(issue.nodeId) ?? issue.nodeId : issue.edgeId ?? '流程'}</span>
               <Badge variant={issue.severity === 'error' ? 'destructive' : 'outline'}>
@@ -1395,7 +1415,7 @@ function PreflightIssuePanel({ issues, nodes }: { issues: AgentFlowRunIssue[]; n
               </Badge>
             </div>
             <div className="mt-1 leading-4 text-muted-foreground">{issue.message}</div>
-          </div>
+          </button>
         ))}
       </div>
       {issues.length > 8 && (

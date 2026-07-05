@@ -134,6 +134,14 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="handoff-preview-panel"')
   })
 
+  it('lets users click a preflight issue to select the broken node', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('onSelectNode')
+    expect(source).toContain('data-testid="preflight-issue-card"')
+    expect(source).toContain('issue.nodeId && onSelectNode(issue.nodeId)')
+  })
+
   it('shows an execution plan panel with each node incoming and outgoing handoff contracts', () => {
     const source = readCanvasSource()
 
