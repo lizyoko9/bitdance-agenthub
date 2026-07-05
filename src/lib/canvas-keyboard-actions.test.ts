@@ -16,6 +16,13 @@ describe('resolveCanvasKeyboardAction', () => {
     expect(resolveCanvasKeyboardAction({ key: 'Escape' })).toBe('cancel-connection')
   })
 
+  it('resolves undo and redo shortcuts like a desktop canvas editor', () => {
+    expect(resolveCanvasKeyboardAction({ key: 'z', ctrlKey: true })).toBe('undo-canvas')
+    expect(resolveCanvasKeyboardAction({ key: 'Z', metaKey: true })).toBe('undo-canvas')
+    expect(resolveCanvasKeyboardAction({ key: 'y', ctrlKey: true })).toBe('redo-canvas')
+    expect(resolveCanvasKeyboardAction({ key: 'Z', metaKey: true, shiftKey: true })).toBe('redo-canvas')
+  })
+
   it('ignores delete shortcuts while the user is editing text', () => {
     const input = editableTarget('input')
     const textarea = editableTarget('textarea')
@@ -33,6 +40,7 @@ describe('resolveCanvasKeyboardAction', () => {
     expect(resolveCanvasKeyboardAction({ key: 'Backspace', metaKey: true })).toBeNull()
     expect(resolveCanvasKeyboardAction({ key: 's', ctrlKey: true, shiftKey: true })).toBeNull()
     expect(resolveCanvasKeyboardAction({ key: 'd', metaKey: true, altKey: true })).toBeNull()
+    expect(resolveCanvasKeyboardAction({ key: 'z', ctrlKey: true, altKey: true })).toBeNull()
     expect(resolveCanvasKeyboardAction({ key: 'Enter' })).toBeNull()
   })
 })

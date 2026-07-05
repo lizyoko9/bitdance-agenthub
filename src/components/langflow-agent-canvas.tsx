@@ -33,10 +33,12 @@ import {
   PanelRightOpen,
   Play,
   Plus,
+  Redo2,
   Save,
   Settings2,
   Sparkles,
   Trash2,
+  Undo2,
   Wrench,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
@@ -156,6 +158,13 @@ interface CanvasRunRecord {
   }>
 }
 
+interface CanvasHistorySnapshot {
+  nodes: AgentFlowNode[]
+  edges: AgentFlowEdge[]
+  selectedNodeId: string
+  selectedEdgeId: string
+}
+
 interface EdgeRoute {
   sourceTitle: string
   sourcePortLabel: string
@@ -180,6 +189,7 @@ const CANVAS_RUN_HISTORY_STORAGE_KEY = 'agenthub.langflow-agent-canvas.runs'
 const NODE_TEMPLATE_MIME = 'application/agenthub-node-template'
 const CANVAS_FIT_VIEW_PADDING = 0.18
 const CANVAS_FIT_VIEW_MAX_ZOOM = 0.85
+const CANVAS_HISTORY_LIMIT = 50
 
 const artifactLabels: Record<ArtifactType, string> = { ...LANGFLOW_PORT_KIND_LABELS, any: '任意' }
 
@@ -285,6 +295,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
   const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
   const [savedDrafts, setSavedDrafts] = useState<CanvasDraft[]>([])
+  const [undoStack, setUndoStack] = useState<CanvasHistorySnapshot[]>([])
+  const [redoStack, setRedoStack] = useState<CanvasHistorySnapshot[]>([])
   const [paletteCollapsed, setPaletteCollapsed] = useState(false)
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false)
   const { screenToFlowPosition, fitView } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
@@ -369,6 +381,46 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
   const executionPlan = useMemo(() => buildAgentFlowRunPlan({ nodes, edges }), [edges, nodes])
   const executionStages = useMemo(() => buildExecutionStages(nodes, edges), [edges, nodes])
+  const buildCurrentHistorySnapshot = useCallback(() =>
+    createCanvasHistorySnapshot(nodes, edges, selectedNodeId, selectedEdgeId),
+  [edges, nodes, selectedEdgeId, selectedNodeId])
+  const restoreCanvasHistorySnapshot = useCallback((snapshot: CanvasHistorySnapshot) => {
+    setNodes(cloneCanvasNodes(snapshot.nodes))
+    setEdges(cloneCanvasEdges(snapshot.edges))
+    setSelectedNodeId(snapshot.selectedNodeId)
+    setSelectedEdgeId(snapshot.selectedEdgeId)
+    setActiveConnectionType(null)
+    setActiveOutputPort(null)
+  }, [setEdges, setNodes])
+  const pushCanvasHistory = useCallback(() => {
+    const snapshot = buildCurrentHistorySnapshot()
+    setUndoStack((current) => [...current, snapshot].slice(-CANVAS_HISTORY_LIMIT))
+    setRedoStack([])
+  }, [buildCurrentHistorySnapshot])
+  const undoCanvasEdit = useCallback(() => {
+    const previous = undoStack.at(-1)
+    if (!previous) {
+      setNotice('没有可撤销的画布编辑。')
+      return
+    }
+
+    setUndoStack((current) => current.slice(0, -1))
+    setRedoStack((current) => [...current, buildCurrentHistorySnapshot()].slice(-CANVAS_HISTORY_LIMIT))
+    restoreCanvasHistorySnapshot(previous)
+    setNotice('已撤销上一步画布编辑。')
+  }, [buildCurrentHistorySnapshot, restoreCanvasHistorySnapshot, undoStack])
+  const redoCanvasEdit = useCallback(() => {
+    const next = redoStack.at(-1)
+    if (!next) {
+      setNotice('没有可重做的画布编辑。')
+      return
+    }
+
+    setRedoStack((current) => current.slice(0, -1))
+    setUndoStack((current) => [...current, buildCurrentHistorySnapshot()].slice(-CANVAS_HISTORY_LIMIT))
+    restoreCanvasHistorySnapshot(next)
+    setNotice('已重做画布编辑。')
+  }, [buildCurrentHistorySnapshot, redoStack, restoreCanvasHistorySnapshot])
   const nodesForCanvas = useMemo(
     () => nodes.map((node) => ({
       ...node,
@@ -420,6 +472,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             targetInput.id,
             targetInput.label,
           )
+          pushCanvasHistory()
           setEdges((current) => replaceEdgesForSingleTargetHandle(current, edge))
           setSelectedNodeId(targetNode.id)
           setSelectedEdgeId('')
@@ -429,7 +482,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         },
       },
     })),
-    [activeConnectionType, activeOutputPort, edges, executionStages, nodes, setEdges, setNodes],
+    [activeConnectionType, activeOutputPort, edges, executionStages, nodes, pushCanvasHistory, setEdges, setNodes],
   )
 
   const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
@@ -453,6 +506,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         })
       : null
 
+    pushCanvasHistory()
     setNodes((current) => [...current, node])
     if (sourceNode && autoPair) {
       const edge = createFlowEdge(
@@ -475,7 +529,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId(node.id)
     setSelectedEdgeId('')
     if (!position) fitCanvasView()
-  }, [activeConnectionType, activeOutputPort, fitCanvasView, nodes, selectedNodeId, setEdges, setNodes])
+  }, [activeConnectionType, activeOutputPort, fitCanvasView, nodes, pushCanvasHistory, selectedNodeId, setEdges, setNodes])
 
   const handlePaletteDragStart = useCallback((event: DragEvent<HTMLButtonElement>, templateId: string) => {
     event.dataTransfer.setData(NODE_TEMPLATE_MIME, templateId)
@@ -536,6 +590,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       type,
     }
 
+    pushCanvasHistory()
     setNodes((current) =>
       current.map((node) =>
         node.id === nodeId
@@ -543,11 +598,12 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           : node,
       ),
     )
-  }, [setNodes])
+  }, [pushCanvasHistory, setNodes])
 
   const removePortFromNode = useCallback((nodeId: string, direction: 'inputs' | 'outputs', portId: string) => {
     const removedHandle = direction === 'inputs' ? `in:${portId}` : `out:${portId}`
 
+    pushCanvasHistory()
     setNodes((current) =>
       current.map((node) =>
         node.id === nodeId
@@ -568,7 +624,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           : !(edge.source === nodeId && edge.sourceHandle === removedHandle),
       ),
     )
-  }, [setEdges, setNodes])
+  }, [pushCanvasHistory, setEdges, setNodes])
 
   const syncEdgesAfterPortTypeChange = useCallback((
     nodeId: string,
@@ -627,6 +683,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     portId: string,
     nextType: ArtifactType,
   ) => {
+    pushCanvasHistory()
     setNodes((current) =>
       current.map((node) =>
         node.id === nodeId
@@ -643,10 +700,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       ),
     )
     syncEdgesAfterPortTypeChange(nodeId, direction, portId, nextType)
-  }, [setNodes, syncEdgesAfterPortTypeChange])
+  }, [pushCanvasHistory, setNodes, syncEdgesAfterPortTypeChange])
 
   const replaceNodePortsForAgent = useCallback((nodeId: string, agent: AgentProfileRow) => {
     const agentPorts = buildAgentFlowPortsFromContracts(agent)
+    pushCanvasHistory()
     setNodes((current) =>
       current.map((node) =>
         node.id === nodeId
@@ -665,10 +723,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       ),
     )
     setEdges((current) => keepEdgesWithKnownHandles(current, nodeId, agentPorts.inputs, agentPorts.outputs))
-  }, [setEdges, setNodes])
+  }, [pushCanvasHistory, setEdges, setNodes])
 
   const replaceNodePortsForSoftwareCommand = useCallback((nodeId: string, command: SoftwareCommandRow) => {
     const commandPorts = buildSoftwareCommandFlowPorts(command)
+    pushCanvasHistory()
     setNodes((current) =>
       current.map((node) =>
         node.id === nodeId
@@ -687,20 +746,23 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       ),
     )
     setEdges((current) => keepEdgesWithKnownHandles(current, nodeId, commandPorts.inputs, commandPorts.outputs))
-  }, [setEdges, setNodes])
+  }, [pushCanvasHistory, setEdges, setNodes])
 
   const deleteNodeById = useCallback((nodeId: string) => {
+    if (!nodes.some((node) => node.id === nodeId)) return
+    pushCanvasHistory()
     setNodes((current) => current.filter((node) => node.id !== nodeId))
     setEdges((current) =>
       current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
     )
     setSelectedNodeId('')
-  }, [setEdges, setNodes])
+  }, [nodes, pushCanvasHistory, setEdges, setNodes])
 
   const duplicateNodeById = useCallback((nodeId: string) => {
     const source = nodes.find((node) => node.id === nodeId)
     if (!source) return
 
+    pushCanvasHistory()
     const duplicate: AgentFlowNode = {
       ...source,
       id: `${source.data.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -719,12 +781,14 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setSelectedNodeId(duplicate.id)
     setSelectedEdgeId('')
     setNotice(`已复制节点：${source.data.title}`)
-  }, [nodes, setEdges, setNodes])
+  }, [nodes, pushCanvasHistory, setEdges, setNodes])
 
   const deleteEdgeById = useCallback((edgeId: string) => {
+    if (!edges.some((edge) => edge.id === edgeId)) return
+    pushCanvasHistory()
     setEdges((current) => current.filter((edge) => edge.id !== edgeId))
     setSelectedEdgeId('')
-  }, [setEdges])
+  }, [edges, pushCanvasHistory, setEdges])
 
   const clearSelectedNodes = useCallback(() => {
     setNodes((current) => current.map((item) => item.selected ? { ...item, selected: false } : item))
@@ -808,6 +872,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         return
       }
 
+      pushCanvasHistory()
       setEdges((current) =>
         replaceEdgesForSingleTargetHandle(
           current,
@@ -827,7 +892,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
       )
       setNotice(`${target.data.title} 现在只会收到：${artifactLabels[output.type]}。`)
     },
-    [edges, nodes, setEdges],
+    [edges, nodes, pushCanvasHistory, setEdges],
   )
 
   const runPreflight = useCallback(() => {
@@ -906,6 +971,16 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     const handleKeyDown = (event: KeyboardEvent) => {
       const action = resolveCanvasKeyboardAction(event)
       if (!action) return
+      if (action === 'undo-canvas') {
+        event.preventDefault()
+        undoCanvasEdit()
+        return
+      }
+      if (action === 'redo-canvas') {
+        event.preventDefault()
+        redoCanvasEdit()
+        return
+      }
       if (action === 'save-workflow') {
         event.preventDefault()
         saveCanvasDraft()
@@ -936,7 +1011,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeConnectionType, activeOutputPort, deleteEdgeById, deleteNodeById, duplicateNodeById, saveCanvasDraft, selectedEdgeId, selectedNodeId])
+  }, [activeConnectionType, activeOutputPort, deleteEdgeById, deleteNodeById, duplicateNodeById, redoCanvasEdit, saveCanvasDraft, selectedEdgeId, selectedNodeId, undoCanvasEdit])
 
   const openSavedCanvasDraft = useCallback((draftId: string) => {
     const draft = savedDrafts.find((item) => item.workflowDraftId === draftId)
@@ -1014,6 +1089,32 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           <Button type="button" size="sm" variant="outline" className="gap-1" onClick={createNewCanvasDraft}>
             <Plus className="size-3.5" />
             新建流程
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            data-testid="canvas-undo-button"
+            disabled={undoStack.length === 0}
+            title="撤销 Ctrl+Z"
+            onClick={undoCanvasEdit}
+          >
+            <Undo2 className="size-3.5" />
+            撤销
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            data-testid="canvas-redo-button"
+            disabled={redoStack.length === 0}
+            title="重做 Ctrl+Y"
+            onClick={redoCanvasEdit}
+          >
+            <Redo2 className="size-3.5" />
+            重做
           </Button>
           <Button type="button" size="sm" variant="outline" className="gap-1" onClick={saveCanvasDraft}>
             <Save className="size-3.5" />
@@ -2672,6 +2773,20 @@ function cloneCanvasEdges(edges: AgentFlowEdge[]) {
     data: edge.data ? { ...edge.data } : edge.data,
     markerEnd: edge.markerEnd && typeof edge.markerEnd === 'object' ? { ...edge.markerEnd } : edge.markerEnd,
   }))
+}
+
+function createCanvasHistorySnapshot(
+  nodes: AgentFlowNode[],
+  edges: AgentFlowEdge[],
+  selectedNodeId: string,
+  selectedEdgeId: string,
+): CanvasHistorySnapshot {
+  return {
+    nodes: cloneCanvasNodes(nodes),
+    edges: cloneCanvasEdges(edges),
+    selectedNodeId,
+    selectedEdgeId,
+  }
 }
 
 function findPortType(

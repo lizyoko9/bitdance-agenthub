@@ -157,6 +157,21 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('onClick={saveCanvasDraft}')
   })
 
+  it('supports undo and redo for recent canvas edits', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('CanvasHistorySnapshot')
+    expect(source).toContain('const [undoStack, setUndoStack]')
+    expect(source).toContain('const [redoStack, setRedoStack]')
+    expect(source).toContain('pushCanvasHistory()')
+    expect(source).toContain('undoCanvasEdit()')
+    expect(source).toContain('redoCanvasEdit()')
+    expect(source).toContain("action === 'undo-canvas'")
+    expect(source).toContain("action === 'redo-canvas'")
+    expect(source).toContain('data-testid="canvas-undo-button"')
+    expect(source).toContain('data-testid="canvas-redo-button"')
+  })
+
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 

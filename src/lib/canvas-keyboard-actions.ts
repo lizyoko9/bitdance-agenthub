@@ -2,7 +2,9 @@ export type CanvasKeyboardAction =
   | 'cancel-connection'
   | 'delete-selected-node'
   | 'duplicate-selected-node'
+  | 'redo-canvas'
   | 'save-workflow'
+  | 'undo-canvas'
 
 type KeyboardShortcutEvent = {
   key: string
@@ -18,13 +20,17 @@ export function resolveCanvasKeyboardAction(event: KeyboardShortcutEvent): Canva
 
   const key = event.key.toLowerCase()
   const hasCommandModifier = Boolean(event.ctrlKey || event.metaKey)
-  if (event.altKey || event.shiftKey) return null
+  if (event.altKey) return null
   if (hasCommandModifier) {
+    if (key === 'z') return event.shiftKey ? 'redo-canvas' : 'undo-canvas'
+    if (event.shiftKey) return null
+    if (key === 'y') return 'redo-canvas'
     if (key === 's') return 'save-workflow'
     if (key === 'd') return 'duplicate-selected-node'
     return null
   }
 
+  if (event.shiftKey) return null
   if (key === 'escape') return 'cancel-connection'
   if (event.key !== 'Delete' && event.key !== 'Backspace') return null
   return 'delete-selected-node'
