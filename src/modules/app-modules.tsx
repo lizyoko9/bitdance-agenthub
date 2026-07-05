@@ -20,11 +20,11 @@ import {
 import type { ReactNode } from 'react'
 
 import { AgentLibrary } from '@/components/agent-library'
-import { AgentWorkflowCanvas } from '@/components/agent-workflow-canvas'
 import { ArtifactLibrary } from '@/components/artifact-library'
 import { ChatPanel } from '@/components/chat-panel'
 import { ConfigOpsCenter } from '@/components/config-ops-center'
 import { DesktopWorkbench } from '@/components/desktop-workbench'
+import { LangflowAgentCanvas } from '@/components/langflow-agent-canvas'
 import { MemoryManagementCenter } from '@/components/memory-management-center'
 import { ModelControlCenter } from '@/components/model-control-center'
 import { ProductionIntegrationsCenter } from '@/components/production-integrations-center'
@@ -113,7 +113,7 @@ export const appModules: AppModuleDefinition[] = [
     description: '旧入口兼容模块，统一收口到编排画布。',
     icon: Workflow,
     group: 'hidden',
-    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
+    render: ({ canvasWorkflowId }) => <LangflowAgentCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'agent-canvas',
@@ -121,7 +121,7 @@ export const appModules: AppModuleDefinition[] = [
     description: '像搭积木一样连接智能体、产物、审批、条件和工具节点。',
     icon: GitBranch,
     group: 'primary',
-    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
+    render: ({ canvasWorkflowId }) => <LangflowAgentCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'agent-orchestration',
@@ -129,7 +129,7 @@ export const appModules: AppModuleDefinition[] = [
     description: '旧入口兼容模块，统一收口到编排画布。',
     icon: Workflow,
     group: 'hidden',
-    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
+    render: ({ canvasWorkflowId }) => <LangflowAgentCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'langflow-native',
@@ -137,7 +137,7 @@ export const appModules: AppModuleDefinition[] = [
     description: '旧入口兼容模块，统一收口到编排画布。',
     icon: GitBranch,
     group: 'hidden',
-    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
+    render: ({ canvasWorkflowId }) => <LangflowAgentCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'infinite-canvas',
@@ -145,7 +145,7 @@ export const appModules: AppModuleDefinition[] = [
     description: '旧入口兼容模块，统一收口到编排画布。',
     icon: Layers,
     group: 'hidden',
-    render: ({ canvasWorkflowId }) => <AgentWorkflowCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
+    render: ({ canvasWorkflowId }) => <LangflowAgentCanvas initialWorkflowId={canvasWorkflowId ?? undefined} />,
   },
   {
     id: 'skills',
