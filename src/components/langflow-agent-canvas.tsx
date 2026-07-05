@@ -1369,21 +1369,45 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             ) : (
               <div className="space-y-1.5">
                 {savedDrafts.slice(0, 5).map((draft) => (
-                  <button
+                  <article
                     key={draft.workflowDraftId ?? draft.savedAt}
-                    type="button"
                     data-testid="canvas-saved-workflow-card"
                     className={cn(
                       'w-full rounded-md border bg-background px-2.5 py-2 text-left transition hover:border-primary hover:bg-primary/5',
                       draft.workflowDraftId === workflowDraftId && 'border-primary bg-primary/5',
                     )}
-                    onClick={() => draft.workflowDraftId && openSavedCanvasDraft(draft.workflowDraftId)}
                   >
                     <span className="block truncate text-xs font-semibold">{draft.title ?? '未命名流程'}</span>
-                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                      {draft.nodes.length} 节点 / {draft.edges.length} 连线
-                    </span>
-                  </button>
+                    <div className="mt-2 text-[11px] text-muted-foreground">
+                      保存于 {formatSavedWorkflowTime(draft.savedAt)}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px]"
+                        data-testid="canvas-saved-workflow-node-count"
+                      >
+                        {draft.nodes.length} 节点
+                      </Badge>
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px]"
+                        data-testid="canvas-saved-workflow-edge-count"
+                      >
+                        {draft.edges.length} 连线
+                      </Badge>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="ml-auto h-7 px-2 text-[11px]"
+                        data-testid="canvas-saved-workflow-open"
+                        onClick={() => draft.workflowDraftId && openSavedCanvasDraft(draft.workflowDraftId)}
+                      >
+                        打开
+                      </Button>
+                    </div>
+                  </article>
                 ))}
               </div>
             )}
@@ -3300,6 +3324,18 @@ function formatRunTime(value: number) {
     minute: '2-digit',
     second: '2-digit',
   }).format(new Date(value))
+}
+
+function formatSavedWorkflowTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '未知时间'
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
 }
 
 function saveCanvasRunHistory(runs: CanvasRunRecord[]) {

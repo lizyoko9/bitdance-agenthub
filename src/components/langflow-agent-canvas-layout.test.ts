@@ -333,6 +333,16 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('setSavedDrafts(nextLibrary)')
   })
 
+  it('shows saved workflow cards as reusable workflow assets with clear open actions', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="canvas-saved-workflow-open"')
+    expect(source).toContain('data-testid="canvas-saved-workflow-node-count"')
+    expect(source).toContain('data-testid="canvas-saved-workflow-edge-count"')
+    expect(source).toContain('formatSavedWorkflowTime')
+    expect(source).toContain('draft.workflowDraftId && openSavedCanvasDraft(draft.workflowDraftId)')
+  })
+
   it('filters palette components while a typed output connection is active', () => {
     const source = readCanvasSource()
 
