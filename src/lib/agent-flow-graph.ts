@@ -60,6 +60,28 @@ export function findFirstCompatiblePortPair<TPort extends ConnectablePort>({
   return null
 }
 
+export function listCompatiblePortPairs<TPort extends ConnectablePort>({
+  sourceOutputs,
+  targetInputs,
+  canConnect,
+}: {
+  sourceOutputs: TPort[]
+  targetInputs: TPort[]
+  canConnect: (sourceType: TPort['type'], targetType: TPort['type']) => boolean
+}): CompatiblePortPair<TPort>[] {
+  const pairs: CompatiblePortPair<TPort>[] = []
+
+  for (const sourcePort of sourceOutputs) {
+    for (const targetPort of targetInputs) {
+      if (canConnect(sourcePort.type, targetPort.type)) {
+        pairs.push({ sourcePort, targetPort })
+      }
+    }
+  }
+
+  return pairs
+}
+
 export function wouldCreateDirectedCycle(
   edges: DirectedWorkflowEdge[],
   nextEdge: DirectedWorkflowEdge,

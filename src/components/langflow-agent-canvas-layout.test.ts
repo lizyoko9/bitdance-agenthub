@@ -266,6 +266,23 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('selected &&')
   })
 
+  it('lets users reroute a selected handoff edge by artifact type in the right inspector', () => {
+    const source = readCanvasSource()
+    const edgePanelSource = source.slice(
+      source.indexOf('function EdgeConfigPanel'),
+      source.indexOf('function NodeConfigPanel'),
+    )
+
+    expect(source).toContain('listCompatiblePortPairs')
+    expect(source).toContain('rerouteEdgeById')
+    expect(source).toContain('onRerouteEdge={(sourcePort, targetPort) => rerouteEdgeById(selectedEdge.id, sourcePort, targetPort)}')
+    expect(edgePanelSource).toContain('data-testid="edge-route-options"')
+    expect(edgePanelSource).toContain('data-testid="edge-route-option"')
+    expect(edgePanelSource).toContain('data-edge-route-selected')
+    expect(edgePanelSource).toContain('onClick={() => onRerouteEdge(option.sourcePort, option.targetPort)}')
+    expect(edgePanelSource).toContain('ArtifactPill type={option.sourcePort.type}')
+  })
+
   it('supports dragging palette components onto the canvas at the drop position', () => {
     const source = readCanvasSource()
 

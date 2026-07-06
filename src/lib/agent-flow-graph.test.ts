@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   findFirstCompatiblePortPair,
+  listCompatiblePortPairs,
   replaceEdgesForSingleTargetHandle,
   wouldCreateDirectedCycle,
 } from './agent-flow-graph'
@@ -110,5 +111,41 @@ describe('findFirstCompatiblePortPair', () => {
       sourcePort: { id: 'video-final', label: 'final video', type: 'video' },
       targetPort: { id: 'incoming', label: 'incoming', type: 'any' },
     })
+  })
+})
+
+describe('listCompatiblePortPairs', () => {
+  it('lists every compatible source output and target input pair for an edge route picker', () => {
+    const result = listCompatiblePortPairs({
+      sourceOutputs: [
+        { id: 'report', label: 'report', type: 'report' },
+        { id: 'video', label: 'video', type: 'video' },
+        { id: 'code', label: 'code', type: 'code' },
+      ],
+      targetInputs: [
+        { id: 'video-in', label: 'video input', type: 'video' },
+        { id: 'any-in', label: 'any input', type: 'any' },
+      ],
+      canConnect: (sourceType, targetType) => targetType === 'any' || sourceType === targetType,
+    })
+
+    expect(result).toEqual([
+      {
+        sourcePort: { id: 'report', label: 'report', type: 'report' },
+        targetPort: { id: 'any-in', label: 'any input', type: 'any' },
+      },
+      {
+        sourcePort: { id: 'video', label: 'video', type: 'video' },
+        targetPort: { id: 'video-in', label: 'video input', type: 'video' },
+      },
+      {
+        sourcePort: { id: 'video', label: 'video', type: 'video' },
+        targetPort: { id: 'any-in', label: 'any input', type: 'any' },
+      },
+      {
+        sourcePort: { id: 'code', label: 'code', type: 'code' },
+        targetPort: { id: 'any-in', label: 'any input', type: 'any' },
+      },
+    ])
   })
 })

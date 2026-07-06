@@ -56,6 +56,7 @@ import type { AgentProfileRow, SoftwareCommandRow } from '@/db/schema'
 import { buildAgentFlowPortsFromContracts } from '@/lib/agent-flow-agent-contracts'
 import {
   findFirstCompatiblePortPair,
+  listCompatiblePortPairs,
   replaceEdgesForSingleTargetHandle,
   wouldCreateDirectedCycle,
 } from '@/lib/agent-flow-graph'
@@ -652,6 +653,41 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setNotice(`已把 ${sourceNode.data.title} 的 ${autoPair.sourcePort.label} 接到 ${targetNode.data.title}。`)
     return true
   }, [activeOutputPort, clearActiveConnection, edges, nodes, pushCanvasHistory, setEdges])
+
+  const rerouteEdgeById = useCallback((edgeId: string, sourcePort: AgentFlowPort, targetPort: AgentFlowPort) => {
+    if (!canConnect(sourcePort.type, targetPort.type)) {
+      setNotice(`${sourcePort.label} 不能交付给 ${targetPort.label}，请选择兼容的产物类型。`)
+      return
+    }
+
+    pushCanvasHistory()
+    setEdges((current) =>
+      current.map((edge) =>
+        edge.id === edgeId
+          ? {
+              ...edge,
+              sourceHandle: outputHandleId(sourcePort),
+              targetHandle: inputHandleId(targetPort),
+              data: {
+                artifactType: sourcePort.type,
+                label: artifactLabels[sourcePort.type],
+                outputId: sourcePort.id,
+                sourcePortId: sourcePort.id,
+                targetPortId: targetPort.id,
+                sourcePortLabel: sourcePort.label,
+                targetPortLabel: targetPort.label,
+                handoffStatus: 'pending',
+                handoffContract: `${artifactLabels[sourcePort.type]}: ${sourcePort.label} -> ${targetPort.label}`,
+              },
+            }
+          : edge,
+      ),
+    )
+    setSelectedEdgeId(edgeId)
+    setSelectedNodeId('')
+    clearActiveConnection()
+    setNotice(`这条连线现在只传 ${artifactLabels[sourcePort.type]}。`)
+  }, [clearActiveConnection, pushCanvasHistory, setEdges])
 
   const addNodeFromTemplate = useCallback((templateId: string, position?: { x: number; y: number }) => {
     const nextIndex = nodes.length + 1
@@ -1729,6 +1765,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                     edge={selectedEdge}
                     nodes={nodes}
                     onDeleteEdge={() => deleteEdgeById(selectedEdge.id)}
+                    onRerouteEdge={(sourcePort, targetPort) => rerouteEdgeById(selectedEdge.id, sourcePort, targetPort)}
                   />
                 ) : (
                   <NodeConfigPanel
@@ -2374,12 +2411,25 @@ function EdgeConfigPanel({
   edge,
   nodes,
   onDeleteEdge,
+  onRerouteEdge,
 }: {
   edge: AgentFlowEdge
   nodes: AgentFlowNode[]
   onDeleteEdge: () => void
+  onRerouteEdge: (sourcePort: AgentFlowPort, targetPort: AgentFlowPort) => void
 }) {
   const route = describeEdgeRoute(edge, nodes)
+  const sourceNode = nodes.find((node) => node.id === edge.source)
+  const targetNode = nodes.find((node) => node.id === edge.target)
+  const sourcePort = sourceNode ? findPortByHandle(sourceNode, 'outputs', edge.sourceHandle) : null
+  const targetPort = targetNode ? findPortByHandle(targetNode, 'inputs', edge.targetHandle) : null
+  const routeOptions = sourceNode && targetNode
+    ? listCompatiblePortPairs({
+        sourceOutputs: sourceNode.data.outputs,
+        targetInputs: targetNode.data.inputs,
+        canConnect,
+      })
+    : []
   const handoffStatus = edge.data?.handoffStatus ?? 'pending'
   const handoffStatusLabel = handoffStatus === 'delivered' ? '已交付' : handoffStatus === 'blocked' ? '已阻塞' : '待交付'
 
@@ -2411,6 +2461,32 @@ function EdgeConfigPanel({
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold">{artifactLabels[route.artifactType]}</div>
               <ArtifactPill type={route.artifactType} />
+            </div>
+            <div data-testid="edge-route-options" className="mt-3 grid gap-1.5">
+              {routeOptions.map((option) => {
+                const selected = option.sourcePort.id === sourcePort?.id && option.targetPort.id === targetPort?.id
+
+                return (
+                  <button
+                    key={`${option.sourcePort.id}:${option.targetPort.id}`}
+                    type="button"
+                    className={cn(
+                      'flex min-w-0 items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-xs transition hover:border-primary hover:bg-primary/5',
+                      selected && 'border-primary bg-primary/10 text-primary',
+                    )}
+                    data-testid="edge-route-option"
+                    data-artifact-type={option.sourcePort.type}
+                    data-edge-route-selected={selected}
+                    aria-pressed={selected}
+                    onClick={() => onRerouteEdge(option.sourcePort, option.targetPort)}
+                  >
+                    <ArtifactPill type={option.sourcePort.type} />
+                    <span className="min-w-0 flex-1 truncate">
+                      {option.sourcePort.label}{' -> '}{option.targetPort.label}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
             <div
               className="mt-2 inline-flex items-center rounded-full border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground"
