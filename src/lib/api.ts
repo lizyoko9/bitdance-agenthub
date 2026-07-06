@@ -16055,6 +16055,12 @@ export async function fetchUsageSummary(): Promise<UsageSummary> {
 }
 
 export type RunActivityKind = 'employee_run' | 'agent_run'
+export type RunActivityBrainStatus =
+  | 'not_applicable'
+  | 'waiting_reflection'
+  | 'learned'
+  | 'needs_review'
+  | 'failure_lesson'
 
 export interface RunActivitySummaryRun {
   id: string
@@ -16068,6 +16074,8 @@ export interface RunActivitySummaryRun {
   updatedAt: number
   artifactCount: number
   toolActionCount: number
+  brainStatus: RunActivityBrainStatus
+  brainLabel: string
 }
 
 export interface RunActivitySummaryEvent {

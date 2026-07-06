@@ -1578,6 +1578,11 @@ function RunCard({
         <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
           {phaseLabel(run.phase)}：{run.currentStep || statusLabel(run.status)}
         </div>
+        <div className="mt-2">
+          <span className={cn('rounded-full px-2 py-0.5 text-[11px]', runBrainStatusClass(run.brainStatus))}>
+            {run.brainLabel}
+          </span>
+        </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
         <StatusBadge value={statusLabel(run.status)} />
@@ -1587,6 +1592,13 @@ function RunCard({
       </div>
     </button>
   )
+}
+
+function runBrainStatusClass(status: RunActivitySummaryRun['brainStatus']) {
+  if (status === 'failure_lesson') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  if (status === 'needs_review') return 'bg-primary/10 text-primary'
+  if (status === 'learned') return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+  return 'bg-muted text-muted-foreground'
 }
 
 function DetailStat({ label, value }: { label: string; value: string }) {

@@ -2,6 +2,10 @@ import { desc, inArray } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { AgentRunRow, EmployeeRunRow, RunStatus } from '@/db/schema'
+import {
+  resolveRunActivityBrainStatus,
+  type RunActivityBrainStatus,
+} from '@/lib/run-activity-brain-status'
 
 export type RunActivityKind = 'employee_run' | 'agent_run'
 
@@ -17,6 +21,8 @@ export interface RunActivitySummaryRun {
   updatedAt: number
   artifactCount: number
   toolActionCount: number
+  brainStatus: RunActivityBrainStatus
+  brainLabel: string
 }
 
 export interface RunActivitySummaryEvent {
@@ -94,13 +100,30 @@ export async function getRunActivitySummary(): Promise<RunActivitySummary> {
   ])
 
   const employeeRunIds = employeeRuns.slice(0, RECENT_RUN_LIMIT).map((run) => run.id)
-  const employeeEvents = employeeRunIds.length
-    ? await db.query.employeeRunEvents.findMany({
-        where: inArray(schema.employeeRunEvents.employeeRunId, employeeRunIds),
-        orderBy: [desc(schema.employeeRunEvents.createdAt)],
-        limit: RECENT_EVENT_LIMIT,
-      })
-    : []
+  const [employeeEvents, runReflections, runMemories, runLearningEvents] = employeeRunIds.length
+    ? await Promise.all([
+        db.query.employeeRunEvents.findMany({
+          where: inArray(schema.employeeRunEvents.employeeRunId, employeeRunIds),
+          orderBy: [desc(schema.employeeRunEvents.createdAt)],
+          limit: RECENT_EVENT_LIMIT,
+        }),
+        db.query.runReflections.findMany({
+          where: inArray(schema.runReflections.runId, employeeRunIds),
+          orderBy: [desc(schema.runReflections.createdAt)],
+          limit: 100,
+        }),
+        db.query.memoryItems.findMany({
+          where: inArray(schema.memoryItems.sourceRunId, employeeRunIds),
+          orderBy: [desc(schema.memoryItems.createdAt)],
+          limit: 100,
+        }),
+        db.query.learningEvents.findMany({
+          where: inArray(schema.learningEvents.runId, employeeRunIds),
+          orderBy: [desc(schema.learningEvents.createdAt)],
+          limit: 100,
+        }),
+      ])
+    : [[], [], [], []]
 
   const profileNames = new Map(agentProfiles.map((profile) => [profile.id, profile.name]))
   const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]))
@@ -113,12 +136,34 @@ export async function getRunActivitySummary(): Promise<RunActivitySummary> {
   for (const row of cliRuns) increment(toolCountByEmployeeRun, row.employeeRunId ?? '')
   for (const row of mcpToolCalls) increment(toolCountByEmployeeRun, row.employeeRunId ?? '')
   for (const row of computerActionEvents) increment(toolCountByEmployeeRun, row.employeeRunId ?? '')
+  const reflectionByEmployeeRun = new Set(runReflections.map((reflection) => reflection.runId))
+  const memoryCountByEmployeeRun = countBy(runMemories, (memory) => memory.sourceRunId ?? '')
+  const pendingLearningCountByEmployeeRun = countBy(
+    runLearningEvents.filter((event) => event.status === 'pending_review'),
+    (event) => event.runId,
+  )
+  const failureCountByEmployeeRun = new Map<string, number>()
+  for (const reflection of runReflections) {
+    if (reflection.whatFailed.length > 0) {
+      failureCountByEmployeeRun.set(
+        reflection.runId,
+        (failureCountByEmployeeRun.get(reflection.runId) ?? 0) + reflection.whatFailed.length,
+      )
+    }
+  }
+  for (const memory of runMemories) {
+    if (memory.type === 'mistake') increment(failureCountByEmployeeRun, memory.sourceRunId ?? '')
+  }
 
   const recentEmployeeRuns = employeeRuns.slice(0, RECENT_RUN_LIMIT).map((run) =>
     employeeRunToActivity(run, {
       agentName: profileNames.get(run.agentProfileId) ?? null,
       artifactCount: artifactCountByEmployeeRun.get(run.id) ?? 0,
       toolActionCount: toolCountByEmployeeRun.get(run.id) ?? 0,
+      hasReflection: reflectionByEmployeeRun.has(run.id),
+      memoryCount: memoryCountByEmployeeRun.get(run.id) ?? 0,
+      pendingLearningCount: pendingLearningCountByEmployeeRun.get(run.id) ?? 0,
+      failureCount: failureCountByEmployeeRun.get(run.id) ?? 0,
     }),
   )
   const recentAgentRuns = agentRuns.slice(0, RECENT_RUN_LIMIT).map((run) =>
@@ -175,8 +220,23 @@ export async function getRunActivitySummary(): Promise<RunActivitySummary> {
 
 function employeeRunToActivity(
   run: EmployeeRunRow,
-  details: { agentName: string | null; artifactCount: number; toolActionCount: number },
+  details: {
+    agentName: string | null
+    artifactCount: number
+    toolActionCount: number
+    hasReflection: boolean
+    memoryCount: number
+    pendingLearningCount: number
+    failureCount: number
+  },
 ): RunActivitySummaryRun {
+  const brain = resolveRunActivityBrainStatus({
+    kind: 'employee_run',
+    hasReflection: details.hasReflection,
+    failureCount: details.failureCount,
+    memoryCount: details.memoryCount,
+    pendingLearningCount: details.pendingLearningCount,
+  })
   return {
     id: run.id,
     kind: 'employee_run',
@@ -189,6 +249,8 @@ function employeeRunToActivity(
     updatedAt: run.finishedAt ?? run.updatedAt,
     artifactCount: details.artifactCount,
     toolActionCount: details.toolActionCount,
+    brainStatus: brain.status,
+    brainLabel: brain.label,
   }
 }
 
@@ -196,6 +258,13 @@ function agentRunToActivity(
   run: AgentRunRow,
   details: { agentName: string | null; artifactCount: number },
 ): RunActivitySummaryRun {
+  const brain = resolveRunActivityBrainStatus({
+    kind: 'agent_run',
+    hasReflection: false,
+    failureCount: 0,
+    memoryCount: 0,
+    pendingLearningCount: 0,
+  })
   return {
     id: run.id,
     kind: 'agent_run',
@@ -208,6 +277,8 @@ function agentRunToActivity(
     updatedAt: run.finishedAt ?? run.startedAt,
     artifactCount: details.artifactCount,
     toolActionCount: 0,
+    brainStatus: brain.status,
+    brainLabel: brain.label,
   }
 }
 

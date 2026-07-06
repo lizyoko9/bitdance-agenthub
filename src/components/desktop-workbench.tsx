@@ -1253,6 +1253,9 @@ function RunActivityCard({
                   <span className="rounded-full bg-muted px-2 py-0.5">阶段：{phaseToLabel(run.phase)}</span>
                   <span className="rounded-full bg-muted px-2 py-0.5">工具 {run.toolActionCount}</span>
                   <span className="rounded-full bg-muted px-2 py-0.5">产物 {run.artifactCount}</span>
+                  <span className={cn('rounded-full px-2 py-0.5', runBrainStatusClass(run.brainStatus))}>
+                    {run.brainLabel}
+                  </span>
                 </div>
               </button>
             ))}
@@ -1429,6 +1432,13 @@ function brainDigestToneClass(tone: EmployeeRunBrainDigest['tone']) {
   if (tone === 'ready') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
   if (tone === 'warning') return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
   return 'border-muted bg-muted/40 text-muted-foreground'
+}
+
+function runBrainStatusClass(status: RunActivitySummary['recentRuns'][number]['brainStatus']) {
+  if (status === 'failure_lesson') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  if (status === 'needs_review') return 'bg-primary/10 text-primary'
+  if (status === 'learned') return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+  return 'bg-muted text-muted-foreground'
 }
 
 function RuntimeEnvironmentPanel({
