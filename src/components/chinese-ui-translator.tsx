@@ -363,8 +363,8 @@ export function ChineseUiTranslator() {
   useEffect(() => {
     const translateRoot = () => {
       const root = document.getElementById('agenthub-app-root')
+      removeRuntimeSourceTextNodes(document.body)
       if (!root) return
-      removeRuntimeSourceTextNodes(root)
       translateTextNodes(root)
       translateElementAttributes(root)
     }
@@ -375,7 +375,7 @@ export function ChineseUiTranslator() {
     })
     const root = document.getElementById('agenthub-app-root')
     if (!root) return () => observer.disconnect()
-    observer.observe(root, {
+    observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true,

@@ -10,9 +10,18 @@ describe('ChineseUiTranslator runtime source guard', () => {
   it('removes leaked runtime source text nodes before translating the UI', () => {
     const source = readTranslatorSource()
 
-    expect(source).toContain('removeRuntimeSourceTextNodes(root)')
+    expect(source).toContain('removeRuntimeSourceTextNodes(document.body)')
     expect(source).toContain('looksLikeRuntimeSource(node.textContent)')
     expect(source).toContain('node.remove()')
+  })
+
+  it('watches the whole document body for Next.js runtime text leaks', () => {
+    const source = readTranslatorSource()
+
+    expect(source).toContain('observer.observe(document.body')
+    expect(source.indexOf('removeRuntimeSourceTextNodes(document.body)')).toBeLessThan(
+      source.indexOf('translateTextNodes(root)'),
+    )
   })
 
   it('does not delete normal long business copy just because it is long', () => {
