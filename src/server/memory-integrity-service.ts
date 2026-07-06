@@ -35,8 +35,15 @@ export interface ScanMemoryIntegrityArgs {
   limit?: number
 }
 
+type PartialMemoryBeforeWritePolicy = Omit<
+  Partial<MemoryIntegrityPolicy['beforeWrite']>,
+  'sourceConfidenceMap'
+> & {
+  sourceConfidenceMap?: Partial<Record<MemoryIntegritySourceType, number>>
+}
+
 type PartialMemoryIntegrityPolicy = {
-  beforeWrite?: Partial<MemoryIntegrityPolicy['beforeWrite']>
+  beforeWrite?: PartialMemoryBeforeWritePolicy
   periodicScan?: Partial<MemoryIntegrityPolicy['periodicScan']>
 }
 

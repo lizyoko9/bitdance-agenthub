@@ -3,6 +3,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { db, schema } from '@/db/client'
 import type {
   AgentAvailabilityDecision,
+  AgentWorkingDaySchedule,
   AgentMaintenanceWindow,
   AgentOvertimePolicy,
   AgentScheduleCurrentStatus,
@@ -18,7 +19,7 @@ import { recordAuditLog } from '@/server/security-service'
 export interface CreateAgentScheduleArgs {
   agentProfileId: string
   timezone?: string
-  weeklySchedule: AgentWeeklySchedule
+  weeklySchedule: Partial<Record<WeekdayName, AgentWorkingDaySchedule>>
   maintenanceWindows?: AgentMaintenanceWindow[]
   overtimePolicy?: AgentOvertimePolicy
   vacationMode?: AgentVacationMode
@@ -61,7 +62,7 @@ export async function createAgentSchedule(args: CreateAgentScheduleArgs): Promis
     id: newAgentScheduleId(),
     agentProfileId: agent.id,
     timezone: args.timezone?.trim() || 'UTC',
-    weeklySchedule: args.weeklySchedule,
+    weeklySchedule: normalizeWeeklySchedule(args.weeklySchedule),
     maintenanceWindows: args.maintenanceWindows ?? [],
     overtimePolicy: { ...DEFAULT_OVERTIME, ...(args.overtimePolicy ?? {}) },
     vacationMode: { ...DEFAULT_VACATION, ...(args.vacationMode ?? {}) },
@@ -84,6 +85,24 @@ export async function createAgentSchedule(args: CreateAgentScheduleArgs): Promis
     metadata: { agentProfileId: agent.id, timezone: row.timezone, status: row.status },
   })
   return row
+}
+
+const WEEKDAYS: WeekdayName[] = [
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday',
+]
+
+function normalizeWeeklySchedule(
+  weeklySchedule: Partial<Record<WeekdayName, AgentWorkingDaySchedule>>,
+): AgentWeeklySchedule {
+  return Object.fromEntries(
+    WEEKDAYS.map((day) => [day, weeklySchedule[day] ?? { active: false }]),
+  ) as AgentWeeklySchedule
 }
 
 export async function listAgentSchedules(args: {

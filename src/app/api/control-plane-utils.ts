@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { z } from 'zod'
 
-export async function parseJsonBody<T>(
+export async function parseJsonBody<S extends z.ZodTypeAny>(
   req: NextRequest,
-  schema: z.ZodType<T>,
-): Promise<{ ok: true; data: T } | { ok: false; response: NextResponse }> {
+  schema: S,
+): Promise<{ ok: true; data: z.output<S> } | { ok: false; response: NextResponse }> {
   const raw = await req.json().catch(() => null)
   const parsed = schema.safeParse(raw)
   if (!parsed.success) {

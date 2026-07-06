@@ -2,6 +2,13 @@ import { z } from 'zod'
 
 export const JsonObjectSchema = z.record(z.string(), z.unknown())
 
+type RequiredUnknown = Record<string, unknown> | unknown[] | string | number | boolean | null
+
+const RequiredUnknownSchema = z.any().transform((value): RequiredUnknown => {
+  if (value === undefined) return null
+  return value as RequiredUnknown
+})
+
 export const KnowledgeNodeTypeSchema = z.enum([
   'capability',
   'agent',
@@ -666,7 +673,7 @@ export const WorkflowTemplateParameterDefinitionSchema = z.object({
     .array(
       z.object({
         label: z.string().min(1),
-        value: z.unknown(),
+        value: RequiredUnknownSchema,
       }),
     )
     .optional(),
@@ -2983,7 +2990,7 @@ export const TaskTemplateParameterSchema = z.object({
   default: z.unknown().optional(),
   required: z.boolean().default(false),
   options: z
-    .array(z.object({ label: z.string().min(1), value: z.unknown() }))
+    .array(z.object({ label: z.string().min(1), value: RequiredUnknownSchema }))
     .optional(),
 })
 
@@ -4397,7 +4404,7 @@ export const AgentCertificationRubricBody = z.object({
 export const AgentCertificationTaskBody = z.object({
   taskId: z.string().min(1),
   description: z.string().min(1),
-  expectedOutput: z.unknown(),
+  expectedOutput: RequiredUnknownSchema,
   scoringRubric: AgentCertificationRubricBody,
 })
 
@@ -4413,7 +4420,7 @@ export const AgentCertificationExamBody = z.object({
 
 export const AgentCertificationSubmissionBody = z.object({
   taskId: z.string().min(1),
-  output: z.unknown(),
+  output: RequiredUnknownSchema,
   durationMs: z.number().int().nonnegative().optional(),
   notes: z.string().max(1000).optional(),
 })

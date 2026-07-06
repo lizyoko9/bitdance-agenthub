@@ -478,7 +478,8 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
 
         if (m.type === 'assistant') {
           // 完整 assistant 消息 —— 处理 tool_use 块（text 已经在 stream_event 里增量过）
-          const content = m.message?.content as Array<{
+          const assistantMessage = m as { message?: { content?: unknown } }
+          const content = assistantMessage.message?.content as Array<{
             type: string
             id?: string
             name?: string
@@ -517,7 +518,8 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
 
         if (m.type === 'user') {
           // tool_result 块（SDK 内部执行完工具后的返回）
-          const content = m.message?.content as
+          const userMessage = m as { message?: { content?: unknown } }
+          const content = userMessage.message?.content as
             | Array<{
                 type: string
                 tool_use_id?: string

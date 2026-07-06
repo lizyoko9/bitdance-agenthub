@@ -10,6 +10,7 @@ import {
 const ToolNameSchema = z.enum(AVAILABLE_AGENT_TOOLS)
 const ProviderSchema = z.enum(['anthropic', 'openai', 'deepseek', 'volcano-ark', 'openai-compatible'])
 const AdapterSchema = z.enum(['custom', 'claude-code', 'codex'])
+type AssertTrue<T extends true> = T
 
 export const AgentDraftRequestSchema = z.object({
   intent: z.string().trim().min(6).max(4000),
@@ -55,8 +56,15 @@ export const AgentConfigDraftSchema = z
   .refine(
     (draft) => draft.adapterName === 'custom' || draft.toolNames.length === 0,
     { message: 'SDK adapter draft must not include custom toolNames' },
-  ) satisfies z.ZodType<AgentConfigDraft>
+  )
 
 export const AgentDraftResponseSchema = z.object({
   draft: AgentConfigDraftSchema,
-}) satisfies z.ZodType<AgentDraftResponse>
+})
+
+export type AgentConfigDraftSchemaOutputMatches = AssertTrue<
+  z.output<typeof AgentConfigDraftSchema> extends AgentConfigDraft ? true : false
+>
+export type AgentDraftResponseSchemaOutputMatches = AssertTrue<
+  z.output<typeof AgentDraftResponseSchema> extends AgentDraftResponse ? true : false
+>
