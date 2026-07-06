@@ -29,19 +29,19 @@ export function buildVisibleAppModules<T extends NavigationModuleLike>(
   modules: readonly T[],
   group: NavigationGroup,
 ): T[] {
-  const groupModules = modules.filter((module) => module.group === group)
-  const canonicalOrchestrationModule = groupModules.find((module) => module.id === CANONICAL_ORCHESTRATION_MODULE_ID)
+  const groupModules = modules.filter((entry) => entry.group === group)
+  const canonicalOrchestrationModule = groupModules.find((entry) => entry.id === CANONICAL_ORCHESTRATION_MODULE_ID)
   const visible: T[] = []
   let addedOrchestrationModule = false
 
-  for (const module of groupModules) {
-    if (!isOrchestrationModuleId(module.id)) {
-      visible.push(module)
+  for (const entry of groupModules) {
+    if (!isOrchestrationModuleId(entry.id)) {
+      visible.push(entry)
       continue
     }
 
     if (addedOrchestrationModule) continue
-    visible.push(canonicalOrchestrationModule ?? module)
+    visible.push(canonicalOrchestrationModule ?? entry)
     addedOrchestrationModule = true
   }
 

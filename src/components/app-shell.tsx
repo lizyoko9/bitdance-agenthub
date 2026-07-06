@@ -57,7 +57,7 @@ function WorkspaceMain({
   canvasWorkflowId: string | null
   onOpenWorkflow: (workflowId: string) => void
 }) {
-  const module = getAppModule(mode)
+  const appModule = getAppModule(mode)
   const content = renderAppModule(mode, {
     onModeChange,
     agentSettingsRequestKey,
@@ -65,7 +65,7 @@ function WorkspaceMain({
     onOpenWorkflow,
   })
 
-  if (module.frame === 'bare') return content
+  if (appModule.frame === 'bare') return content
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">

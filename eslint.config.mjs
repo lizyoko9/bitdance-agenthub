@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     "build/**",
     "dist-electron/**",
     ".tmp/**",
+    ".codex-runlogs/**",
+    ".external/**",
     "tmp/**",
     "output/**",
     ".agenthub-data/**",

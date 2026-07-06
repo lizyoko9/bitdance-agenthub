@@ -112,12 +112,13 @@ export function SoftwareCapabilityStore() {
     })
   }, [category, search, store.cards])
 
+  const selectedSoftwareProfileId = selectedCard?.softwareProfileId ?? null
   const selectedCommands = useMemo(
     () =>
-      selectedCard?.softwareProfileId
-        ? softwareCommands.filter((command) => command.softwareProfileId === selectedCard.softwareProfileId)
+      selectedSoftwareProfileId
+        ? softwareCommands.filter((command) => command.softwareProfileId === selectedSoftwareProfileId)
         : [],
-    [selectedCard?.softwareProfileId, softwareCommands],
+    [selectedSoftwareProfileId, softwareCommands],
   )
 
   async function withAction(message: string, fn: () => Promise<void>) {

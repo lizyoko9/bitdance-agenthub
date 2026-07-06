@@ -4438,20 +4438,6 @@ function artifactOutputHandle(output: CanvasArtifactOutput): string {
   return `artifact:${output.key}`
 }
 
-function normalizeArtifactOutput(value: unknown, index: number, fallbackType: string): CanvasArtifactOutput | null {
-  const obj = asRecord(value)
-  const type = stringValue(obj.type, fallbackType)
-  const key = stringValue(obj.key, artifactOutputKey(type, index))
-  if (!type || !key) return null
-  return {
-    key,
-    type,
-    label: stringValue(obj.label, artifactTypeLabel(type)),
-    description: stringValue(obj.description, artifactFileHint(type)),
-    customerVisible: typeof obj.customerVisible === 'boolean' ? obj.customerVisible : index === 0,
-  }
-}
-
 function artifactOutputsOf(node: DraftNode): CanvasArtifactOutput[] {
   return getCanvasNodeOutputPorts(node) as CanvasArtifactOutput[]
 }
