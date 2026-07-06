@@ -802,6 +802,30 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('edge.data?.handoffContract')
   })
 
+  it('lets users open a handoff edge directly from the selected node inspector', () => {
+    const source = readCanvasSource()
+    const nodePanelSource = source.slice(
+      source.indexOf('function NodeConfigPanel'),
+      source.indexOf('function NodePrimaryOutputSelector'),
+    )
+    const handoffSummarySource = source.slice(
+      source.indexOf('function NodeHandoffSummary'),
+      source.indexOf('function HandoffList'),
+    )
+    const handoffListSource = source.slice(
+      source.indexOf('function HandoffList'),
+      source.indexOf('function getNodeHandoffSummary'),
+    )
+
+    expect(source).toContain('onSelectEdge: (edgeId: string) => void')
+    expect(source).toContain('onSelectEdge={selectEdgeById}')
+    expect(nodePanelSource).toContain('onSelectEdge={onSelectEdge}')
+    expect(handoffSummarySource).toContain('onSelectEdge={onSelectEdge}')
+    expect(handoffListSource).toContain('data-testid="node-handoff-route-card"')
+    expect(handoffListSource).toContain('onClick={() => onSelectEdge(handoff.id)}')
+    expect(handoffListSource).toContain('aria-label={`查看${handoff.peerTitle}的${handoff.artifactLabel}交付线`}')
+  })
+
   it('keeps the selected node handoff setup visible instead of hiding it in collapsed details', () => {
     const source = readCanvasSource()
     const nodePanelSource = source.slice(

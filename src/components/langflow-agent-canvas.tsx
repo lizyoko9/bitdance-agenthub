@@ -1783,6 +1783,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                     replaceNodePortsForAgent={replaceNodePortsForAgent}
                     replaceNodePortsForSoftwareCommand={replaceNodePortsForSoftwareCommand}
                     onStartOutputConnection={startOutputConnection}
+                    onSelectEdge={selectEdgeById}
                   />
                 )}
                 <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} onSelectNode={selectNodeById} />
@@ -2533,6 +2534,7 @@ function NodeConfigPanel({
   replaceNodePortsForAgent,
   replaceNodePortsForSoftwareCommand,
   onStartOutputConnection,
+  onSelectEdge,
 }: {
   node: AgentFlowNode | null
   nodes: AgentFlowNode[]
@@ -2547,6 +2549,7 @@ function NodeConfigPanel({
   replaceNodePortsForAgent: (nodeId: string, agent: AgentProfileRow) => void
   replaceNodePortsForSoftwareCommand: (nodeId: string, command: SoftwareCommandRow) => void
   onStartOutputConnection: (nodeId: string, type: ArtifactType, outputId: string) => void
+  onSelectEdge: (edgeId: string) => void
 }) {
   if (!node) {
     return (
@@ -2655,7 +2658,7 @@ function NodeConfigPanel({
 
         <NodeInputRequirementPanel node={node} />
         <NodeDeliveryOutletPanel node={node} onStartOutputConnection={onStartOutputConnection} />
-        <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
+        <NodeHandoffSummary node={node} nodes={nodes} edges={edges} onSelectEdge={onSelectEdge} />
         <NodeSetupGuide node={node} />
 
         <details
@@ -2975,18 +2978,20 @@ function NodeHandoffSummary({
   node,
   nodes,
   edges,
+  onSelectEdge,
 }: {
   node: AgentFlowNode
   nodes: AgentFlowNode[]
   edges: AgentFlowEdge[]
+  onSelectEdge: (edgeId: string) => void
 }) {
   const { incomingHandoffs, outgoingHandoffs } = getNodeHandoffSummary(node, nodes, edges)
 
   return (
     <PanelBlock title="实际交付关系">
       <div data-testid="node-handoff-summary" className="grid gap-2 text-xs">
-        <HandoffList title="收到的交付" emptyText="还没有上游连到这个节点。" handoffs={incomingHandoffs} />
-        <HandoffList title="交出去的交付" emptyText="还没有把这个节点的产物交给下游。" handoffs={outgoingHandoffs} />
+        <HandoffList title="收到的交付" emptyText="还没有上游连到这个节点。" handoffs={incomingHandoffs} onSelectEdge={onSelectEdge} />
+        <HandoffList title="交出去的交付" emptyText="还没有把这个节点的产物交给下游。" handoffs={outgoingHandoffs} onSelectEdge={onSelectEdge} />
       </div>
     </PanelBlock>
   )
@@ -2996,6 +3001,7 @@ function HandoffList({
   title,
   emptyText,
   handoffs,
+  onSelectEdge,
 }: {
   title: string
   emptyText: string
@@ -3004,7 +3010,9 @@ function HandoffList({
     peerTitle: string
     contract: string
     artifactType: ArtifactType
+    artifactLabel: string
   }>
+  onSelectEdge: (edgeId: string) => void
 }) {
   return (
     <section className="rounded-md border bg-muted/20 p-2">
@@ -3019,13 +3027,20 @@ function HandoffList({
       ) : (
         <div className="space-y-1">
           {handoffs.map((handoff) => (
-            <div key={handoff.id} className="rounded-md border bg-background px-2 py-1.5">
+            <button
+              key={handoff.id}
+              type="button"
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-left transition hover:border-primary hover:bg-primary/5"
+              data-testid="node-handoff-route-card"
+              aria-label={`查看${handoff.peerTitle}的${handoff.artifactLabel}交付线`}
+              onClick={() => onSelectEdge(handoff.id)}
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate font-medium">{handoff.peerTitle}</span>
                 <ArtifactPill type={handoff.artifactType} />
               </div>
               <div className="mt-1 truncate text-[11px] text-muted-foreground">{handoff.contract}</div>
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -3046,6 +3061,7 @@ function getNodeHandoffSummary(
       peerTitle: nodeTitleById.get(edge.source) ?? '上游节点',
       contract: edge.data?.handoffContract ?? edge.data?.label ?? '交付关系',
       artifactType: edge.data?.artifactType ?? 'any',
+      artifactLabel: edge.data?.artifactType ? artifactLabels[edge.data.artifactType] : artifactLabels.any,
     }))
   const outgoingHandoffs = edges
     .filter((edge) => edge.source === node.id)
@@ -3054,6 +3070,7 @@ function getNodeHandoffSummary(
       peerTitle: nodeTitleById.get(edge.target) ?? '下游节点',
       contract: edge.data?.handoffContract ?? edge.data?.label ?? '交付关系',
       artifactType: edge.data?.artifactType ?? 'any',
+      artifactLabel: edge.data?.artifactType ? artifactLabels[edge.data.artifactType] : artifactLabels.any,
     }))
 
   return { incomingHandoffs, outgoingHandoffs }
