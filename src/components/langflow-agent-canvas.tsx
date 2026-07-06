@@ -2657,18 +2657,26 @@ function NodePrimaryOutputSelector({
           <ArtifactPill type={primaryOutput.type} />
           <span className="min-w-0 flex-1 truncate text-xs">{primaryOutput.label}</span>
         </div>
-        <select
-          className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-          data-testid="node-primary-output-type-select"
-          value={primaryOutput.type}
-          onChange={(event) => onTypeChange(primaryOutput.id, event.target.value as ArtifactType)}
-        >
+        <div className="grid grid-cols-2 gap-1.5">
           {primaryDeliverableTypes.map((type) => (
-            <option key={type} value={type}>
-              {artifactLabels[type]}
-            </option>
+            <button
+              key={type}
+              type="button"
+              className={cn(
+                'flex min-w-0 items-center gap-1.5 rounded-md border bg-background px-2 py-1.5 text-left text-xs transition hover:border-primary hover:bg-primary/5',
+                type === primaryOutput.type && 'border-primary bg-primary/10 text-primary',
+              )}
+              data-testid="node-primary-output-type-button"
+              data-artifact-type={type}
+              data-selected-artifact-type={type === primaryOutput.type}
+              aria-pressed={type === primaryOutput.type}
+              onClick={() => onTypeChange(primaryOutput.id, type)}
+            >
+              <ArtifactPill type={type} />
+              <span className="min-w-0 truncate">{artifactLabels[type]}</span>
+            </button>
           ))}
-        </select>
+        </div>
         <div className="text-[11px] leading-4 text-muted-foreground">
           这个节点只会把这一种产物交给下游；如果要更多出口，再打开高级端口设置。
         </div>

@@ -649,12 +649,14 @@ describe('Langflow agent canvas layout', () => {
     )
   })
 
-  it('lets users choose the primary deliverable type without opening advanced port settings', () => {
+  it('lets users choose the primary deliverable type as visible artifact buttons instead of a form dropdown', () => {
     const source = readCanvasSource()
 
     expect(source).toContain('NodePrimaryOutputSelector node={node}')
     expect(source).toContain('data-testid="node-primary-output-selector"')
-    expect(source).toContain('data-testid="node-primary-output-type-select"')
+    expect(source).toContain('data-testid="node-primary-output-type-button"')
+    expect(source).toContain('aria-pressed={type === primaryOutput.type}')
+    expect(source).toContain('data-selected-artifact-type={type === primaryOutput.type}')
     expect(source).toContain('primaryDeliverableTypes')
     expect(source).toContain("changePortTypeForNode(node.id, 'outputs', outputId, type)")
     expect(source.indexOf('NodePrimaryOutputSelector node={node}')).toBeLessThan(
