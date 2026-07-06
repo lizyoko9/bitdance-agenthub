@@ -3,6 +3,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { getDefaultModuleLayout } from '@/lib/agenthub-module-catalog'
+
 import {
   appModules,
   getAppModule,
@@ -68,5 +70,9 @@ describe('app module routing', () => {
       '模型管理',
       '工具连接',
     ])
+  })
+
+  it('keeps primary navigation aligned with the default module block layout', () => {
+    expect(primaryAppModules.map((module) => module.id)).toEqual(getDefaultModuleLayout().map((module) => module.id))
   })
 })
