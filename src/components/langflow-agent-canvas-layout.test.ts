@@ -86,6 +86,25 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('selectionOnDrag={false}')
   })
 
+  it('uses a Langflow-style floating canvas control bar instead of the default React Flow controls', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('Panel,')
+    expect(source).toContain('CanvasFloatingControls')
+    expect(source).toContain('data-testid="agent-canvas-floating-controls"')
+    expect(source).toContain('data-testid="canvas-zoom-in-button"')
+    expect(source).toContain('data-testid="canvas-zoom-out-button"')
+    expect(source).toContain('data-testid="canvas-fit-view-button"')
+    expect(source).toContain('onFitView={fitCanvasView}')
+    expect(source).not.toContain('<Controls />')
+  })
+
+  it('keeps the minimap away from the bottom canvas action bar', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('<MiniMap position="top-right" pannable zoomable nodeStrokeWidth={3} />')
+  })
+
   it('pads automatic fit view so workflow nodes are not hidden under the palette or inspector', () => {
     const source = readCanvasSource()
 

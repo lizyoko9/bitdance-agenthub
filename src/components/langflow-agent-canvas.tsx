@@ -3,10 +3,10 @@
 import {
   Background,
   BaseEdge,
-  Controls,
   Handle,
   MarkerType,
   MiniMap,
+  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -34,12 +34,15 @@ import {
   Play,
   Plus,
   Redo2,
+  RotateCcw,
   Save,
   Settings2,
   Sparkles,
   Trash2,
   Undo2,
   Wrench,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from 'react'
 
@@ -335,6 +338,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [paletteCollapsed, setPaletteCollapsed] = useState(false)
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false)
   const { screenToFlowPosition, fitView } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
+  const { zoomIn, zoomOut, zoomTo } = useReactFlow<AgentFlowNode, AgentFlowEdge>()
   const fitCanvasView = useCallback(() => {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -1212,40 +1216,6 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             <Plus className="size-3.5" />
             新建流程
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="gap-1"
-            data-testid="canvas-undo-button"
-            disabled={undoStack.length === 0}
-            title="撤销 Ctrl+Z"
-            onClick={undoCanvasEdit}
-          >
-            <Undo2 className="size-3.5" />
-            撤销
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="gap-1"
-            data-testid="canvas-redo-button"
-            disabled={redoStack.length === 0}
-            title="重做 Ctrl+Y"
-            onClick={redoCanvasEdit}
-          >
-            <Redo2 className="size-3.5" />
-            重做
-          </Button>
-          <Button type="button" size="sm" variant="outline" className="gap-1" onClick={saveCanvasDraft}>
-            <Save className="size-3.5" />
-            保存流程
-          </Button>
-          <Button type="button" size="sm" className="gap-1" onClick={runPreflight}>
-            <Play className="size-3.5" />
-            检查并试运行
-          </Button>
         </div>
       </header>
 
@@ -1313,8 +1283,19 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           connectionLineStyle={{ stroke: '#60a5fa', strokeWidth: 2 }}
         >
           <Background gap={18} size={1} />
-          <Controls />
-          <MiniMap pannable zoomable nodeStrokeWidth={3} />
+          <CanvasFloatingControls
+            undoCanvasEdit={undoCanvasEdit}
+            redoCanvasEdit={redoCanvasEdit}
+            saveCanvasDraft={saveCanvasDraft}
+            runPreflight={runPreflight}
+            onZoomIn={() => void zoomIn()}
+            onZoomOut={() => void zoomOut()}
+            onResetZoom={() => void zoomTo(1)}
+            onFitView={fitCanvasView}
+            canUndo={undoStack.length > 0}
+            canRedo={redoStack.length > 0}
+          />
+          <MiniMap position="top-right" pannable zoomable nodeStrokeWidth={3} />
           </ReactFlow>
           <ActiveConnectionBanner
             activeConnectionType={activeConnectionType}
@@ -1617,6 +1598,123 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
       </main>
       </div>
+  )
+}
+
+function CanvasFloatingControls({
+  undoCanvasEdit,
+  redoCanvasEdit,
+  saveCanvasDraft,
+  runPreflight,
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
+  onFitView,
+  canUndo,
+  canRedo,
+}: {
+  undoCanvasEdit: () => void
+  redoCanvasEdit: () => void
+  saveCanvasDraft: () => void
+  runPreflight: () => void
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onResetZoom: () => void
+  onFitView: () => void
+  canUndo: boolean
+  canRedo: boolean
+}) {
+  return (
+    <Panel
+      position="bottom-center"
+      className="!m-4 flex items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-lg backdrop-blur"
+      data-testid="agent-canvas-floating-controls"
+    >
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-8"
+        data-testid="canvas-undo-button"
+        disabled={!canUndo}
+        title="撤销 Ctrl+Z"
+        onClick={undoCanvasEdit}
+      >
+        <Undo2 className="size-4" />
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-8"
+        data-testid="canvas-redo-button"
+        disabled={!canRedo}
+        title="重做 Ctrl+Y"
+        onClick={redoCanvasEdit}
+      >
+        <Redo2 className="size-4" />
+      </Button>
+      <div className="mx-1 h-5 w-px bg-border" />
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-8"
+        data-testid="canvas-zoom-out-button"
+        title="缩小"
+        onClick={onZoomOut}
+      >
+        <ZoomOut className="size-4" />
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-8"
+        data-testid="canvas-zoom-in-button"
+        title="放大"
+        onClick={onZoomIn}
+      >
+        <ZoomIn className="size-4" />
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-8"
+        data-testid="canvas-reset-zoom-button"
+        title="恢复 100%"
+        onClick={onResetZoom}
+      >
+        <RotateCcw className="size-4" />
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-8 gap-1 px-2"
+        data-testid="canvas-fit-view-button"
+        title="适配画布"
+        onClick={onFitView}
+      >
+        适配
+      </Button>
+      <div className="mx-1 h-5 w-px bg-border" />
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-8 gap-1 px-2"
+        onClick={saveCanvasDraft}
+      >
+        <Save className="size-3.5" />
+        保存
+      </Button>
+      <Button type="button" size="sm" className="h-8 gap-1 px-2" onClick={runPreflight}>
+        <Play className="size-3.5" />
+        检查并试运行
+      </Button>
+    </Panel>
   )
 }
 
