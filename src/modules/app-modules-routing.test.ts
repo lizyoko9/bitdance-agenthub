@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { appModules, getAppModule, normalizeAppModuleId, type AppModuleId } from './app-modules'
+import {
+  appModules,
+  getAppModule,
+  normalizeAppModuleId,
+  primaryAppModules,
+  type AppModuleId,
+} from './app-modules'
 
 describe('app module routing', () => {
   const legacyOrchestrationIds = [
@@ -36,5 +42,16 @@ describe('app module routing', () => {
     expect(source).not.toContain('LangflowNativeModule')
     expect(source).not.toContain('InfiniteCanvasModule')
     expect(source).not.toContain('WorkflowLibrary')
+  })
+
+  it('does not expose separate lifecycle or langflow canvas modules in primary navigation', () => {
+    const primaryIds = primaryAppModules.map((module) => module.id)
+
+    expect(primaryIds).toContain('agent-canvas')
+    expect(primaryIds).not.toContain('workflows')
+    expect(primaryIds).not.toContain('agent-orchestration')
+    expect(primaryIds).not.toContain('langflow-native')
+    expect(primaryIds).not.toContain('infinite-canvas')
+    expect(appModules.some((module) => module.id === 'agenthub-lifecycle')).toBe(false)
   })
 })
