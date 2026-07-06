@@ -3385,6 +3385,28 @@ function RunTimelinePanel({
               <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
                 收到 {step.incomingContracts.length} 项 · 交出 {step.outgoingContracts.length} 项
               </span>
+              {(step.incomingContracts.length > 0 || step.outgoingContracts.length > 0) && (
+                <span className="mt-1 grid gap-1" data-testid="run-timeline-step-contracts">
+                  {step.incomingContracts.slice(0, 2).map((contract, index) => (
+                    <span
+                      key={`incoming-${contract}-${index}`}
+                      className="block truncate rounded border bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      data-run-contract-direction="incoming"
+                    >
+                      收到：{contract}
+                    </span>
+                  ))}
+                  {step.outgoingContracts.slice(0, 2).map((contract, index) => (
+                    <span
+                      key={`outgoing-${contract}-${index}`}
+                      className="block truncate rounded border bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      data-run-contract-direction="outgoing"
+                    >
+                      交出：{contract}
+                    </span>
+                  ))}
+                </span>
+              )}
             </span>
           </button>
         ))}

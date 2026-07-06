@@ -65,6 +65,20 @@ describe('Langflow agent canvas layout', () => {
     )
   })
 
+  it('shows exact incoming and outgoing contracts inside each run timeline step', () => {
+    const source = readCanvasSource()
+    const timelineSource = source.slice(
+      source.indexOf('function RunTimelinePanel'),
+      source.indexOf('function RunResultSummary'),
+    )
+
+    expect(timelineSource).toContain('data-testid="run-timeline-step-contracts"')
+    expect(timelineSource).toContain('step.incomingContracts.slice(0, 2)')
+    expect(timelineSource).toContain('step.outgoingContracts.slice(0, 2)')
+    expect(timelineSource).toContain('data-run-contract-direction="incoming"')
+    expect(timelineSource).toContain('data-run-contract-direction="outgoing"')
+  })
+
   it('shows local run evidence directly on completed canvas nodes', () => {
     const source = readCanvasSource()
     const nodesForCanvasSource = source.slice(
