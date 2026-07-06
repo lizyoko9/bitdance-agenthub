@@ -2216,9 +2216,11 @@ function NodeConfigPanel({
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Settings2 className="size-4 text-primary" />
-            节点设置
+            <span className="max-w-52 truncate" data-testid="selected-node-panel-title">
+              {node.data.title}
+            </span>
           </div>
-          <div className="mt-1 text-xs text-muted-foreground">{nodeKindLabels[node.data.kind]}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{nodeKindLabels[node.data.kind]} · 节点设置</div>
         </div>
         <Button type="button" size="sm" variant="destructive" className="h-8" onClick={onDeleteNode}>
           删除

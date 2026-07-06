@@ -702,6 +702,18 @@ describe('Langflow agent canvas layout', () => {
     expect(nodePanelSource.indexOf('NodeSetupGuide node={node}')).toBeLessThan(collapsedDetailsIndex)
   })
 
+  it('uses the selected node name as the inspector heading', () => {
+    const source = readCanvasSource()
+    const nodePanelSource = source.slice(
+      source.indexOf('function NodeConfigPanel'),
+      source.indexOf('function NodePrimaryOutputSelector'),
+    )
+
+    expect(nodePanelSource).toContain('data-testid="selected-node-panel-title"')
+    expect(nodePanelSource).toContain('{node.data.title}')
+    expect(nodePanelSource).toContain('{nodeKindLabels[node.data.kind]} · 节点设置')
+  })
+
   it('keeps existing edges consistent when a port artifact type changes', () => {
     const source = readCanvasSource()
 
