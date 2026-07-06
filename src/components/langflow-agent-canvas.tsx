@@ -1641,7 +1641,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                 )}
                 <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} onSelectNode={selectNodeById} />
                 <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} onSelectEdge={selectEdgeById} />
-                <CustomerDeliveryPreviewPanel nodes={nodes} edges={edges} />
+                <CustomerDeliveryPreviewPanel nodes={nodes} edges={edges} onSelectNode={selectNodeById} />
               </>
             )}
           </div>
@@ -2949,9 +2949,11 @@ function HandoffPreviewPanel({
 function CustomerDeliveryPreviewPanel({
   nodes,
   edges,
+  onSelectNode,
 }: {
   nodes: AgentFlowNode[]
   edges: AgentFlowEdge[]
+  onSelectNode: (nodeId: string) => void
 }) {
   const deliveries = buildCustomerDeliverySummaries(nodes, edges)
 
@@ -2974,10 +2976,13 @@ function CustomerDeliveryPreviewPanel({
       ) : (
         <div className="space-y-2">
           {deliveries.map((delivery) => (
-            <article
+            <button
               key={delivery.id}
-              className="rounded-lg border bg-muted/20 p-2 text-xs"
+              type="button"
+              className="w-full rounded-lg border bg-muted/20 p-2 text-left text-xs transition hover:border-primary hover:bg-primary/5"
               data-testid="customer-delivery-card"
+              aria-label={`查看客户交付物${delivery.title}`}
+              onClick={() => onSelectNode(delivery.id)}
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0 truncate font-semibold">{delivery.title}</div>
@@ -2988,7 +2993,7 @@ function CustomerDeliveryPreviewPanel({
                 {delivery.handoffContract}
               </div>
               <div className="mt-1 text-[11px] text-muted-foreground">来源：{delivery.sourceTitle}</div>
-            </article>
+            </button>
           ))}
         </div>
       )}

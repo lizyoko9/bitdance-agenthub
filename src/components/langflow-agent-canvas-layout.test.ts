@@ -740,13 +740,26 @@ describe('Langflow agent canvas layout', () => {
     const source = readCanvasSource()
 
     expect(source).toContain('CustomerDeliveryPreviewPanel')
-    expect(source).toContain('<CustomerDeliveryPreviewPanel nodes={nodes} edges={edges} />')
+    expect(source).toContain('<CustomerDeliveryPreviewPanel nodes={nodes} edges={edges} onSelectNode={selectNodeById} />')
     expect(source).toContain('buildCustomerDeliverySummaries')
     expect(source).toContain('node.data.customerVisible')
     expect(source).toContain('data-testid="customer-delivery-preview-panel"')
     expect(source).toContain('data-testid="customer-delivery-card"')
     expect(source).toContain('客户最终看到')
     expect(source).toContain('等待上游交付')
+  })
+
+  it('lets users click a customer deliverable card to inspect the final artifact node', () => {
+    const source = readCanvasSource()
+    const deliveryPanelSource = source.slice(
+      source.indexOf('function CustomerDeliveryPreviewPanel'),
+      source.indexOf('function ActiveConnectionBanner'),
+    )
+
+    expect(deliveryPanelSource).toContain('onSelectNode')
+    expect(deliveryPanelSource).toContain('data-testid="customer-delivery-card"')
+    expect(deliveryPanelSource).toContain('onClick={() => onSelectNode(delivery.id)}')
+    expect(deliveryPanelSource).toContain('aria-label={`查看客户交付物${delivery.title}`}')
   })
 
   it('lets users click a preflight issue to select the broken node', () => {
