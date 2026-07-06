@@ -37,6 +37,10 @@ import type {
   WorkflowRunRow,
 } from '@/db/schema'
 import {
+  buildWorkflowNodeBrainStatuses,
+  type WorkflowNodeBrainStatus,
+} from '@/lib/workflow-node-brain-status'
+import {
   newAgentProfileId,
   newAgentWorkstationId,
   newApprovalRequestId,
@@ -1693,6 +1697,7 @@ export interface WorkflowRunSnapshot {
   workflowRun: WorkflowRunRow
   nodeRuns: WorkflowNodeRunRow[]
   employeeRuns: EmployeeRunRow[]
+  nodeBrainStatuses: WorkflowNodeBrainStatus[]
   softwareCommandRuns: SoftwareCommandRunRow[]
   computerSessions: ComputerSessionRow[]
   computerActionEvents: ComputerActionEventRow[]
@@ -1709,6 +1714,43 @@ export async function getWorkflowRunSnapshot(runId: string): Promise<WorkflowRun
     orderBy: [asc(schema.workflowNodeRuns.startedAt)],
   })
   const employeeRuns = await listWorkflowEmployeeRuns(runId)
+  const employeeRunIds = employeeRuns.map((run) => run.id)
+  const [runReflections, runMemories, runLearningEvents] = employeeRunIds.length
+    ? await Promise.all([
+        db.query.runReflections.findMany({
+          where: inArray(schema.runReflections.runId, employeeRunIds),
+          orderBy: [asc(schema.runReflections.createdAt)],
+        }),
+        db.query.memoryItems.findMany({
+          where: inArray(schema.memoryItems.sourceRunId, employeeRunIds),
+          orderBy: [asc(schema.memoryItems.createdAt)],
+        }),
+        db.query.learningEvents.findMany({
+          where: inArray(schema.learningEvents.runId, employeeRunIds),
+          orderBy: [asc(schema.learningEvents.createdAt)],
+        }),
+      ])
+    : [[], [], []]
+  const nodeBrainStatuses = buildWorkflowNodeBrainStatuses({
+    nodeRuns: nodeRuns.map((nodeRun) => ({
+      id: nodeRun.id,
+      nodeId: nodeRun.nodeId,
+      output: nodeRun.output,
+    })),
+    employeeRuns: employeeRuns.map((employeeRun) => ({ id: employeeRun.id })),
+    reflections: runReflections.map((reflection) => ({
+      runId: reflection.runId,
+      whatFailed: reflection.whatFailed,
+    })),
+    memories: runMemories.map((memory) => ({
+      sourceRunId: memory.sourceRunId,
+      type: memory.type,
+    })),
+    learningEvents: runLearningEvents.map((event) => ({
+      runId: event.runId,
+      status: event.status,
+    })),
+  })
   const softwareCommandRuns = await listSoftwareCommandRunsForWorkflowRun(runId)
   const computerSessions = await listComputerSessionsForWorkflowRun(runId)
   const computerActionEvents = await listComputerActionEventsForWorkflowRun(runId)
@@ -1724,6 +1766,7 @@ export async function getWorkflowRunSnapshot(runId: string): Promise<WorkflowRun
     workflowRun,
     nodeRuns,
     employeeRuns,
+    nodeBrainStatuses,
     softwareCommandRuns,
     computerSessions,
     computerActionEvents,

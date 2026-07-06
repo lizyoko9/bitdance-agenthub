@@ -708,6 +708,8 @@ import type {
 import type { AgentProfileCapabilityReport } from '@/server/control-plane-service'
 import type { AgentIsolationReport } from '@/server/agent-isolation-service'
 import type { AgentMemoryLearningReport } from '@/server/agent-memory-learning-report-service'
+import type { WorkflowNodeBrainStatus } from '@/lib/workflow-node-brain-status'
+export type { WorkflowNodeBrainStatus } from '@/lib/workflow-node-brain-status'
 import type { ApiDesignCoverageReport } from '@/server/api-design-coverage-report-service'
 import type { BackendServiceCoverageReport } from '@/server/backend-service-coverage-report-service'
 import type { DatabaseCoverageReport } from '@/server/database-coverage-report-service'
@@ -11078,6 +11080,7 @@ export interface WorkflowRunSnapshot {
   workflowRun: WorkflowRunRow
   nodeRuns: WorkflowNodeRunRow[]
   employeeRuns: EmployeeRunRow[]
+  nodeBrainStatuses: WorkflowNodeBrainStatus[]
   softwareCommandRuns: SoftwareCommandRunRow[]
   computerSessions: ComputerSessionRow[]
   computerActionEvents: ComputerActionEventRow[]

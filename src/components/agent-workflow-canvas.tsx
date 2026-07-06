@@ -3,6 +3,7 @@
 import {
   Activity,
   AlertCircle,
+  Brain,
   Bot,
   Camera,
   CheckCircle2,
@@ -91,7 +92,9 @@ import {
   runWorkflowPreset,
   startWorkflowRun,
   updateWorkflow,
+  type WorkflowNodeBrainStatus,
   type WorkflowPresetDto,
+  type WorkflowRunSnapshot,
 } from '@/lib/api'
 import {
   canConnectArtifactOutputToTarget as canConnectCanvasArtifactOutputToTarget,
@@ -248,6 +251,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunRow[]>([])
   const [workflowPreflights, setWorkflowPreflights] = useState<WorkflowPreflightRow[]>([])
   const [nodeRuns, setNodeRuns] = useState<WorkflowNodeRunRow[]>([])
+  const [nodeBrainStatuses, setNodeBrainStatuses] = useState<WorkflowNodeBrainStatus[]>([])
   const [employeeRuns, setEmployeeRuns] = useState<EmployeeRunRow[]>([])
   const [softwareCommandRuns, setSoftwareCommandRuns] = useState<SoftwareCommandRunRow[]>([])
   const [computerSessions, setComputerSessions] = useState<ComputerSessionRow[]>([])
@@ -306,6 +310,12 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
     for (const run of nodeRuns) map.set(run.nodeId, run)
     return map
   }, [nodeRuns])
+
+  const nodeBrainStatusByNodeRunId = useMemo(() => {
+    const map = new Map<string, WorkflowNodeBrainStatus>()
+    for (const brainStatus of nodeBrainStatuses) map.set(brainStatus.nodeRunId, brainStatus)
+    return map
+  }, [nodeBrainStatuses])
 
   const customerDeliverableNodes = useMemo(
     () => nodes.filter((node) => customerVisibleOf(node)),
@@ -366,6 +376,30 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
     selectedSoftwareCommandId,
     selectedWorkflowId,
   ])
+
+  const clearWorkflowRunSnapshot = useCallback(() => {
+    setNodeRuns([])
+    setNodeBrainStatuses([])
+    setEmployeeRuns([])
+    setSoftwareCommandRuns([])
+    setComputerSessions([])
+    setComputerActionEvents([])
+    setArtifactValidations([])
+    setApprovalRequests([])
+    setResourceLocks([])
+  }, [])
+
+  const setWorkflowRunSnapshot = useCallback((snapshot: WorkflowRunSnapshot) => {
+    setNodeRuns(snapshot.nodeRuns)
+    setNodeBrainStatuses(snapshot.nodeBrainStatuses)
+    setEmployeeRuns(snapshot.employeeRuns)
+    setSoftwareCommandRuns(snapshot.softwareCommandRuns)
+    setComputerSessions(snapshot.computerSessions)
+    setComputerActionEvents(snapshot.computerActionEvents)
+    setArtifactValidations(snapshot.artifactValidations)
+    setApprovalRequests(snapshot.approvalRequests)
+    setResourceLocks(snapshot.resourceLocks)
+  }, [])
 
   useEffect(() => {
     void reloadLists()
@@ -474,14 +508,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
 
   useEffect(() => {
     if (!selectedRunId) {
-      setNodeRuns([])
-      setEmployeeRuns([])
-      setSoftwareCommandRuns([])
-      setComputerSessions([])
-      setComputerActionEvents([])
-      setArtifactValidations([])
-      setApprovalRequests([])
-      setResourceLocks([])
+      clearWorkflowRunSnapshot()
       return
     }
     let alive = true
@@ -489,14 +516,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
       try {
         const snapshot = await fetchWorkflowRunSnapshot(selectedRunId)
         if (!alive) return
-        setNodeRuns(snapshot.nodeRuns)
-        setEmployeeRuns(snapshot.employeeRuns)
-        setSoftwareCommandRuns(snapshot.softwareCommandRuns)
-        setComputerSessions(snapshot.computerSessions)
-        setComputerActionEvents(snapshot.computerActionEvents)
-        setArtifactValidations(snapshot.artifactValidations)
-        setApprovalRequests(snapshot.approvalRequests)
-        setResourceLocks(snapshot.resourceLocks)
+        setWorkflowRunSnapshot(snapshot)
       } catch (err) {
         if (alive) setError(formatError(err))
       }
@@ -505,7 +525,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
     return () => {
       alive = false
     }
-  }, [selectedRunId])
+  }, [clearWorkflowRunSnapshot, selectedRunId, setWorkflowRunSnapshot])
 
   const runAction = async (label: string, action: () => Promise<void>) => {
     setSaving(label)
@@ -525,14 +545,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
   const resetDraft = () => {
     setSelectedWorkflowId('')
     setSelectedRunId('')
-    setNodeRuns([])
-    setEmployeeRuns([])
-    setSoftwareCommandRuns([])
-    setComputerSessions([])
-    setComputerActionEvents([])
-    setArtifactValidations([])
-    setApprovalRequests([])
-    setResourceLocks([])
+    clearWorkflowRunSnapshot()
     setWorkflowPreflights([])
     setWorkflowName('智能体交付流程')
     setWorkflowDescription('由员工智能体、软件命令和人工审批组成的画布流程。')
@@ -987,14 +1000,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
       const runs = await fetchWorkflowRuns(result.workflow.id)
       setWorkflowRuns((current) => mergeRuns(current, runs))
       const snapshot = await fetchWorkflowRunSnapshot(result.workflowRun.id)
-      setNodeRuns(snapshot.nodeRuns)
-      setEmployeeRuns(snapshot.employeeRuns)
-      setSoftwareCommandRuns(snapshot.softwareCommandRuns)
-      setComputerSessions(snapshot.computerSessions)
-      setComputerActionEvents(snapshot.computerActionEvents)
-      setArtifactValidations(snapshot.artifactValidations)
-      setApprovalRequests(snapshot.approvalRequests)
-      setResourceLocks(snapshot.resourceLocks)
+      setWorkflowRunSnapshot(snapshot)
     })
 
   const runWorkflow = () =>
@@ -1006,27 +1012,13 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
       const runs = await fetchWorkflowRuns(selectedWorkflowId)
       setWorkflowRuns((current) => mergeRuns(current, runs))
       const snapshot = await fetchWorkflowRunSnapshot(workflowRun.id)
-      setNodeRuns(snapshot.nodeRuns)
-      setEmployeeRuns(snapshot.employeeRuns)
-      setSoftwareCommandRuns(snapshot.softwareCommandRuns)
-      setComputerSessions(snapshot.computerSessions)
-      setComputerActionEvents(snapshot.computerActionEvents)
-      setArtifactValidations(snapshot.artifactValidations)
-      setApprovalRequests(snapshot.approvalRequests)
-      setResourceLocks(snapshot.resourceLocks)
+      setWorkflowRunSnapshot(snapshot)
     })
 
   const refreshSelectedRunSnapshot = async () => {
     if (!selectedRunId) return
     const snapshot = await fetchWorkflowRunSnapshot(selectedRunId)
-    setNodeRuns(snapshot.nodeRuns)
-    setEmployeeRuns(snapshot.employeeRuns)
-    setSoftwareCommandRuns(snapshot.softwareCommandRuns)
-    setComputerSessions(snapshot.computerSessions)
-    setComputerActionEvents(snapshot.computerActionEvents)
-    setArtifactValidations(snapshot.artifactValidations)
-    setApprovalRequests(snapshot.approvalRequests)
-    setResourceLocks(snapshot.resourceLocks)
+    setWorkflowRunSnapshot(snapshot)
     setWorkflowRuns((current) => mergeRuns(current, [snapshot.workflowRun]))
   }
 
@@ -1536,6 +1528,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
                     ? softwareCommandById.get(node.softwareCommandId)
                     : null
                   const nodeRun = nodeRunByNodeId.get(node.id)
+                  const brainStatus = nodeRun ? nodeBrainStatusByNodeRunId.get(nodeRun.id) : null
                   const displayName = node.label || agent?.name || softwareCommand?.name || nodeTypeLabel(node.type)
                   const displayDescription =
                     agent?.role ?? softwareCommand?.description ?? nodeDescription(node)
@@ -1705,6 +1698,7 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
                       )}
                     </div>
                     <CanvasNodeProgress nodeRun={nodeRun ?? null} artifactType={artifactType} />
+                    <CanvasNodeBrainStatus brainStatus={brainStatus ?? null} />
                     <div className="mt-auto flex items-center justify-between gap-1">
                       <Badge variant="outline" className="h-4 px-1.5 text-[9px]">
                         {nodeTypeLabel(node.type)}
@@ -1919,7 +1913,12 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
               emptyLabel="选择运行记录"
             />
             <RunStatusList runs={workflowRuns.slice(0, 6)} selectedRunId={selectedRunId} />
-            <NodeRunList nodeRuns={nodeRuns} nodes={nodes} agentById={agentById} />
+            <NodeRunList
+              nodeRuns={nodeRuns}
+              nodes={nodes}
+              agentById={agentById}
+              nodeBrainStatusByNodeRunId={nodeBrainStatusByNodeRunId}
+            />
             <EmployeeRunList runs={employeeRuns} agentById={agentById} />
             <SoftwareCommandRunList runs={softwareCommandRuns} commandById={softwareCommandById} />
             <ComputerSessionList
@@ -3051,6 +3050,42 @@ function CanvasNodeProgress({
   )
 }
 
+function CanvasNodeBrainStatus({
+  brainStatus,
+}: {
+  brainStatus: WorkflowNodeBrainStatus | null
+}) {
+  if (!brainStatus || brainStatus.status === 'not_applicable') return null
+  return (
+    <div
+      data-testid="canvas-node-brain-status"
+      data-brain-status={brainStatus.status}
+      className={cn(
+        'mt-1 flex min-w-0 items-center justify-between gap-1 rounded-md border px-1.5 py-1 text-[9px]',
+        workflowNodeBrainStatusClass(brainStatus.status),
+      )}
+      title={`员工大脑：${brainStatus.label}`}
+    >
+      <span className="flex min-w-0 items-center gap-1 font-medium">
+        <Brain className="size-2.5 shrink-0" />
+        <span className="truncate">员工大脑</span>
+      </span>
+      <span className="shrink-0">{brainStatus.label}</span>
+    </div>
+  )
+}
+
+function workflowNodeBrainStatusClass(status: WorkflowNodeBrainStatus['status']): string {
+  const classes: Record<WorkflowNodeBrainStatus['status'], string> = {
+    not_applicable: 'border-border bg-muted/40 text-muted-foreground',
+    waiting_reflection: 'border-border bg-muted/40 text-muted-foreground',
+    learned: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700',
+    needs_review: 'border-amber-500/30 bg-amber-500/10 text-amber-700',
+    failure_lesson: 'border-destructive/30 bg-destructive/10 text-destructive',
+  }
+  return classes[status]
+}
+
 type CanvasNodeRunState = 'idle' | 'queued' | 'running' | 'paused' | 'complete' | 'failed'
 
 function canvasNodeRunState(nodeRun: WorkflowNodeRunRow | null): CanvasNodeRunState {
@@ -3969,10 +4004,12 @@ function NodeRunList({
   nodeRuns,
   nodes,
   agentById,
+  nodeBrainStatusByNodeRunId,
 }: {
   nodeRuns: WorkflowNodeRunRow[]
   nodes: DraftNode[]
   agentById: Map<string, AgentProfileRow>
+  nodeBrainStatusByNodeRunId: Map<string, WorkflowNodeBrainStatus>
 }) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
   if (nodeRuns.length === 0) return <EmptyLine text="选择或启动一次运行后，这里会显示节点进度" />
@@ -3981,6 +4018,7 @@ function NodeRunList({
       {nodeRuns.map((run) => {
         const node = nodeMap.get(run.nodeId)
         const agent = node?.agentProfileId ? agentById.get(node.agentProfileId) : null
+        const brainStatus = nodeBrainStatusByNodeRunId.get(run.id)
         return (
           <div key={run.id} className="rounded-md border px-2 py-1.5 text-[11px]">
             <div className="flex items-center justify-between gap-2">
@@ -3992,6 +4030,12 @@ function NodeRunList({
             <div className="mt-1 truncate text-muted-foreground">
               {run.currentStep ?? run.progressStatus}
             </div>
+            {brainStatus && brainStatus.status !== 'not_applicable' && (
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Brain className="size-3 shrink-0" />
+                <span className="truncate">员工大脑 · {brainStatus.label}</span>
+              </div>
+            )}
           </div>
         )
       })}
