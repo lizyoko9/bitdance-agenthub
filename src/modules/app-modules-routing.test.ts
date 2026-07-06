@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+import { describe, expect, it } from 'vitest'
 
 import {
   appModules,
@@ -53,5 +54,19 @@ describe('app module routing', () => {
     expect(primaryIds).not.toContain('langflow-native')
     expect(primaryIds).not.toContain('infinite-canvas')
     expect(appModules.some((module) => String(module.id) === 'agenthub-lifecycle')).toBe(false)
+  })
+
+  it('keeps primary navigation labels readable for Chinese users', () => {
+    const primaryLabels = primaryAppModules.map((module) => module.label)
+
+    expect(primaryLabels).toEqual([
+      '工作台',
+      '对话',
+      '智能体',
+      '编排画布',
+      '技能管理',
+      '模型管理',
+      '工具连接',
+    ])
   })
 })

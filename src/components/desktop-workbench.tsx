@@ -61,6 +61,7 @@ import {
   type EmployeeRunSnapshot,
   type RunActivitySummary,
 } from '@/lib/api'
+import { inferBusinessWorkbenchProfile } from '@/lib/business-workbench-model'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 
@@ -246,7 +247,7 @@ function buildBusinessWorkbench(args: {
   const failedToday = totals?.failedToday ?? 0
   const completedToday = totals?.completedToday ?? 0
   const artifactCount = totals?.artifacts ?? 0
-  const business = inferBusinessKind(corpus)
+  const business = inferBusinessWorkbenchProfile(corpus)
 
   const nextAction =
     args.readyModelCount === 0 && args.modelCount === 0
@@ -348,42 +349,6 @@ function buildBusinessWorkbench(args: {
         icon: <FileCheck2 className="size-4" />,
       },
     ],
-  }
-}
-
-function inferBusinessKind(corpus: string) {
-  if (/剪映|视频|capcut|素材|脚本|剪辑|抖音|短视频|movie|film/.test(corpus)) {
-    return {
-      name: '内容生产工作台',
-      signal: '视频、素材、剪辑和交付结果优先',
-      focus: '先看素材、草稿、导出结果和卡点',
-    }
-  }
-  if (/微信|客户|销售|私域|客服|飞书|notion|消息|群|联系人/.test(corpus)) {
-    return {
-      name: '客户沟通工作台',
-      signal: '客户消息、跟进任务和人工确认优先',
-      focus: '先看沟通状态、待回复对象和交付证明',
-    }
-  }
-  if (/代码|项目|修复|bug|github|codex|claude|opencode|仓库|测试|部署|前端/.test(corpus)) {
-    return {
-      name: '项目研发工作台',
-      signal: '代码任务、测试结果和部署产物优先',
-      focus: '先看失败原因、修改进度、测试和可预览结果',
-    }
-  }
-  if (/数据|表格|报表|分析|指标|运营|订单|财务/.test(corpus)) {
-    return {
-      name: '数据运营工作台',
-      signal: '指标、表格、报告和异常提醒优先',
-      focus: '先看关键数字、异常项和下一步动作',
-    }
-  }
-  return {
-    name: '综合业务工作台',
-    signal: '根据会话、任务和运行记录自动决定展示内容',
-    focus: '先看任务状态、关键结果和下一步',
   }
 }
 
