@@ -48,6 +48,7 @@ import {
   fetchAgents,
   fetchAgentEnvironmentPreview,
   fetchAgentProfiles,
+  fetchAppModuleManagerView,
   fetchCliProfiles,
   fetchConversations,
   fetchEmployeeRunSnapshot,
@@ -61,6 +62,7 @@ import {
   type EmployeeRunSnapshot,
   type RunActivitySummary,
 } from '@/lib/api'
+import type { AgentHubModuleManagerView } from '@/lib/agenthub-module-manager'
 import { inferBusinessWorkbenchProfile } from '@/lib/business-workbench-model'
 import {
   buildEmployeeRunBrainDigest,
@@ -371,6 +373,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
   const [skills, setSkills] = useState<SkillRow[]>([])
   const [conversations, setConversations] = useState<ConversationWithMeta[]>([])
   const [runActivity, setRunActivity] = useState<RunActivitySummary | null>(null)
+  const [moduleManager, setModuleManager] = useState<AgentHubModuleManagerView | null>(null)
   const [goal, setGoal] = useState('')
   const [workMode, setWorkMode] = useState<'team' | 'model'>('team')
   const [loading, setLoading] = useState(true)
@@ -540,6 +543,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
         fetchSoftwareProfiles().catch(() => []),
         fetchSkillsCenterData().catch(() => ({ skills: [] })),
       ])
+      const moduleManagerView = await fetchAppModuleManagerView().catch(() => null)
       setAgents(agentList)
       setEmployeeProfiles(employeeProfileList)
       setModels(modelList)
@@ -549,6 +553,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
       setSkills(skillsData.skills)
       setConversations(conversationList)
       setRunActivity(activitySummary)
+      setModuleManager(moduleManagerView)
       setNotice(null)
     } catch (err) {
       setNotice(err instanceof Error ? err.message : '工作台数据加载失败')
@@ -683,6 +688,12 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
 
         <ReadinessChecklist
           items={readinessItems}
+          onNavigate={onModeChange}
+        />
+
+        <ModuleStorePreview
+          moduleManager={moduleManager}
+          loading={loading}
           onNavigate={onModeChange}
         />
 
@@ -1748,6 +1759,108 @@ function ReadinessChecklist({
       </CardContent>
     </Card>
   )
+}
+
+function ModuleStorePreview({
+  moduleManager,
+  loading,
+  onNavigate,
+}: {
+  moduleManager: AgentHubModuleManagerView | null
+  loading: boolean
+  onNavigate: (mode: SidebarMode) => void
+}) {
+  const activeModules = moduleManager?.activeModules.slice(0, 5) ?? []
+  const availableModules = moduleManager?.availableModules.slice(0, 4) ?? []
+
+  return (
+    <section data-testid="workbench-module-store-preview" className="rounded-lg border bg-muted/20 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <LayersIcon />
+            <span>模块积木</span>
+          </div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            系统功能按积木管理：默认只显示常用模块，需要更多能力时再加入。
+          </div>
+        </div>
+        <Badge variant="outline">
+          {moduleManager ? `${moduleManager.activeModules.length} 已启用` : loading ? '读取中' : '未加载'}
+        </Badge>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <ModuleBlockColumn
+          title="已启用模块"
+          emptyLabel={loading ? '正在读取模块...' : '暂无启用模块'}
+          modules={activeModules}
+          onNavigate={onNavigate}
+        />
+        <ModuleBlockColumn
+          title="可加入模块"
+          emptyLabel={loading ? '正在读取模块...' : '暂无可加入模块'}
+          modules={availableModules}
+          onNavigate={onNavigate}
+        />
+      </div>
+    </section>
+  )
+}
+
+function ModuleBlockColumn({
+  title,
+  emptyLabel,
+  modules,
+  onNavigate,
+}: {
+  title: string
+  emptyLabel: string
+  modules: AgentHubModuleManagerView['activeModules']
+  onNavigate: (mode: SidebarMode) => void
+}) {
+  return (
+    <div className="min-w-0 rounded-md bg-background p-2.5">
+      <div className="mb-2 text-xs font-semibold">{title}</div>
+      {modules.length ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {modules.map((module) => (
+            <button
+              key={module.id}
+              type="button"
+              onClick={() => onNavigate(module.id as SidebarMode)}
+              className="min-w-0 rounded-md border px-2.5 py-2 text-left transition hover:border-primary/60 hover:bg-accent"
+            >
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate text-xs font-semibold">{module.label}</span>
+                <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[10px]', moduleStatusToneClass(module.statusTone))}>
+                  {module.statusLabel}
+                </span>
+              </div>
+              <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+                {module.dependencyHint}
+              </div>
+              <div className="mt-1 text-[10px] font-medium text-primary">{module.actionLabel}</div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+          {emptyLabel}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LayersIcon() {
+  return <FolderKanban className="size-4 text-primary" />
+}
+
+function moduleStatusToneClass(tone: AgentHubModuleManagerView['activeModules'][number]['statusTone']) {
+  if (tone === 'ready') return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+  if (tone === 'warning') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  return 'bg-muted text-muted-foreground'
 }
 
 function businessToneClass(tone: BusinessMetric['tone']) {
