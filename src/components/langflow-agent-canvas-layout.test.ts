@@ -47,6 +47,24 @@ describe('Langflow agent canvas layout', () => {
     expect(source).not.toContain('absolute bottom-3 left-[18.5rem]')
   })
 
+  it('shows a clickable run timeline after a local dry run', () => {
+    const source = readCanvasSource()
+    const executionPanelSource = source.slice(
+      source.indexOf('function ExecutionPlanPanel'),
+      source.indexOf('function RunResultSummary'),
+    )
+
+    expect(source).toContain('RunTimelinePanel run={lastRun} onSelectNode={onSelectNode}')
+    expect(source).toContain('function RunTimelinePanel')
+    expect(source).toContain('data-testid="run-timeline-panel"')
+    expect(source).toContain('data-testid="run-timeline-step"')
+    expect(source).toContain('data-run-step-stage={step.stage}')
+    expect(source).toContain('onClick={() => onSelectNode(step.nodeId)}')
+    expect(executionPanelSource.indexOf('<RunResultSummary run={lastRun} />')).toBeLessThan(
+      executionPanelSource.indexOf('<RunTimelinePanel run={lastRun} onSelectNode={onSelectNode} />'),
+    )
+  })
+
   it('shows preflight problems in the right inspector instead of overlaying the canvas', () => {
     const source = readCanvasSource()
     const flowSurfaceSource = source.slice(

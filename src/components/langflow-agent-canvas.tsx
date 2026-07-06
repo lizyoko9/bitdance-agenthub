@@ -3258,6 +3258,7 @@ function ExecutionPlanPanel({
         <Badge variant="outline">{steps.length} 个节点</Badge>
       </div>
       <RunResultSummary run={lastRun} />
+      <RunTimelinePanel run={lastRun} onSelectNode={onSelectNode} />
       <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
         {steps.map((step) => (
           <button
@@ -3274,6 +3275,52 @@ function ExecutionPlanPanel({
             </div>
             <ContractList title="收到" contracts={step.incomingContracts} emptyText="起点节点，等待用户目标或上游触发。" />
             <ContractList title="交出" contracts={step.outgoingContracts} emptyText="终点节点，负责沉淀最终产物。" />
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function RunTimelinePanel({
+  run,
+  onSelectNode,
+}: {
+  run: CanvasRunRecord | null
+  onSelectNode: (nodeId: string) => void
+}) {
+  if (!run) return null
+
+  return (
+    <section
+      className="mb-3 rounded-lg border bg-primary/5 p-2"
+      data-testid="run-timeline-panel"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold">运行时间线</div>
+        <Badge variant="outline" className="text-[10px]">
+          {run.steps.length} 步
+        </Badge>
+      </div>
+      <div className="space-y-1.5">
+        {run.steps.map((step) => (
+          <button
+            key={`${run.id}-${step.nodeId}`}
+            type="button"
+            className="flex w-full min-w-0 items-start gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-xs transition hover:border-primary hover:bg-primary/5"
+            data-testid="run-timeline-step"
+            data-run-step-stage={step.stage}
+            onClick={() => onSelectNode(step.nodeId)}
+          >
+            <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+              {step.stage}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-semibold">{step.title}</span>
+              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                收到 {step.incomingContracts.length} 项 · 交出 {step.outgoingContracts.length} 项
+              </span>
+            </span>
           </button>
         ))}
       </div>
