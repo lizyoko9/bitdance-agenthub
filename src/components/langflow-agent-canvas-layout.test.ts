@@ -41,7 +41,7 @@ describe('Langflow agent canvas layout', () => {
     const source = readCanvasSource()
 
     expect(source).toContain('data-testid="canvas-right-inspector"')
-    expect(source).toContain('<ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />')
+    expect(source).toContain('<ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} onSelectNode={selectNodeById} />')
     expect(source).toContain('<HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} onSelectEdge={selectEdgeById} />')
     expect(source).not.toContain('absolute left-[18.5rem] top-3')
     expect(source).not.toContain('absolute bottom-3 left-[18.5rem]')
@@ -774,6 +774,20 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('incomingContracts')
     expect(source).toContain('outgoingContracts')
     expect(source).toContain('data-testid="execution-plan-panel"')
+  })
+
+  it('lets users click an execution plan step to inspect the matching canvas node', () => {
+    const source = readCanvasSource()
+    const executionPanelSource = source.slice(
+      source.indexOf('function ExecutionPlanPanel'),
+      source.indexOf('function RunResultSummary'),
+    )
+
+    expect(source).toContain('<ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} onSelectNode={selectNodeById} />')
+    expect(executionPanelSource).toContain('onSelectNode')
+    expect(executionPanelSource).toContain('data-testid="execution-plan-step"')
+    expect(executionPanelSource).toContain('onClick={() => onSelectNode(step.nodeId)}')
+    expect(executionPanelSource).toContain('aria-label={`查看${step.title}节点配置`}')
   })
 
   it('shows the latest local dry-run result directly on the canvas', () => {

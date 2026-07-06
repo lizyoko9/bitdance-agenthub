@@ -1639,7 +1639,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                     onStartOutputConnection={startOutputConnection}
                   />
                 )}
-                <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
+                <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} onSelectNode={selectNodeById} />
                 <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} onSelectEdge={selectEdgeById} />
                 <CustomerDeliveryPreviewPanel nodes={nodes} edges={edges} />
               </>
@@ -2805,10 +2805,12 @@ function ExecutionPlanPanel({
   steps,
   visible,
   lastRun,
+  onSelectNode,
 }: {
   steps: AgentFlowRunPlanStep[]
   visible: boolean
   lastRun: CanvasRunRecord | null
+  onSelectNode: (nodeId: string) => void
 }) {
   if (!visible) return null
 
@@ -2827,14 +2829,21 @@ function ExecutionPlanPanel({
       <RunResultSummary run={lastRun} />
       <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
         {steps.map((step) => (
-          <div key={step.nodeId} className="rounded-lg border bg-background p-2 text-xs">
+          <button
+            key={step.nodeId}
+            type="button"
+            className="w-full rounded-lg border bg-background p-2 text-left text-xs transition hover:border-primary hover:bg-primary/5"
+            data-testid="execution-plan-step"
+            aria-label={`查看${step.title}节点配置`}
+            onClick={() => onSelectNode(step.nodeId)}
+          >
             <div className="flex items-center justify-between gap-2">
               <div className="truncate font-semibold">{step.title}</div>
               <Badge variant="outline">第 {step.stage} 步</Badge>
             </div>
             <ContractList title="收到" contracts={step.incomingContracts} emptyText="起点节点，等待用户目标或上游触发。" />
             <ContractList title="交出" contracts={step.outgoingContracts} emptyText="终点节点，负责沉淀最终产物。" />
-          </div>
+          </button>
         ))}
       </div>
     </section>
