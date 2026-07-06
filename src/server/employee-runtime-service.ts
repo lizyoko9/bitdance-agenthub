@@ -54,7 +54,7 @@ import {
 } from '@/server/computer-session-manager'
 import {
   listLearningEventsForRun,
-  proposeLearningEventFromReflection,
+  proposeLearningEventsFromRuntimeLearning,
 } from '@/server/learning-service'
 import { revokeDynamicPermissionsForCompletedRun } from '@/server/dynamic-permission-service'
 import { assertCanStartNewAgentTask } from '@/server/maintenance-service'
@@ -388,14 +388,16 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
     agent,
     retrievedMemories: context.retrievedMemories,
   })
-  const learningProposal = await proposeLearningEventFromReflection({
+  const learningProposal = await proposeLearningEventsFromRuntimeLearning({
     reflection: learning.reflection,
     agent,
+    memoryEvolution: learning.memoryEvolution,
   })
   await recordEmployeeEvent(runId, 'phase', 'reflect_and_learn', 'Runtime reflection and memory write completed.', {
     reflectionId: learning.reflection?.id ?? null,
     memoryItemId: learning.memoryItem?.id ?? null,
     learningEventId: learningProposal.learningEvent?.id ?? null,
+    learningEventIds: learningProposal.learningEvents.map((event) => event.id),
     memoryEvolution: learning.memoryEvolution
       ? {
           updateCount: learning.memoryEvolution.memoryUpdates.length,

@@ -9,6 +9,11 @@ import type {
   PlaybookVersionRow,
   RunReflectionRow,
 } from '@/db/schema'
+import type {
+  AgentMemoryApprovalRequest,
+  AgentMemoryBlock,
+  AgentMemoryEvolutionPlan,
+} from '@/lib/agent-psm-memory-core'
 import {
   newLearningEventId,
   newPlaybookId,
@@ -17,6 +22,10 @@ import {
 
 export interface RuntimeLearningProposal {
   learningEvent: LearningEventRow | null
+}
+
+export interface RuntimeLearningProposals extends RuntimeLearningProposal {
+  learningEvents: LearningEventRow[]
 }
 
 export async function proposeLearningEventFromReflection(args: {
@@ -54,6 +63,50 @@ export async function proposeLearningEventFromReflection(args: {
 
   await db.insert(schema.learningEvents).values(row)
   return { learningEvent: row }
+}
+
+export async function proposeLearningEventsFromRuntimeLearning(args: {
+  reflection: RunReflectionRow | null
+  agent: AgentProfileRow
+  memoryEvolution?: AgentMemoryEvolutionPlan | null
+}): Promise<RuntimeLearningProposals> {
+  if (!args.reflection) return { learningEvent: null, learningEvents: [] }
+
+  const events: LearningEventRow[] = []
+  const playbookDraft = args.memoryEvolution?.playbookDraft ?? null
+
+  if (playbookDraft) {
+    events.push(await createPsmPlaybookLearningEvent({
+      reflection: args.reflection,
+      agent: args.agent,
+      playbookDraft,
+      approvalRequests: findApprovalRequests(args.memoryEvolution, playbookDraft.id),
+    }))
+  }
+
+  for (const request of args.memoryEvolution?.approvalRequests ?? []) {
+    if (playbookDraft && request.kind === 'activate_playbook' && request.targetId === playbookDraft.id) {
+      continue
+    }
+    events.push(await createPsmApprovalLearningEvent({
+      reflection: args.reflection,
+      agent: args.agent,
+      approvalRequest: request,
+    }))
+  }
+
+  if (events.length > 0) {
+    return { learningEvent: events[0], learningEvents: events }
+  }
+
+  const fallback = await proposeLearningEventFromReflection({
+    reflection: args.reflection,
+    agent: args.agent,
+  })
+  return {
+    learningEvent: fallback.learningEvent,
+    learningEvents: fallback.learningEvent ? [fallback.learningEvent] : [],
+  }
 }
 
 export async function listLearningEvents(status?: LearningEventRow['status']): Promise<LearningEventRow[]> {
@@ -143,6 +196,103 @@ export async function rejectLearningEvent(
   return getRequiredLearningEvent(learningEventId)
 }
 
+async function createPsmPlaybookLearningEvent(args: {
+  reflection: RunReflectionRow
+  agent: AgentProfileRow
+  playbookDraft: AgentMemoryBlock
+  approvalRequests: AgentMemoryApprovalRequest[]
+}): Promise<LearningEventRow> {
+  const now = Date.now()
+  const summary =
+    args.approvalRequests[0]?.reason ??
+    firstMeaningfulLine(args.playbookDraft.content) ??
+    `Review work manual draft from run ${args.reflection.runId}.`
+  const proposedPlaybook: JsonObject = {
+    source: 'agent_psm_evolution',
+    title: args.playbookDraft.title,
+    description: `这个 Agent 从运行 ${args.reflection.runId} 里沉淀了工作手册草稿，审核后才能成为长期经验。`,
+    steps: parsePlaybookSteps(args.playbookDraft, args.reflection),
+    sourceRunId: args.reflection.runId,
+    memoryBlockId: args.playbookDraft.id,
+    memoryScope: args.playbookDraft.scope,
+    memoryType: args.playbookDraft.type,
+    reviewStatus: args.playbookDraft.reviewStatus,
+    approvalRequests: args.approvalRequests as unknown as JsonObject[],
+    whatWorked: args.reflection.whatWorked,
+    futureWarnings: args.reflection.futureWarnings,
+  }
+  return insertLearningEvent({
+    runId: args.reflection.runId,
+    agentProfileId: args.agent.id,
+    reflectionId: args.reflection.id,
+    type: 'playbook_proposal',
+    title: args.playbookDraft.title,
+    summary,
+    proposedPlaybook,
+    createdAt: now,
+  })
+}
+
+async function createPsmApprovalLearningEvent(args: {
+  reflection: RunReflectionRow
+  agent: AgentProfileRow
+  approvalRequest: AgentMemoryApprovalRequest
+}): Promise<LearningEventRow> {
+  const proposedPlaybook: JsonObject = {
+    source: 'agent_psm_evolution',
+    kind: args.approvalRequest.kind,
+    targetId: args.approvalRequest.targetId,
+    reason: args.approvalRequest.reason,
+    sourceRunId: args.reflection.runId,
+    privateFirst: true,
+    reviewBeforeSharing: true,
+    newKnowledge: args.reflection.newKnowledge,
+    futureWarnings: args.reflection.futureWarnings,
+  }
+  return insertLearningEvent({
+    runId: args.reflection.runId,
+    agentProfileId: args.agent.id,
+    reflectionId: args.reflection.id,
+    type: args.approvalRequest.kind === 'share_memory'
+      ? 'memory_share_review'
+      : 'psm_approval_review',
+    title: args.approvalRequest.kind === 'share_memory'
+      ? 'Agent 记忆共享审核'
+      : 'Agent 学习审核',
+    summary: args.approvalRequest.reason,
+    proposedPlaybook,
+    createdAt: Date.now(),
+  })
+}
+
+async function insertLearningEvent(args: {
+  runId: string
+  agentProfileId: string
+  reflectionId: string
+  type: string
+  title: string
+  summary: string
+  proposedPlaybook: JsonObject
+  createdAt: number
+}): Promise<LearningEventRow> {
+  const row = {
+    id: newLearningEventId(),
+    runId: args.runId,
+    agentProfileId: args.agentProfileId,
+    reflectionId: args.reflectionId,
+    type: args.type,
+    title: args.title,
+    summary: args.summary,
+    proposedPlaybook: args.proposedPlaybook,
+    status: 'pending_review' as const,
+    reviewerNote: null,
+    createdAt: args.createdAt,
+    reviewedAt: null,
+  }
+  await db.insert(schema.learningEvents).values(row)
+  return row
+}
+
 export async function listPlaybooks(agentProfileId?: string): Promise<PlaybookRow[]> {
   return db.query.playbooks.findMany({
     where: agentProfileId ? eq(schema.playbooks.agentProfileId, agentProfileId) : undefined,
@@ -184,4 +334,26 @@ function getString(obj: JsonObject, key: string): string | null {
 function getStringArray(obj: JsonObject, key: string): string[] {
   const value = obj[key]
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function findApprovalRequests(
+  memoryEvolution: AgentMemoryEvolutionPlan | null | undefined,
+  targetId: string,
+): AgentMemoryApprovalRequest[] {
+  return (memoryEvolution?.approvalRequests ?? []).filter((request) => request.targetId === targetId)
+}
+
+function parsePlaybookSteps(playbookDraft: AgentMemoryBlock, reflection: RunReflectionRow): string[] {
+  const contentSteps = playbookDraft.content
+    .split(/\r?\n/u)
+    .map((line) => line.replace(/^\s*\d+[.)]\s*/u, '').trim())
+    .filter(Boolean)
+  return contentSteps.length > 0 ? contentSteps : reflection.reusableProcedure
+}
+
+function firstMeaningfulLine(value: string): string | null {
+  return value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find(Boolean) ?? null
 }
