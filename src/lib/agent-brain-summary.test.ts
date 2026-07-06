@@ -85,6 +85,20 @@ function report(overrides: Partial<AgentBrainSummaryReport> = {}): AgentBrainSum
         },
       ],
     },
+    learningTrace: [
+      {
+        runId: 'run_1',
+        reflectionId: 'reflection_1',
+        createdAt: 3,
+        outcome: 'failed',
+        whatWorked: ['复用了剪映导出流程'],
+        whatFailed: ['项目路径不存在，导出失败'],
+        memoryTitles: ['失败教训：项目路径不存在'],
+        pendingLearningTitles: ['剪映失败教训共享审核'],
+        approvedLearningTitles: [],
+        playbookTitles: [],
+      },
+    ],
     governance: {
       needsHumanReview: true,
       sensitiveMemoryTitles: ['客户账号偏好'],
@@ -216,6 +230,20 @@ describe('agent brain summary', () => {
       },
     ])
     expect(detail.playbooks).toEqual(['短视频导出 SOP'])
+    expect(detail.learningTrace).toEqual([
+      {
+        title: '失败归因：项目路径不存在，导出失败',
+        badge: '失败复盘',
+        tone: 'warning',
+        detail: '运行 run_1 · 已写入 1 条记忆 · 1 条待审核',
+        items: [
+          '做对了：复用了剪映导出流程',
+          '失败原因：项目路径不存在，导出失败',
+          '写入记忆：失败教训：项目路径不存在',
+          '待审核：剪映失败教训共享审核',
+        ],
+      },
+    ])
     expect(detail.recentContext).toEqual([
       '剪映导出流程 · software · 命中：剪映、导出',
       '客户偏好 1080p MP4 · customer · 命中：客户、MP4',

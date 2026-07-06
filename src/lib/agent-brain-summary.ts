@@ -51,6 +51,18 @@ export interface AgentBrainSummaryReport {
       updatedAt: number
     }>
   }
+  learningTrace?: Array<{
+    runId: string
+    reflectionId?: string | null
+    createdAt: number
+    outcome: 'succeeded' | 'failed' | 'mixed'
+    whatWorked: string[]
+    whatFailed: string[]
+    memoryTitles: string[]
+    pendingLearningTitles: string[]
+    approvedLearningTitles: string[]
+    playbookTitles: string[]
+  }>
   governance: {
     needsHumanReview: boolean
     sensitiveMemoryTitles?: string[]
@@ -95,6 +107,14 @@ export interface AgentBrainReviewItem {
   detail: string
 }
 
+export interface AgentBrainLearningTraceItem {
+  title: string
+  badge: string
+  tone: 'ready' | 'warning' | 'muted'
+  detail: string
+  items: string[]
+}
+
 export interface AgentBrainDetailView {
   title: string
   statusLabel: string
@@ -104,6 +124,7 @@ export interface AgentBrainDetailView {
   recentContext: string[]
   reviewQueue: string[]
   reviewItems: AgentBrainReviewItem[]
+  learningTrace: AgentBrainLearningTraceItem[]
   playbooks: string[]
   recommendations: string[]
 }
@@ -252,6 +273,7 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
     }),
     reviewQueue,
     reviewItems,
+    learningTrace: buildLearningTrace(report),
     playbooks: (report.learningSummary.latestPlaybooks ?? [])
       .filter((playbook) => playbook.status === 'active')
       .map((playbook) => playbook.title.trim())
@@ -259,6 +281,40 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
       .slice(0, 5),
     recommendations: report.recommendations.map((item) => item.trim()).filter(Boolean).slice(0, 5),
   }
+}
+
+function buildLearningTrace(report: AgentBrainSummaryReport): AgentBrainLearningTraceItem[] {
+  return (report.learningTrace ?? [])
+    .slice(0, 4)
+    .map((trace) => {
+      const failed = trace.whatFailed.map((item) => item.trim()).filter(Boolean)
+      const worked = trace.whatWorked.map((item) => item.trim()).filter(Boolean)
+      const memoryTitles = trace.memoryTitles.map((item) => item.trim()).filter(Boolean)
+      const pendingTitles = trace.pendingLearningTitles.map((item) => item.trim()).filter(Boolean)
+      const approvedTitles = trace.approvedLearningTitles.map((item) => item.trim()).filter(Boolean)
+      const playbookTitles = trace.playbookTitles.map((item) => item.trim()).filter(Boolean)
+      const titleSeed = failed[0] ?? worked[0] ?? memoryTitles[0] ?? trace.runId
+      const reviewCount = pendingTitles.length
+      const items = [
+        ...worked.map((item) => `做对了：${item}`),
+        ...failed.map((item) => `失败原因：${item}`),
+        ...memoryTitles.map((item) => `写入记忆：${item}`),
+        ...pendingTitles.map((item) => `待审核：${item}`),
+        ...approvedTitles.map((item) => `已确认：${item}`),
+        ...playbookTitles.map((item) => `工作手册：${item}`),
+      ]
+      const tone: AgentBrainLearningTraceItem['tone'] =
+        trace.outcome === 'failed' ? 'warning' : trace.outcome === 'succeeded' ? 'ready' : 'muted'
+
+      return {
+        title: failed.length ? `失败归因：${titleSeed}` : `经验复盘：${titleSeed}`,
+        badge: trace.outcome === 'failed' ? '失败复盘' : trace.outcome === 'succeeded' ? '成功经验' : '复盘记录',
+        tone,
+        detail: `运行 ${trace.runId} · 已写入 ${memoryTitles.length} 条记忆 · ${reviewCount} 条待审核`,
+        items: items.slice(0, 6),
+      }
+    })
+    .filter((trace) => trace.items.length > 0)
 }
 
 function buildReviewItems(report: AgentBrainSummaryReport): AgentBrainReviewItem[] {

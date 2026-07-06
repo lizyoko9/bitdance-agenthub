@@ -593,6 +593,8 @@ function AgentBrainDetailPanel({
         ))}
       </div>
 
+      <LearningTraceList items={detail.learningTrace} />
+
       <div className="grid gap-2 lg:grid-cols-2">
         <DetailList title="最近会注入的上下文" emptyLabel="暂无可召回经验" items={detail.recentContext} />
         <ReviewItemList
@@ -606,6 +608,48 @@ function AgentBrainDetailPanel({
       </div>
     </div>
   )
+}
+
+function LearningTraceList({ items }: { items: AgentBrainDetailView['learningTrace'] }) {
+  return (
+    <div className="rounded-md border bg-background/60 px-3 py-2">
+      <div className="text-xs font-medium">最近学习轨迹</div>
+      <div className="mt-2 space-y-2">
+        {items.length ? (
+          items.slice(0, 3).map((item) => (
+            <div key={`${item.badge}:${item.title}`} className="rounded-md border bg-muted/15 px-2.5 py-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+                  {item.title}
+                </span>
+                <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[10px]', traceToneClass(item.tone))}>
+                  {item.badge}
+                </span>
+              </div>
+              <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{item.detail}</div>
+              <div className="mt-2 space-y-1">
+                {item.items.slice(0, 4).map((line) => (
+                  <div key={line} className="truncate text-[11px] text-muted-foreground">
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="text-[11px] text-muted-foreground">
+            还没有运行复盘。这个员工完成任务后，会在这里显示它学到了什么、哪里失败过、哪些经验需要确认。
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function traceToneClass(tone: AgentBrainDetailView['learningTrace'][number]['tone']) {
+  if (tone === 'ready') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+  if (tone === 'warning') return 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+  return 'bg-muted text-muted-foreground'
 }
 
 function MiniStat({ item }: { item: { label: string; value: string; detail: string } }) {

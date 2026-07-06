@@ -11,6 +11,10 @@ import type {
   PlaybookRow,
   RunReflectionRow,
 } from '@/db/schema'
+import {
+  buildAgentMemoryLearningTrace,
+  type AgentMemoryLearningTraceItem,
+} from '@/lib/agent-memory-learning-trace'
 import { retrieveRelevantMemories } from '@/server/agent-memory-service'
 
 export type AgentMemoryLearningReadiness = 'ready' | 'needs_review' | 'empty' | 'disabled'
@@ -72,6 +76,7 @@ export interface AgentMemoryLearningReport {
     playbookVersionCount: number
     latestPlaybooks: Array<Pick<PlaybookRow, 'id' | 'title' | 'status' | 'updatedAt'>>
   }
+  learningTrace: AgentMemoryLearningTraceItem[]
   governance: {
     needsHumanReview: boolean
     sensitiveMemoryTitles: string[]
@@ -160,6 +165,32 @@ export async function getAgentMemoryLearningReport(
     playbooks,
     playbookVersionCount,
   })
+  const learningTrace = buildAgentMemoryLearningTrace({
+    reflections: reflections.map((reflection) => ({
+      id: reflection.id,
+      runId: reflection.runId,
+      createdAt: reflection.createdAt,
+      whatWorked: reflection.whatWorked,
+      whatFailed: reflection.whatFailed,
+    })),
+    memories: ownedMemories.map((memory) => ({
+      sourceRunId: memory.sourceRunId,
+      title: memory.title,
+    })),
+    learningEvents: learningEvents.map((event) => ({
+      id: event.id,
+      runId: event.runId,
+      reflectionId: event.reflectionId,
+      title: event.title,
+      status: event.status,
+      createdAt: event.createdAt,
+    })),
+    playbooks: playbooks.map((playbook) => ({
+      title: playbook.title,
+      sourceLearningEventId: playbook.sourceLearningEventId,
+    })),
+    limit: 5,
+  })
   const governance = buildGovernance({
     memories: ownedMemories,
     learningEvents,
@@ -203,6 +234,7 @@ export async function getAgentMemoryLearningReport(
     retrieval,
     reflectionSummary,
     learningSummary,
+    learningTrace,
     governance,
     recommendations,
     generatedAt: Date.now(),
