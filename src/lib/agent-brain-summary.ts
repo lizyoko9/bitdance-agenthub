@@ -115,12 +115,20 @@ export interface AgentBrainLearningTraceItem {
   items: string[]
 }
 
+export interface AgentBrainLoopItem {
+  label: string
+  value: string
+  state: 'ready' | 'warning' | 'muted'
+  detail: string
+}
+
 export interface AgentBrainDetailView {
   title: string
   statusLabel: string
   statusTone: AgentBrainSummaryView['statusTone']
   memoryBoundaries: AgentBrainDetailStat[]
   recallFlow: AgentBrainDetailStat[]
+  brainLoop: AgentBrainLoopItem[]
   recentContext: string[]
   reviewQueue: string[]
   reviewItems: AgentBrainReviewItem[]
@@ -266,6 +274,11 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
         detail: '只把相关记忆放进这个员工的工作上下文',
       },
     ],
+    brainLoop: buildBrainLoop(report, {
+      memoryEnabled,
+      contextTypeCount,
+      needsReview,
+    }),
     recentContext: report.retrieval.candidates.slice(0, 5).map((candidate) => {
       const matched = candidate.matchedTerms?.filter(Boolean).join('、')
       const suffix = matched ? `命中：${matched}` : `评分：${roundNumber(candidate.score)}`
@@ -281,6 +294,64 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
       .slice(0, 5),
     recommendations: report.recommendations.map((item) => item.trim()).filter(Boolean).slice(0, 5),
   }
+}
+
+function buildBrainLoop(
+  report: AgentBrainSummaryReport,
+  options: {
+    memoryEnabled: boolean
+    contextTypeCount: number
+    needsReview: boolean
+  },
+): AgentBrainLoopItem[] {
+  const reflectionCount = report.reflectionSummary?.total ?? (report.learningTrace ?? []).length
+  const pendingReviewCount = report.learningSummary.pendingReview
+  const hasFailureSignals =
+    report.memorySummary.mistakeCount > 0 ||
+    report.governance.mistakeTitles.length > 0 ||
+    (report.learningTrace ?? []).some((trace) => trace.whatFailed.length > 0)
+
+  return [
+    {
+      label: '提取线索',
+      value: report.retrieval.sampleGoal?.trim() || '按任务目标提取',
+      state: options.memoryEnabled ? 'ready' : 'muted',
+      detail: '从目标里识别客户、工具、交付物和风险点。',
+    },
+    {
+      label: '召回经验',
+      value: options.memoryEnabled ? `${report.retrieval.candidates.length} 条` : '未启用',
+      state: options.memoryEnabled ? 'ready' : 'muted',
+      detail: options.memoryEnabled
+        ? '只取这个 Agent 当前最相关的私有经验、项目知识和工具经验。'
+        : '记忆已关闭，这个 Agent 不会在运行前召回长期经验。',
+    },
+    {
+      label: '编译上下文',
+      value: options.memoryEnabled ? `${options.contextTypeCount} 类` : '未启用',
+      state: options.memoryEnabled ? 'ready' : 'muted',
+      detail: options.memoryEnabled
+        ? '把记忆压成可执行上下文，避免把历史聊天整段塞给模型。'
+        : '没有可注入的长期经验，只使用当前任务上下文。',
+    },
+    {
+      label: '执行验证',
+      value: reflectionCount > 0 ? `${reflectionCount} 次复盘` : '等待运行',
+      state: hasFailureSignals || options.needsReview ? 'warning' : reflectionCount > 0 ? 'ready' : 'muted',
+      detail: '运行后检查产物、失败原因和可复用步骤。',
+    },
+    {
+      label: '沉淀经验',
+      value:
+        pendingReviewCount > 0
+          ? `${pendingReviewCount} 条待确认`
+          : report.learningSummary.activePlaybooks > 0
+            ? `${report.learningSummary.activePlaybooks} 本手册`
+            : '等待沉淀',
+      state: pendingReviewCount > 0 || options.needsReview ? 'warning' : report.learningSummary.activePlaybooks > 0 ? 'ready' : 'muted',
+      detail: '失败教训先留在这个 Agent 内，重要经验确认后才变成工作手册。',
+    },
+  ]
 }
 
 function buildLearningTrace(report: AgentBrainSummaryReport): AgentBrainLearningTraceItem[] {

@@ -200,6 +200,38 @@ describe('agent brain summary', () => {
         detail: '只把相关记忆放进这个员工的工作上下文',
       },
     ])
+    expect(detail.brainLoop).toEqual([
+      {
+        label: '提取线索',
+        value: '剪映导出视频',
+        state: 'ready',
+        detail: '从目标里识别客户、工具、交付物和风险点。',
+      },
+      {
+        label: '召回经验',
+        value: '2 条',
+        state: 'ready',
+        detail: '只取这个 Agent 当前最相关的私有经验、项目知识和工具经验。',
+      },
+      {
+        label: '编译上下文',
+        value: '4 类',
+        state: 'ready',
+        detail: '把记忆压成可执行上下文，避免把历史聊天整段塞给模型。',
+      },
+      {
+        label: '执行验证',
+        value: '3 次复盘',
+        state: 'warning',
+        detail: '运行后检查产物、失败原因和可复用步骤。',
+      },
+      {
+        label: '沉淀经验',
+        value: '1 条待确认',
+        state: 'warning',
+        detail: '失败教训先留在这个 Agent 内，重要经验确认后才变成工作手册。',
+      },
+    ])
     expect(detail.reviewQueue).toEqual([
       '视频导出工作手册草稿',
       '客户账号偏好',
@@ -277,6 +309,12 @@ describe('agent brain summary', () => {
       label: '召回经验',
       value: '0 条',
       detail: '记忆已关闭，运行时不会注入长期经验',
+    })
+    expect(detail.brainLoop).toContainEqual({
+      label: '召回经验',
+      value: '未启用',
+      state: 'muted',
+      detail: '记忆已关闭，这个 Agent 不会在运行前召回长期经验。',
     })
     expect(detail.reviewQueue).toEqual(['Memory policy is disabled for this Agent.'])
   })

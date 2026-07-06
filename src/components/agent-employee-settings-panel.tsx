@@ -587,6 +587,8 @@ function AgentBrainDetailPanel({
         ))}
       </div>
 
+      <BrainLoopPanel items={detail.brainLoop} />
+
       <div className="grid gap-2 sm:grid-cols-2">
         {detail.memoryBoundaries.map((item) => (
           <MiniStat key={item.label} item={item} />
@@ -608,6 +610,36 @@ function AgentBrainDetailPanel({
       </div>
     </div>
   )
+}
+
+function BrainLoopPanel({ items }: { items: AgentBrainDetailView['brainLoop'] }) {
+  return (
+    <div className="rounded-md border bg-background/60 px-3 py-2">
+      <div className="text-xs font-medium">脑内工作流</div>
+      <div className="mt-2 grid gap-2 md:grid-cols-5">
+        {items.map((item, index) => (
+          <div key={item.label} className="min-w-0 rounded-md border bg-muted/15 px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className={cn('flex size-5 shrink-0 items-center justify-center rounded-full text-[10px]', brainLoopStateClass(item.state))}>
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{item.label}</span>
+            </div>
+            <div className="mt-1 truncate text-xs font-semibold">{item.value}</div>
+            <div className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
+              {item.detail}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function brainLoopStateClass(state: AgentBrainDetailView['brainLoop'][number]['state']) {
+  if (state === 'ready') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+  if (state === 'warning') return 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+  return 'bg-muted text-muted-foreground'
 }
 
 function LearningTraceList({ items }: { items: AgentBrainDetailView['learningTrace'] }) {
