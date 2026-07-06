@@ -1949,6 +1949,7 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
 
       <div className="px-3 py-2">
         <p className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">{data.description}</p>
+        <NodeCardPortContracts inputs={data.inputs} outputs={data.outputs} />
         {data.incomingHandoffs?.length ? (
           <div
             className="mt-2 rounded-md border bg-muted/20 p-2"
@@ -2094,6 +2095,71 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
         </div>
       )}
     </div>
+  )
+}
+
+function NodeCardPortContracts({
+  inputs,
+  outputs,
+}: {
+  inputs: AgentFlowPort[]
+  outputs: AgentFlowPort[]
+}) {
+  return (
+    <div data-testid="node-card-port-contracts" className="mt-2 grid gap-1.5">
+      <NodeCardPortContractRow
+        testId="node-card-input-contracts"
+        title="接收输入"
+        ports={inputs}
+        emptyText="无需上游输入"
+      />
+      <NodeCardPortContractRow
+        testId="node-card-output-contracts"
+        title="只交付产物"
+        ports={outputs}
+        emptyText="无下游产物"
+        hint="下游只会收到所选出口的产物"
+      />
+    </div>
+  )
+}
+
+function NodeCardPortContractRow({
+  testId,
+  title,
+  ports,
+  emptyText,
+  hint,
+}: {
+  testId: string
+  title: string
+  ports: AgentFlowPort[]
+  emptyText: string
+  hint?: string
+}) {
+  return (
+    <section data-testid={testId} className="rounded-md border bg-background/70 px-2 py-1.5">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold text-muted-foreground">{title}</span>
+        {hint && <span className="truncate text-[10px] text-muted-foreground">{hint}</span>}
+      </div>
+      {ports.length === 0 ? (
+        <div className="text-[11px] text-muted-foreground">{emptyText}</div>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {ports.map((port) => (
+            <span
+              key={port.id}
+              className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border bg-muted/30 px-1.5 py-0.5 text-[10px]"
+              title={`${port.label} / ${artifactLabels[port.type]}`}
+            >
+              <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: artifactColors[port.type] }} />
+              <span className="truncate">{artifactLabels[port.type]}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

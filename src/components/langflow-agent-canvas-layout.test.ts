@@ -547,6 +547,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('已交付')
   })
 
+  it('shows each node input and output contracts directly on the node card', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodeCardPortContracts')
+    expect(source).toContain('data-testid="node-card-port-contracts"')
+    expect(source).toContain('testId="node-card-input-contracts"')
+    expect(source).toContain('testId="node-card-output-contracts"')
+    expect(source).toContain('data-testid={testId}')
+    expect(source).toContain('接收输入')
+    expect(source).toContain('只交付产物')
+    expect(source).toContain('下游只会收到所选出口的产物')
+  })
+
   it('lets users select the matching edge from node handoff summaries', () => {
     const source = readCanvasSource()
 
