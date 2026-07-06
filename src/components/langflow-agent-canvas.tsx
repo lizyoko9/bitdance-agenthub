@@ -64,6 +64,7 @@ import { applyPreflightStatusToEdges, applyPreflightStatusToNodes } from '@/lib/
 import { buildAgentFlowRunPlan, type AgentFlowRunPlanStep } from '@/lib/agent-flow-run-plan'
 import { validateAgentFlowForRun, type AgentFlowRunIssue } from '@/lib/agent-flow-run-preflight'
 import { buildSoftwareCommandFlowPorts } from '@/lib/agent-flow-software-command-contracts'
+import { deriveCanvasLifecycleStatus, type CanvasLifecycleStatus } from '@/lib/agenthub-canvas-lifecycle-status'
 import {
   agentFlowNodeTemplates,
   cloneTemplatePorts,
@@ -465,6 +466,11 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const handoffSteps = useMemo(() => buildHandoffSteps(nodes, edges), [edges, nodes])
   const executionPlan = useMemo(() => buildAgentFlowRunPlan({ nodes, edges }), [edges, nodes])
   const executionStages = useMemo(() => buildExecutionStages(nodes, edges), [edges, nodes])
+  const livePreflight = useMemo(() => validateAgentFlowForRun({ nodes, edges }), [edges, nodes])
+  const lifecycleStatus = useMemo(
+    () => deriveCanvasLifecycleStatus({ preflight: livePreflight, hasRun: Boolean(lastRun) }),
+    [lastRun, livePreflight],
+  )
   const activeConnectionSource = useMemo(() => {
     if (!activeOutputPort) return null
     const node = nodes.find((item) => item.id === activeOutputPort.nodeId)
@@ -1446,6 +1452,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           <CanvasFloatingControls
             undoCanvasEdit={undoCanvasEdit}
             redoCanvasEdit={redoCanvasEdit}
+            lifecycleStatus={lifecycleStatus}
             saveCanvasDraft={saveCanvasDraft}
             runPreflight={runPreflight}
             onZoomIn={() => void zoomIn()}
@@ -1823,6 +1830,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 function CanvasFloatingControls({
   undoCanvasEdit,
   redoCanvasEdit,
+  lifecycleStatus,
   saveCanvasDraft,
   runPreflight,
   onZoomIn,
@@ -1836,6 +1844,7 @@ function CanvasFloatingControls({
 }: {
   undoCanvasEdit: () => void
   redoCanvasEdit: () => void
+  lifecycleStatus: CanvasLifecycleStatus
   saveCanvasDraft: () => void
   runPreflight: () => void
   onZoomIn: () => void
@@ -1949,13 +1958,28 @@ function CanvasFloatingControls({
       </Button>
       <div className="mx-1 h-5 w-px bg-border" />
       <div
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border bg-emerald-500/10 px-2 text-xs text-muted-foreground"
+        className={cn(
+          'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground',
+          lifecycleStatus.state === 'needs_capability'
+            ? 'border-amber-500/30 bg-amber-500/10'
+            : 'border-emerald-500/30 bg-emerald-500/10',
+        )}
         data-testid="canvas-lifecycle-status"
+        data-lifecycle-state={lifecycleStatus.state}
         title="生命周期状态"
       >
-        <CheckCircle2 className="size-3.5 text-emerald-500" />
+        <CheckCircle2
+          className={cn(
+            'size-3.5',
+            lifecycleStatus.state === 'needs_capability' ? 'text-amber-500' : 'text-emerald-500',
+          )}
+        />
         <span>生命周期</span>
-        <span className="font-medium text-foreground">运行前检查</span>
+        <span className="font-medium text-foreground">{lifecycleStatus.phaseLabel}</span>
+        <span className="rounded bg-background/70 px-1.5 py-0.5 font-medium text-foreground">
+          {lifecycleStatus.statusLabel}
+        </span>
+        <span className="max-w-28 truncate">{lifecycleStatus.detail}</span>
       </div>
       <Button
         type="button"
