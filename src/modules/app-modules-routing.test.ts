@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { getDefaultModuleLayout } from '@/lib/agenthub-module-catalog'
+import { buildAgentHubModuleManagerView } from '@/lib/agenthub-module-manager'
 
 import {
   advancedAppModules,
@@ -76,6 +77,12 @@ describe('app module routing', () => {
 
   it('keeps primary navigation aligned with the default module block layout', () => {
     expect(primaryAppModules.map((module) => module.id)).toEqual(getDefaultModuleLayout().map((module) => module.id))
+  })
+
+  it('keeps default module manager activation aligned with the primary navigation', () => {
+    expect(buildAgentHubModuleManagerView().activeModules.map((module) => module.id)).toEqual(
+      primaryAppModules.map((module) => module.id),
+    )
   })
 
   it('keeps optional modules out of the default sidebar until they are enabled', () => {
