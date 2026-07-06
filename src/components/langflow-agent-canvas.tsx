@@ -661,28 +661,29 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     }
 
     pushCanvasHistory()
-    setEdges((current) =>
-      current.map((edge) =>
-        edge.id === edgeId
-          ? {
-              ...edge,
-              sourceHandle: outputHandleId(sourcePort),
-              targetHandle: inputHandleId(targetPort),
-              data: {
-                artifactType: sourcePort.type,
-                label: artifactLabels[sourcePort.type],
-                outputId: sourcePort.id,
-                sourcePortId: sourcePort.id,
-                targetPortId: targetPort.id,
-                sourcePortLabel: sourcePort.label,
-                targetPortLabel: targetPort.label,
-                handoffStatus: 'pending',
-                handoffContract: `${artifactLabels[sourcePort.type]}: ${sourcePort.label} -> ${targetPort.label}`,
-              },
-            }
-          : edge,
-      ),
-    )
+    setEdges((current) => {
+      const edge = current.find((item) => item.id === edgeId)
+      if (!edge) return current
+
+      const nextEdge: AgentFlowEdge = {
+        ...edge,
+        sourceHandle: outputHandleId(sourcePort),
+        targetHandle: inputHandleId(targetPort),
+        data: {
+          artifactType: sourcePort.type,
+          label: artifactLabels[sourcePort.type],
+          outputId: sourcePort.id,
+          sourcePortId: sourcePort.id,
+          targetPortId: targetPort.id,
+          sourcePortLabel: sourcePort.label,
+          targetPortLabel: targetPort.label,
+          handoffStatus: 'pending',
+          handoffContract: `${artifactLabels[sourcePort.type]}: ${sourcePort.label} -> ${targetPort.label}`,
+        },
+      }
+
+      return replaceEdgesForSingleTargetHandle(current.filter((edge) => edge.id !== edgeId), nextEdge)
+    })
     setSelectedEdgeId(edgeId)
     setSelectedNodeId('')
     clearActiveConnection()

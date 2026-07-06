@@ -283,6 +283,17 @@ describe('Langflow agent canvas layout', () => {
     expect(edgePanelSource).toContain('ArtifactPill type={option.sourcePort.type}')
   })
 
+  it('keeps a rerouted handoff as the only upstream line for that target input', () => {
+    const source = readCanvasSource()
+    const rerouteSource = source.slice(
+      source.indexOf('const rerouteEdgeById'),
+      source.indexOf('const addNodeFromTemplate'),
+    )
+
+    expect(rerouteSource).toContain('const nextEdge')
+    expect(rerouteSource).toContain('replaceEdgesForSingleTargetHandle(current.filter((edge) => edge.id !== edgeId), nextEdge)')
+  })
+
   it('supports dragging palette components onto the canvas at the drop position', () => {
     const source = readCanvasSource()
 
