@@ -23,4 +23,19 @@ describe('software capability store interaction', () => {
     expect(source).toContain('data-testid="software-detail-dialog"')
     expect(source).toContain('返回软件商店')
   })
+
+  it('summarizes CLI, MCP, and packaged command modes in software details', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/components/software-capability-store/software-mode-panel.tsx'),
+      'utf8',
+    )
+
+    expect(source).toContain('data-testid="software-mode-summary"')
+    expect(source).toContain("mode.kind === 'CLI'")
+    expect(source).toContain("mode.kind === 'MCP'")
+    expect(source).toContain("mode.kind === '命令'")
+    expect(source).toContain('CLI 接入')
+    expect(source).toContain('MCP 接入')
+    expect(source).toContain('封装命令')
+  })
 })

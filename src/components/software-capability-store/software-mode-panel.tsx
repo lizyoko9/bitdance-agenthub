@@ -14,6 +14,12 @@ export function SoftwareModePanel({
   onTestCommand,
   onRunCommand,
 }: SoftwareModePanelProps) {
+  const modeSummary = [
+    { label: 'CLI 接入', count: card.modes.filter((mode) => mode.kind === 'CLI').length },
+    { label: 'MCP 接入', count: card.modes.filter((mode) => mode.kind === 'MCP').length },
+    { label: '封装命令', count: card.modes.filter((mode) => mode.kind === '命令').length },
+  ]
+
   return (
     <div className="space-y-3">
       <div>
@@ -21,6 +27,14 @@ export function SoftwareModePanel({
         <p className="text-xs text-muted-foreground">
           这个软件当前可用的 CLI、MCP、API、浏览器、桌面或封装命令。
         </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3" data-testid="software-mode-summary">
+        {modeSummary.map((item) => (
+          <div key={item.label} className="rounded-lg border bg-muted/30 p-3">
+            <div className="text-lg font-semibold">{item.count}</div>
+            <div className="text-xs text-muted-foreground">{item.label}</div>
+          </div>
+        ))}
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         {card.modes.length === 0 ? (
