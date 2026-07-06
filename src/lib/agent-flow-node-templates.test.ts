@@ -24,13 +24,11 @@ describe('agentFlowNodeTemplates', () => {
       'file-bundle-deliverable',
     ])
 
-    expect(getAgentFlowNodeTemplate('employee-agent')?.outputs.map((port) => port.type)).toEqual([
-      'report',
-      'code',
-      'document',
-      'image',
-      'video',
-      'file_bundle',
+    expect(getAgentFlowNodeTemplate('employee-agent')?.inputs.map((port) => [port.id, port.type])).toEqual([
+      ['message', 'any'],
+    ])
+    expect(getAgentFlowNodeTemplate('employee-agent')?.outputs.map((port) => [port.id, port.type])).toEqual([
+      ['report', 'report'],
     ])
     expect(getAgentFlowNodeTemplate('software-command')?.outputs.map((port) => port.type)).toContain('file_bundle')
     expect(getAgentFlowNodeTemplate('video-deliverable')?.inputs.map((port) => port.type)).toEqual(['video'])

@@ -94,21 +94,8 @@ export const agentFlowNodeTemplates: AgentFlowNodeTemplate[] = [
     subtitle: '执行者',
     category: '智能体',
     description: '选择一个员工级 Agent，持续完成规划、执行、验证和交付。',
-    inputs: [
-      { id: 'message', label: '任务输入', type: 'message' },
-      { id: 'prompt', label: '提示词', type: 'prompt' },
-      { id: 'model', label: '模型', type: 'model' },
-      { id: 'tool', label: '工具能力', type: 'tool' },
-      { id: 'memory', label: '记忆', type: 'memory' },
-    ],
-    outputs: [
-      { id: 'report', label: '报告', type: 'report' },
-      { id: 'code', label: '代码', type: 'code' },
-      { id: 'document', label: '文档', type: 'document' },
-      { id: 'image', label: '图片', type: 'image' },
-      { id: 'video', label: '视频', type: 'video' },
-      { id: 'file_bundle', label: '文件包', type: 'file_bundle' },
-    ],
+    inputs: [{ id: 'message', label: '任务 / 素材', type: 'any' }],
+    outputs: [{ id: 'report', label: '报告', type: 'report' }],
   },
   {
     id: 'software-command',

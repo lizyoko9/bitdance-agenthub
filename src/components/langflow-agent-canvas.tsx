@@ -276,7 +276,7 @@ const initialNodes: AgentFlowNode[] = [
 ]
 
 const initialEdges: AgentFlowEdge[] = [
-  createFlowEdge('customer-to-agent', 'input-1', 'agent-2', 'message', 'message'),
+  createFlowEdge('customer-to-agent', 'input-1', 'agent-2', 'message', 'message', 'out:message', 'in:message', '客户消息', 'message', '任务 / 素材'),
   createFlowEdge('agent-to-delivery', 'agent-2', 'artifact-3', 'report', 'report'),
 ]
 
@@ -3282,6 +3282,7 @@ function createCanvasWorkflowPresetDraft(
     createNodeFromTemplate('employee-agent', { x: 420, y: 140 }, {
       title: `${preset.badge} Agent`,
       description: `根据客户目标完成任务，并产出${artifactLabels[preset.artifactType]}。`,
+      outputs: [{ id: preset.artifactType, label: artifactLabels[preset.artifactType], type: preset.artifactType }],
     }, agentId),
     createNodeFromTemplate(preset.deliverableTemplateId, { x: 820, y: 140 }, {
       description: `这个节点只接收上游连过来的${artifactLabels[preset.artifactType]}，作为客户可见交付物。`,
@@ -3289,7 +3290,7 @@ function createCanvasWorkflowPresetDraft(
     }, artifactId),
   ]
   const edges = [
-    createFlowEdge(`${preset.id}-customer-to-agent`, inputId, agentId, 'message', 'message'),
+    createFlowEdge(`${preset.id}-customer-to-agent`, inputId, agentId, 'message', 'message', 'out:message', 'in:message', '客户消息', 'message', '任务 / 素材'),
     createFlowEdge(`${preset.id}-agent-to-artifact`, agentId, artifactId, preset.artifactType, preset.artifactType),
   ]
 
