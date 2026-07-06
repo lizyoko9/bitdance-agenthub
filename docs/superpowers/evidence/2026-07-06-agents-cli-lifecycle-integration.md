@@ -11,13 +11,13 @@ Plan:
 Focused lifecycle tests:
 
 ```powershell
-node node_modules\vitest\vitest.mjs run src/lib/agenthub-lifecycle-types.test.ts src/server/agenthub-lifecycle-manifest-service.test.ts src/server/agenthub-command-runner.test.ts src/server/agenthub-capability-readiness-service.test.ts src/server/agenthub-eval-service.test.ts src/server/agenthub-lifecycle-report-service.test.ts src/components/langflow-agent-canvas-lifecycle.test.ts src/modules/app-modules-routing.test.ts
+node node_modules\vitest\vitest.mjs run src\lib\agenthub-lifecycle-types.test.ts src\lib\agenthub-canvas-lifecycle-status.test.ts src\server\agenthub-lifecycle-manifest-service.test.ts src\server\agenthub-command-runner.test.ts src\server\agenthub-capability-readiness-service.test.ts src\server\agenthub-eval-service.test.ts src\server\agenthub-lifecycle-report-service.test.ts src\components\langflow-agent-canvas-lifecycle.test.ts src\modules\app-modules-routing.test.ts --reporter=dot
 ```
 
 Result:
 
-- 8 test files passed.
-- 16 tests passed.
+- 9 test files passed.
+- 19 tests passed.
 
 Lifecycle-related lint:
 
@@ -47,7 +47,8 @@ node node_modules\typescript\bin\tsc --noEmit --pretty false
 
 Result:
 
-- Failed on pre-existing unrelated issues in `apps/mobile`, many `src/app/api/**` route input types, `src/server/adapters/claude-code-adapter.ts`, and `src/server/agent-draft-schema.ts`.
+- Failed on pre-existing unrelated issues in many `src/app/api/**` route input types, `src/server/adapters/claude-code-adapter.ts`, and `src/server/agent-draft-schema.ts`.
+- `apps/mobile` is now excluded from the desktop TypeScript project by `tsconfig.json`, and `src/config/desktop-typecheck-scope.test.ts` guards that desktop-only scope.
 - No lifecycle-related errors were reported by the filtered check above.
 
 ## Product Constraints Checked
