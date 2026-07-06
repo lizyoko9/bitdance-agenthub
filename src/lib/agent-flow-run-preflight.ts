@@ -7,6 +7,7 @@ export type AgentFlowRunIssueCode =
   | 'target_node_missing'
   | 'source_port_missing'
   | 'target_port_missing'
+  | 'source_port_type_mismatch'
   | 'port_type_mismatch'
   | 'agent_profile_missing'
   | 'software_command_missing'
@@ -140,6 +141,23 @@ export function validateAgentFlowForRun(args: {
     }
 
     const artifactType = edge.data?.artifactType ?? sourcePort.type
+    if (
+      edge.data?.artifactType &&
+      String(sourcePort.type) !== 'any' &&
+      String(edge.data.artifactType) !== String(sourcePort.type)
+    ) {
+      const sourceLabel = labelArtifactType(String(sourcePort.type))
+      const edgeLabel = labelArtifactType(String(edge.data.artifactType))
+      issues.push({
+        code: 'source_port_type_mismatch',
+        severity: 'error',
+        edgeId: edge.id,
+        nodeId: source.id,
+        message: `${nodeTitle(source)} 当前输出是${sourceLabel}，但这条连线还标记为${edgeLabel}，请重新选择交付产物。`,
+      })
+      continue
+    }
+
     if (!canConnect(String(artifactType), String(targetPort.type))) {
       const artifactLabel = labelArtifactType(String(artifactType))
       const targetLabel = labelArtifactType(String(targetPort.type))

@@ -106,6 +106,33 @@ describe('validateAgentFlowForRun', () => {
     expect(mismatch?.message).not.toContain('document')
   })
 
+  it('blocks stale handoff contracts when an edge artifact no longer matches the source port type', () => {
+    const result = validateAgentFlowForRun({
+      nodes: [
+        node('agent-1', 'agent', {
+          agentId: 'agent-profile-1',
+          outputs: [{ id: 'deliverable', type: 'video' }],
+        }),
+        node('artifact-1', 'artifact', { inputs: [{ id: 'report', type: 'report' }] }),
+      ],
+      edges: [
+        {
+          id: 'stale-edge',
+          source: 'agent-1',
+          target: 'artifact-1',
+          sourceHandle: 'out:deliverable',
+          targetHandle: 'in:report',
+          data: { artifactType: 'report' },
+        },
+      ],
+    })
+
+    expect(result.ready).toBe(false)
+    expect(result.issues.map((issue) => issue.code)).toContain('source_port_type_mismatch')
+    expect(result.issues[0]?.message).toContain('视频')
+    expect(result.issues[0]?.message).toContain('报告')
+  })
+
   it('accepts a typed handoff and reports disconnected nodes as warnings only', () => {
     const result = validateAgentFlowForRun({
       nodes: [
