@@ -560,6 +560,20 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('下游只会收到所选出口的产物')
   })
 
+  it('lets users collapse and expand node cards like a visual flow editor', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('expanded?: boolean')
+    expect(source).toContain('onToggleExpanded?: (nodeId: string) => void')
+    expect(source).toContain('toggleNodeExpanded')
+    expect(source).toContain('data-testid="node-expand-toggle"')
+    expect(source).toContain('data-node-expanded={nodeExpanded}')
+    expect(source).toContain('aria-expanded={nodeExpanded}')
+    expect(source).toContain('nodeExpanded &&')
+    expect(source).toContain('data-testid="node-expanded-details"')
+    expect(source).toContain('data-testid="node-compact-handle-strip"')
+  })
+
   it('lets users select the matching edge from node handoff summaries', () => {
     const source = readCanvasSource()
 

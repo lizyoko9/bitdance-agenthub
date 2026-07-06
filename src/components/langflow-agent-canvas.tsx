@@ -23,6 +23,8 @@ import {
 } from '@xyflow/react'
 import {
   Bot,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   ClipboardCheck,
   Copy,
@@ -119,8 +121,10 @@ interface AgentFlowNodeData extends Record<string, unknown> {
   outgoingHandoffs?: OutgoingHandoff[]
   customerVisible?: boolean
   executionStage?: number
+  expanded?: boolean
   connectionType?: ArtifactType | null
   activeOutputPortId?: string
+  onToggleExpanded?: (nodeId: string) => void
   onOutputConnectStart?: (type: ArtifactType, outputId: string) => void
   onInputConnectComplete?: (targetNodeId: string, targetInputId: string) => void
 }
@@ -506,6 +510,18 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setEdges((current) => current.map((item) => ({ ...item, selected: false })))
     setNotice(`正在交付 ${output.label}，请选择下游节点或从左侧添加兼容节点。`)
   }, [nodes, setEdges, setNodes])
+
+  const toggleNodeExpanded = useCallback((nodeId: string) => {
+    pushCanvasHistory()
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, expanded: node.data.expanded === false } }
+          : node,
+      ),
+    )
+  }, [pushCanvasHistory, setNodes])
+
   const nodesForCanvas = useMemo(
     () => nodes.map((node) => ({
       ...node,
@@ -516,6 +532,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         incomingHandoffs: buildIncomingHandoffsForNode(node.id, nodes, edges),
         outgoingHandoffs: buildOutgoingHandoffsForNode(node.id, nodes, edges),
         executionStage: executionStages.get(node.id),
+        onToggleExpanded: toggleNodeExpanded,
         onOutputConnectStart: (type: ArtifactType, outputId: string) => {
           startOutputConnection(node.id, type, outputId)
         },
@@ -560,7 +577,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         },
       },
     })),
-    [activeConnectionType, activeOutputPort, clearActiveConnection, edges, executionStages, nodes, pushCanvasHistory, setEdges, startOutputConnection],
+    [activeConnectionType, activeOutputPort, clearActiveConnection, edges, executionStages, nodes, pushCanvasHistory, setEdges, startOutputConnection, toggleNodeExpanded],
   )
 
   const completeActiveConnectionToNode = useCallback((targetNodeId: string) => {
@@ -1838,6 +1855,7 @@ function CanvasFloatingControls({
 
 function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
   const configurationState = getNodeConfigurationState({ data })
+  const nodeExpanded = data.expanded !== false
   const nodeIsActiveConnectionSource = Boolean(data.activeOutputPortId)
   const nodeAcceptsActiveConnection = Boolean(
     data.connectionType &&
@@ -1885,6 +1903,17 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
     window.dispatchEvent(new CustomEvent('agenthub:canvas-edge-select', { detail: { edgeId } }))
   }
 
+  const handleExpandTogglePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  const handleExpandToggleClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    data.onToggleExpanded?.(id)
+  }
+
   return (
     <div
       className={cn(
@@ -1897,6 +1926,7 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
       data-node-compatible={nodeAcceptsActiveConnection}
       data-node-incompatible={nodeRejectsActiveConnection}
       data-node-configuration-status={configurationState.status}
+      data-node-expanded={nodeExpanded}
     >
       {selected && (
         <div
@@ -1937,6 +1967,18 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className="nodrag nopan inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            data-testid="node-expand-toggle"
+            aria-expanded={nodeExpanded}
+            aria-label={nodeExpanded ? '收起节点详情' : '展开节点详情'}
+            title={nodeExpanded ? '收起节点详情' : '展开节点详情'}
+            onPointerDownCapture={handleExpandTogglePointerDown}
+            onClick={handleExpandToggleClick}
+          >
+            {nodeExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          </button>
           {data.executionStage && (
             <Badge variant="outline" className="text-[10px]">
               第 {data.executionStage} 步
@@ -1948,8 +1990,11 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
       </div>
 
       <div className="px-3 py-2">
-        <p className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">{data.description}</p>
         <NodeCardPortContracts inputs={data.inputs} outputs={data.outputs} />
+        {!nodeExpanded && <NodeCompactHandleStrip inputs={data.inputs} outputs={data.outputs} />}
+        {nodeExpanded && (
+          <div data-testid="node-expanded-details">
+            <p className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">{data.description}</p>
         {data.incomingHandoffs?.length ? (
           <div
             className="mt-2 rounded-md border bg-muted/20 p-2"
@@ -2087,6 +2132,8 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
             )
           })}
         </div>
+          </div>
+        )}
       </div>
 
       {data.customerVisible && (
@@ -2094,6 +2141,49 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
           客户可以看到这个节点的产物
         </div>
       )}
+    </div>
+  )
+}
+
+function NodeCompactHandleStrip({
+  inputs,
+  outputs,
+}: {
+  inputs: AgentFlowPort[]
+  outputs: AgentFlowPort[]
+}) {
+  return (
+    <div data-testid="node-compact-handle-strip" className="absolute inset-0 pointer-events-none">
+      {inputs.map((input, index) => (
+        <Handle
+          key={input.id}
+          type="target"
+          position={Position.Left}
+          id={inputHandleId(input)}
+          className="!size-3 !border-2 !border-background"
+          style={{
+            backgroundColor: artifactColors[input.type],
+            left: -7,
+            pointerEvents: 'auto',
+            top: `${72 + index * 18}px`,
+          }}
+        />
+      ))}
+      {outputs.map((output, index) => (
+        <Handle
+          key={output.id}
+          type="source"
+          position={Position.Right}
+          id={outputHandleId(output)}
+          className="!size-3 !border-2 !border-background"
+          style={{
+            backgroundColor: artifactColors[output.type],
+            pointerEvents: 'auto',
+            right: -7,
+            top: `${72 + index * 18}px`,
+          }}
+        />
+      ))}
     </div>
   )
 }
