@@ -56,7 +56,7 @@ describe('Langflow agent canvas layout', () => {
     const inspectorSource = source.slice(source.indexOf('data-testid="canvas-right-inspector"'))
 
     expect(source).toContain('data-testid="preflight-issues-panel"')
-    expect(inspectorSource).toContain('<PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />')
+    expect(inspectorSource).toContain('<PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} onSelectEdge={selectEdgeById} />')
     expect(flowSurfaceSource).not.toContain('<PreflightIssuePanel')
     expect(source).not.toContain('absolute right-3 top-3')
   })
@@ -794,12 +794,14 @@ describe('Langflow agent canvas layout', () => {
     expect(deliveryPanelSource).toContain('aria-label={`查看客户交付物${delivery.title}`}')
   })
 
-  it('lets users click a preflight issue to select the broken node', () => {
+  it('lets users click a preflight issue to select the broken node or edge', () => {
     const source = readCanvasSource()
 
     expect(source).toContain('onSelectNode')
+    expect(source).toContain('onSelectEdge')
     expect(source).toContain('data-testid="preflight-issue-card"')
-    expect(source).toContain('issue.nodeId && onSelectNode(issue.nodeId)')
+    expect(source).toContain('<PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} onSelectEdge={selectEdgeById} />')
+    expect(source).toContain('issue.nodeId ? onSelectNode(issue.nodeId) : issue.edgeId ? onSelectEdge(issue.edgeId) : undefined')
   })
 
   it('clears the visual node selection when users select an edge or the blank canvas', () => {

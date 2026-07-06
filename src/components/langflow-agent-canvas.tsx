@@ -1617,7 +1617,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               </div>
             ) : (
               <>
-                <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} />
+                <PreflightIssuePanel issues={preflightIssues} nodes={nodes} onSelectNode={selectNodeById} onSelectEdge={selectEdgeById} />
                 {selectedEdge ? (
                   <EdgeConfigPanel
                     edge={selectedEdge}
@@ -3068,10 +3068,12 @@ function PreflightIssuePanel({
   issues,
   nodes,
   onSelectNode,
+  onSelectEdge,
 }: {
   issues: AgentFlowRunIssue[]
   nodes: AgentFlowNode[]
   onSelectNode: (nodeId: string) => void
+  onSelectEdge: (edgeId: string) => void
 }) {
   if (issues.length === 0) return null
 
@@ -3096,8 +3098,8 @@ function PreflightIssuePanel({
             type="button"
             data-testid="preflight-issue-card"
             className="w-full rounded-lg border bg-background p-2 text-left text-xs transition hover:border-primary disabled:cursor-default disabled:hover:border-border"
-            disabled={!issue.nodeId}
-            onClick={() => issue.nodeId && onSelectNode(issue.nodeId)}
+            disabled={!issue.nodeId && !issue.edgeId}
+            onClick={() => issue.nodeId ? onSelectNode(issue.nodeId) : issue.edgeId ? onSelectEdge(issue.edgeId) : undefined}
           >
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{issue.nodeId ? nodeTitleById.get(issue.nodeId) ?? issue.nodeId : issue.edgeId ?? '流程'}</span>
