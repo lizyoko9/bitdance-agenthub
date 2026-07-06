@@ -30,7 +30,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import type { AgentRow } from '@/db/schema'
 import {
   deleteAgent as deleteAgentAPI,
-  fetchAgentMemoryLearningReport,
+  fetchAgentMemoryLearningReportForAgent,
   type AgentMemoryLearningReport,
 } from '@/lib/api'
 import { buildAgentBrainSummary, type AgentBrainSummaryView } from '@/lib/agent-brain-summary'
@@ -317,7 +317,7 @@ function AgentSettingsOverview({
     setMemoryLoading(true)
     setMemoryUnavailable(false)
     setMemoryReport(null)
-    fetchAgentMemoryLearningReport(agent.id)
+    fetchAgentMemoryLearningReportForAgent(agent.id)
       .then((report) => {
         if (!cancelled) setMemoryReport(report)
       })

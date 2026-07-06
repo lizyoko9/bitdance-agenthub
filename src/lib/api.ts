@@ -8990,6 +8990,17 @@ export async function fetchAgentMemoryLearningReport(
   return report
 }
 
+export async function fetchAgentMemoryLearningReportForAgent(
+  agentId: string,
+  goal?: string,
+): Promise<AgentMemoryLearningReport> {
+  const query = goal?.trim() ? `?q=${encodeURIComponent(goal.trim())}` : ''
+  const { report } = await json<{ report: AgentMemoryLearningReport }>(
+    fetch(`/api/agents/${agentId}/memory-learning-report${query}`),
+  )
+  return report
+}
+
 export interface CloneAgentProfileBody {
   name?: string
   nameSuffix?: string

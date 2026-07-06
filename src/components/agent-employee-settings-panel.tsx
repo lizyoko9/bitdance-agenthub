@@ -17,12 +17,15 @@ import { Button } from '@/components/ui/button'
 import type { AgentRow, CliProfileRow, McpServerRow, ModelProfileRow, SkillRow } from '@/db/schema'
 import {
   fetchCliProfiles,
+  fetchAgentMemoryLearningReportForAgent,
   fetchMcpServers,
   fetchModelProfiles,
   fetchSkillsCenterData,
   updateAgent,
+  type AgentMemoryLearningReport,
   type UpdateAgentBody,
 } from '@/lib/api'
+import { buildAgentBrainDetail, type AgentBrainDetailView } from '@/lib/agent-brain-summary'
 import {
   AGENT_EMPLOYEE_SETTING_SECTIONS,
   buildAgentModelSelectionPatch,
@@ -77,6 +80,9 @@ export function AgentEmployeeSettingsPanel({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
+  const [memoryReport, setMemoryReport] = useState<AgentMemoryLearningReport | null>(null)
+  const [memoryLoading, setMemoryLoading] = useState(false)
+  const [memoryUnavailable, setMemoryUnavailable] = useState(false)
 
   const [selectedModelKey, setSelectedModelKey] = useState('')
   const [selectedToolNames, setSelectedToolNames] = useState<Set<string>>(new Set(agent.toolNames))
@@ -162,8 +168,34 @@ export function AgentEmployeeSettingsPanel({
       }),
     [selectedCliProfileIds, selectedMcpServerIds, selectedSkillIds, selectedToolNames],
   )
+  const brainDetail = useMemo(
+    () => (memoryReport ? buildAgentBrainDetail(memoryReport) : null),
+    [memoryReport],
+  )
 
   const selectedModel = catalog.models.find((model) => model.id === selectedModelKey) ?? null
+
+  useEffect(() => {
+    let cancelled = false
+    setMemoryLoading(true)
+    setMemoryUnavailable(false)
+    setMemoryReport(null)
+    fetchAgentMemoryLearningReportForAgent(agent.id)
+      .then((report) => {
+        if (!cancelled) setMemoryReport(report)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        console.warn('[AgentEmployeeSettingsPanel] memory report unavailable', err)
+        setMemoryUnavailable(true)
+      })
+      .finally(() => {
+        if (!cancelled) setMemoryLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [agent.id])
 
   const saveSettings = async () => {
     setSaving(true)
@@ -367,10 +399,24 @@ export function AgentEmployeeSettingsPanel({
               title="记忆学习"
               description="默认记录项目经验和客户偏好；新流程沉淀为长期经验前需要用户确认。"
             >
+              {memoryLoading ? (
+                <LoadingLine label="正在读取员工大脑" />
+              ) : brainDetail ? (
+                <AgentBrainDetailPanel detail={brainDetail} />
+              ) : (
+                <EmptyLine
+                  label={
+                    memoryUnavailable
+                      ? '暂时没有拿到这个员工的记忆报告，运行任务后会自动重试。'
+                      : '这个员工还没有记忆报告。'
+                  }
+                />
+              )}
+              <div className="mt-3 text-xs font-medium">长期工作规则</div>
               <textarea
                 value={systemPrompt}
                 onChange={(event) => setSystemPrompt(event.target.value)}
-                className="min-h-28 w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="mt-2 min-h-28 w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder="写给这个员工的长期工作规则"
               />
             </SettingsBlock>
@@ -459,6 +505,84 @@ function SettingsBlock({
       </div>
       {children}
     </section>
+  )
+}
+
+function AgentBrainDetailPanel({ detail }: { detail: AgentBrainDetailView }) {
+  const toneClass =
+    detail.statusTone === 'ready'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-300'
+      : detail.statusTone === 'warning'
+        ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-300'
+        : 'border-muted bg-muted/30 text-muted-foreground'
+
+  return (
+    <div className="space-y-3" data-testid="agent-brain-detail">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-semibold">{detail.title}</div>
+        <span className={cn('rounded-full border px-2 py-0.5 text-[10px]', toneClass)}>
+          {detail.statusLabel}
+        </span>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        {detail.recallFlow.map((item) => (
+          <MiniStat key={item.label} item={item} />
+        ))}
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        {detail.memoryBoundaries.map((item) => (
+          <MiniStat key={item.label} item={item} />
+        ))}
+      </div>
+
+      <div className="grid gap-2 lg:grid-cols-2">
+        <DetailList title="最近会注入的上下文" emptyLabel="暂无可召回经验" items={detail.recentContext} />
+        <DetailList title="需要确认" emptyLabel="暂无待审核项" items={detail.reviewQueue} />
+        <DetailList title="可用工作手册" emptyLabel="暂无启用的工作手册" items={detail.playbooks} />
+        <DetailList title="下一步建议" emptyLabel="暂无建议" items={detail.recommendations} />
+      </div>
+    </div>
+  )
+}
+
+function MiniStat({ item }: { item: { label: string; value: string; detail: string } }) {
+  return (
+    <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+      <div className="text-[10px] text-muted-foreground">{item.label}</div>
+      <div className="mt-1 truncate text-xs font-semibold">{item.value}</div>
+      <div className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+        {item.detail}
+      </div>
+    </div>
+  )
+}
+
+function DetailList({
+  title,
+  emptyLabel,
+  items,
+}: {
+  title: string
+  emptyLabel: string
+  items: string[]
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 px-3 py-2">
+      <div className="text-xs font-medium">{title}</div>
+      <div className="mt-1 space-y-1">
+        {items.length ? (
+          items.slice(0, 4).map((item) => (
+            <div key={item} className="truncate text-[11px] text-muted-foreground">
+              {item}
+            </div>
+          ))
+        ) : (
+          <div className="text-[11px] text-muted-foreground">{emptyLabel}</div>
+        )}
+      </div>
+    </div>
   )
 }
 

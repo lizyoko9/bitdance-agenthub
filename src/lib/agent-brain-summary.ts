@@ -4,7 +4,9 @@ export interface AgentBrainSummaryReport {
   readiness: AgentBrainReadiness
   readinessScore: number
   memorySummary: {
+    ownedTotal?: number
     activeOwnedTotal: number
+    byScope?: Partial<Record<string, number>>
     mistakeCount: number
     proceduralCount: number
     semanticCount: number
@@ -12,23 +14,44 @@ export interface AgentBrainSummaryReport {
     averageImportance: number
   }
   retrieval: {
+    sampleGoal?: string
     candidates: Array<{
       id: string
       title: string
       type: string
       scope: string
       score: number
+      matchedTerms?: string[]
     }>
     gaps: string[]
     warnings: string[]
+  }
+  reflectionSummary?: {
+    total: number
+    reusableProcedureCount: number
+    futureWarningCount: number
+    suggestedSkillUpdateCount: number
   }
   learningSummary: {
     pendingReview: number
     activePlaybooks: number
     draftPlaybooks: number
+    latestEvents?: Array<{
+      id: string
+      title: string
+      status: string
+      createdAt: number
+    }>
+    latestPlaybooks?: Array<{
+      id: string
+      title: string
+      status: string
+      updatedAt: number
+    }>
   }
   governance: {
     needsHumanReview: boolean
+    sensitiveMemoryTitles?: string[]
     mistakeTitles: string[]
     pendingLearningTitles: string[]
     expiringSoonMemoryTitles: string[]
@@ -55,6 +78,24 @@ export interface AgentBrainSummaryView {
   emptyState: string | null
   metrics: AgentBrainSummaryMetric[]
   sections: AgentBrainSummarySection[]
+}
+
+export interface AgentBrainDetailStat {
+  label: string
+  value: string
+  detail: string
+}
+
+export interface AgentBrainDetailView {
+  title: string
+  statusLabel: string
+  statusTone: AgentBrainSummaryView['statusTone']
+  memoryBoundaries: AgentBrainDetailStat[]
+  recallFlow: AgentBrainDetailStat[]
+  recentContext: string[]
+  reviewQueue: string[]
+  playbooks: string[]
+  recommendations: string[]
 }
 
 export function buildAgentBrainSummary(report: AgentBrainSummaryReport): AgentBrainSummaryView {
@@ -130,6 +171,84 @@ export function buildAgentBrainSummary(report: AgentBrainSummaryReport): AgentBr
   }
 }
 
+export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBrainDetailView {
+  const needsReview = report.readiness === 'needs_review' || report.governance.needsHumanReview
+  const memoryEnabled = report.readiness !== 'disabled'
+  const scopeCounts = report.memorySummary.byScope ?? {}
+  const contextTypeCount = [
+    report.memorySummary.semanticCount,
+    report.memorySummary.proceduralCount,
+    report.memorySummary.mistakeCount,
+    report.learningSummary.activePlaybooks,
+  ].filter((count) => count > 0).length
+  const reviewQueue = unique([
+    ...report.governance.pendingLearningTitles,
+    ...(report.governance.sensitiveMemoryTitles ?? []),
+    ...report.governance.mistakeTitles,
+    ...report.governance.expiringSoonMemoryTitles,
+    ...report.retrieval.gaps,
+  ])
+
+  return {
+    title: '员工大脑详情',
+    statusLabel: resolveStatusLabel(report.readiness, needsReview),
+    statusTone: resolveStatusTone(report.readiness, needsReview),
+    memoryBoundaries: [
+      {
+        label: '私有记忆',
+        value: String(scopeCounts.agent ?? 0),
+        detail: '优先只给这个员工使用',
+      },
+      {
+        label: '项目共享',
+        value: String(scopeCounts.project ?? 0),
+        detail: '同项目员工可复用',
+      },
+      {
+        label: '工作区共享',
+        value: String(scopeCounts.workspace ?? 0),
+        detail: '团队内可见经验',
+      },
+      {
+        label: '全局工具经验',
+        value: String(scopeCounts.global ?? 0),
+        detail: '审核后才扩散',
+      },
+    ],
+    recallFlow: [
+      {
+        label: '任务线索',
+        value: report.retrieval.sampleGoal?.trim() || '按任务目标提取',
+        detail: '运行前提取目标、客户、工具和交付物线索',
+      },
+      {
+        label: '召回经验',
+        value: `${report.retrieval.candidates.length} 条`,
+        detail: memoryEnabled
+          ? '按线索、标签、重要性、置信度和成功率排序'
+          : '记忆已关闭，运行时不会注入长期经验',
+      },
+      {
+        label: '上下文包',
+        value: `${contextTypeCount} 类`,
+        detail: '只把相关记忆放进这个员工的工作上下文',
+      },
+    ],
+    recentContext: report.retrieval.candidates.slice(0, 5).map((candidate) => {
+      const matched = candidate.matchedTerms?.filter(Boolean).join('、')
+      const suffix = matched ? `命中：${matched}` : `评分：${roundNumber(candidate.score)}`
+      return `${candidate.title} · ${candidate.type} · ${suffix}`
+    }),
+    reviewQueue,
+    playbooks: (report.learningSummary.latestPlaybooks ?? [])
+      .filter((playbook) => playbook.status === 'active')
+      .map((playbook) => playbook.title.trim())
+      .filter(Boolean)
+      .slice(0, 5),
+    recommendations: report.recommendations.map((item) => item.trim()).filter(Boolean).slice(0, 5),
+  }
+}
+
 function resolveStatusLabel(readiness: AgentBrainReadiness, needsReview: boolean): string {
   if (readiness === 'disabled') return '已关闭'
   if (readiness === 'empty') return '暂无经验'
@@ -156,4 +275,8 @@ function unique(values: string[]): string[] {
     result.push(trimmed)
   }
   return result
+}
+
+function roundNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
