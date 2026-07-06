@@ -1948,6 +1948,15 @@ function CanvasFloatingControls({
         适配
       </Button>
       <div className="mx-1 h-5 w-px bg-border" />
+      <div
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border bg-emerald-500/10 px-2 text-xs text-muted-foreground"
+        data-testid="canvas-lifecycle-status"
+        title="生命周期状态"
+      >
+        <CheckCircle2 className="size-3.5 text-emerald-500" />
+        <span>生命周期</span>
+        <span className="font-medium text-foreground">运行前检查</span>
+      </div>
       <Button
         type="button"
         size="sm"
