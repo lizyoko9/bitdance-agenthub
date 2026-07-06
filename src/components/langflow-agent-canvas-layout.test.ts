@@ -712,6 +712,7 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('buildHandoffSteps')
     expect(source).toContain('validateAgentFlowForRun')
     expect(source).toContain('applyPreflightStatusToNodes')
+    expect(source).toContain('applyPreflightStatusToEdges')
     expect(source).toContain('preflightIssues')
     expect(source).toContain('PreflightIssuePanel')
     expect(source).toContain('runPreflight')
@@ -720,6 +721,21 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="handoff-preview-panel"')
     expect(source).toContain('data-testid="handoff-route-line"')
     expect(source).toContain('data-testid="handoff-artifact-contract"')
+  })
+
+  it('updates and displays handoff edge status after a local dry run', () => {
+    const source = readCanvasSource()
+    const edgeSource = source.slice(
+      source.indexOf('function AgentArtifactEdge'),
+      source.indexOf('function EdgeConfigPanel'),
+    )
+
+    expect(source).toContain('setEdges((current) => applyPreflightStatusToEdges({ edges: current, preflight }))')
+    expect(source).toContain("handoffStatus?: 'pending' | 'delivered' | 'blocked'")
+    expect(edgeSource).toContain("const handoffStatus = data?.handoffStatus ?? 'pending'")
+    expect(edgeSource).toContain('data-edge-handoff-status={handoffStatus}')
+    expect(edgeSource).toContain("handoffStatus === 'delivered' ? '已交付'")
+    expect(edgeSource).toContain("handoffStatus === 'blocked' ? '已阻塞'")
   })
 
   it('lets users click a handoff preview card to inspect the actual canvas edge', () => {

@@ -57,7 +57,7 @@ import {
   replaceEdgesForSingleTargetHandle,
   wouldCreateDirectedCycle,
 } from '@/lib/agent-flow-graph'
-import { applyPreflightStatusToNodes } from '@/lib/agent-flow-node-status'
+import { applyPreflightStatusToEdges, applyPreflightStatusToNodes } from '@/lib/agent-flow-node-status'
 import { buildAgentFlowRunPlan, type AgentFlowRunPlanStep } from '@/lib/agent-flow-run-plan'
 import { validateAgentFlowForRun, type AgentFlowRunIssue } from '@/lib/agent-flow-run-preflight'
 import { buildSoftwareCommandFlowPorts } from '@/lib/agent-flow-software-command-contracts'
@@ -134,6 +134,7 @@ type AgentFlowEdge = Edge<{
   sourcePortLabel: string
   targetPortLabel: string
   handoffContract: string
+  handoffStatus?: 'pending' | 'delivered' | 'blocked'
 }>
 
 interface HandoffStep {
@@ -1065,6 +1066,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     const preflight = validateAgentFlowForRun({ nodes, edges })
     setPreflightIssues(preflight.issues)
     setNodes((current) => applyPreflightStatusToNodes({ nodes: current, edges, preflight }))
+    setEdges((current) => applyPreflightStatusToEdges({ edges: current, preflight }))
     if (!preflight.ready) {
       const firstError = preflight.issues.find((issue) => issue.severity === 'error')
       setNotice(`预检未通过：${firstError?.message ?? '流程配置还有阻塞项。'}`)
@@ -1101,7 +1103,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         firstWarning ? `，${preflight.warningCount} 个提醒：${firstWarning.message}` : '。'
       }`,
     )
-  }, [edges, executionPlan, handoffSteps.length, nodes, setNodes, workflowDraftId, workflowTitle])
+  }, [edges, executionPlan, handoffSteps.length, nodes, setEdges, setNodes, workflowDraftId, workflowTitle])
 
   const saveWorkflowDraftToLibrary = useCallback((draft: CanvasDraft) => {
     window.localStorage.setItem(CANVAS_DRAFT_STORAGE_KEY, JSON.stringify(draft))
@@ -2033,6 +2035,8 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
 function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, data, selected }: EdgeProps<AgentFlowEdge>) {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY })
   const type = data?.artifactType ?? 'any'
+  const handoffStatus = data?.handoffStatus ?? 'pending'
+  const handoffStatusLabel = handoffStatus === 'delivered' ? '已交付' : handoffStatus === 'blocked' ? '已阻塞' : '待交付'
   const selectThisEdge = (event: PointerEvent<SVGGElement | SVGPathElement>) => {
     event.stopPropagation()
     window.dispatchEvent(new CustomEvent('agenthub:canvas-edge-select', { detail: { edgeId: id } }))
@@ -2044,7 +2048,12 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
   }
 
   return (
-    <g data-testid="langflow-agent-edge" data-edge-artifact-type={type} onPointerDown={selectThisEdge}>
+    <g
+      data-testid="langflow-agent-edge"
+      data-edge-artifact-type={type}
+      data-edge-handoff-status={handoffStatus}
+      onPointerDown={selectThisEdge}
+    >
       <path
         d={edgePath}
         className="react-flow__edge-interaction"
@@ -2065,7 +2074,7 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
             className="flex h-7 items-center justify-center gap-1 rounded-full border bg-background px-2 text-[10px] shadow-sm"
             data-testid="edge-inline-toolbar"
           >
-            <span className="min-w-0 truncate">{artifactLabels[type]}</span>
+            <span className="min-w-0 truncate">{artifactLabels[type]} · {handoffStatusLabel}</span>
             <button
               type="button"
               className="inline-flex size-5 items-center justify-center rounded-full text-destructive transition hover:bg-destructive/10"
@@ -2079,7 +2088,7 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
         )}
         {!selected && (
           <div className="rounded-full border bg-background px-2 py-1 text-center text-[10px] shadow-sm">
-            {artifactLabels[type]}
+            {artifactLabels[type]} · {handoffStatusLabel}
           </div>
         )}
       </foreignObject>

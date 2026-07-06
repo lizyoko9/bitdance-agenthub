@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { applyPreflightStatusToNodes } from './agent-flow-node-status'
+import { applyPreflightStatusToEdges, applyPreflightStatusToNodes } from './agent-flow-node-status'
 import type { AgentFlowRunIssue } from './agent-flow-run-preflight'
 
 const node = (id: string, status: 'idle' | 'running' | 'done' | 'blocked' = 'idle') => ({
@@ -69,5 +69,45 @@ describe('applyPreflightStatusToNodes', () => {
     })
 
     expect(next[0].data).toEqual({ title: 'Writer', status: 'idle', outputs: ['report'] })
+  })
+})
+
+describe('applyPreflightStatusToEdges', () => {
+  it('marks every handoff edge as delivered after a passing preflight', () => {
+    const next = applyPreflightStatusToEdges({
+      edges: [
+        { source: 'input-1', target: 'agent-1', data: { label: '消息' } },
+        { source: 'agent-1', target: 'artifact-1', data: { label: '报告' } },
+      ],
+      preflight: {
+        ready: true,
+        issues: [],
+      },
+    })
+
+    expect(next.map((edge) => edge.data)).toEqual([
+      { label: '消息', handoffStatus: 'delivered' },
+      { label: '报告', handoffStatus: 'delivered' },
+    ])
+  })
+
+  it('marks edges touching a blocked node as blocked and leaves other handoffs pending', () => {
+    const next = applyPreflightStatusToEdges({
+      edges: [
+        { source: 'input-1', target: 'agent-1', data: { label: '消息', handoffStatus: 'delivered' as const } },
+        { source: 'agent-1', target: 'artifact-1', data: { label: '报告', handoffStatus: 'delivered' as const } },
+        { source: 'scratch-1', target: 'archive-1', data: { label: '文件包', handoffStatus: 'delivered' as const } },
+      ],
+      preflight: {
+        ready: false,
+        issues: [issue('agent_profile_missing', 'error', 'agent-1')],
+      },
+    })
+
+    expect(next.map((edge) => edge.data?.handoffStatus)).toEqual([
+      'blocked',
+      'blocked',
+      'pending',
+    ])
   })
 })
