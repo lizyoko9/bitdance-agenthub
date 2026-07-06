@@ -32,6 +32,7 @@ import { SkillsCenter } from '@/components/skills-center'
 import { ToolControlCenter } from '@/components/tool-control-center'
 import { UsageDashboard } from '@/components/usage-dashboard'
 import { buildVisibleAppModules, normalizeOrchestrationModuleId } from '@/lib/app-module-navigation'
+import { getEnabledModuleLayout } from '@/lib/agenthub-module-catalog'
 
 export type AppModuleId =
   | 'workbench'
@@ -262,8 +263,22 @@ function withDisplayOverride(module: AppModuleDefinition): AppModuleDefinition {
   return module
 }
 
-export const primaryAppModules = buildVisibleAppModules(appModules, 'primary').map(withDisplayOverride)
-export const advancedAppModules = buildVisibleAppModules(appModules, 'advanced').map(withDisplayOverride)
+export function getEnabledAppModules(requestedModuleIds?: string[]): AppModuleDefinition[] {
+  return getEnabledModuleLayout(requestedModuleIds)
+    .map((moduleBlock) => appModules.find((module) => module.id === moduleBlock.id))
+    .filter((module): module is AppModuleDefinition => Boolean(module))
+    .map(withDisplayOverride)
+}
+
+export function getVisibleAppModules(
+  group: AppModuleGroup,
+  requestedModuleIds?: string[],
+): AppModuleDefinition[] {
+  return buildVisibleAppModules(getEnabledAppModules(requestedModuleIds), group).map(withDisplayOverride)
+}
+
+export const primaryAppModules = getVisibleAppModules('primary')
+export const advancedAppModules = getVisibleAppModules('advanced')
 
 const moduleById = new Map(appModules.map((module) => [module.id, module]))
 

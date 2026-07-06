@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest'
 import { getDefaultModuleLayout } from '@/lib/agenthub-module-catalog'
 
 import {
+  advancedAppModules,
   appModules,
+  getEnabledAppModules,
   getAppModule,
   normalizeAppModuleId,
   primaryAppModules,
@@ -74,5 +76,13 @@ describe('app module routing', () => {
 
   it('keeps primary navigation aligned with the default module block layout', () => {
     expect(primaryAppModules.map((module) => module.id)).toEqual(getDefaultModuleLayout().map((module) => module.id))
+  })
+
+  it('keeps optional modules out of the default sidebar until they are enabled', () => {
+    expect(advancedAppModules.map((module) => module.id)).toEqual([])
+  })
+
+  it('can compose optional modules with their required dependencies', () => {
+    expect(getEnabledAppModules(['memory']).map((module) => module.id)).toEqual(['models', 'agents', 'memory'])
   })
 })

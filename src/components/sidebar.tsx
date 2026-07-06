@@ -54,6 +54,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const [showMore, setShowMore] = useState(false)
   const [search, setSearch] = useState('')
   const [creatingConversation, setCreatingConversation] = useState(false)
+  const hasAdvancedModules = advancedAppModules.length > 0
 
   const visibleConversations = useMemo(() => {
     const active = conversations.filter((conversation) => !conversation.archived)
@@ -186,7 +187,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 onClick={() => selectMode(item.id)}
               />
             ))}
-            {!collapsed && (
+            {!collapsed && hasAdvancedModules && (
               <button
                 type="button"
                 onClick={() => setShowMore((value) => !value)}
@@ -196,7 +197,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 {showMore ? '收起更多功能' : '更多功能'}
               </button>
             )}
-            {(showMore || collapsed || advancedAppModules.some((item) => item.id === mode)) && (
+            {hasAdvancedModules && (showMore || collapsed || advancedAppModules.some((item) => item.id === mode)) && (
               <div className={cn('space-y-1', !collapsed && 'pt-1')}>
                 {advancedAppModules.map((item) => (
                   <ModuleNavButton

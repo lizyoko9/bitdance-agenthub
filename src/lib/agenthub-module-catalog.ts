@@ -23,6 +23,13 @@ export type AgentHubModuleCompositionReport = {
   blockers: string[]
 }
 
+export type AgentHubModuleActivationReport = {
+  valid: boolean
+  enabledIds: string[]
+  disabledIds: string[]
+  blockers: string[]
+}
+
 const orchestrationAliases = new Set(['workflows', 'agent-orchestration', 'langflow-native', 'infinite-canvas'])
 
 export const AGENTHUB_MODULE_BLOCKS: AgentHubModuleBlock[] = [
@@ -116,6 +123,74 @@ export function normalizeModuleBlockId(id: string): string {
 
 export function getDefaultModuleLayout(): AgentHubModuleBlock[] {
   return AGENTHUB_MODULE_BLOCKS.filter((module) => module.defaultEnabled)
+}
+
+export function getEnabledModuleLayout(requestedModuleIds?: string[]): AgentHubModuleBlock[] {
+  if (!requestedModuleIds) return getDefaultModuleLayout()
+
+  const activation = resolveModuleActivation(requestedModuleIds)
+
+  return activation.enabledIds
+    .map((moduleId) => AGENTHUB_MODULE_BLOCKS.find((moduleBlock) => moduleBlock.id === moduleId))
+    .filter((moduleBlock): moduleBlock is AgentHubModuleBlock => Boolean(moduleBlock))
+}
+
+export function resolveModuleActivation(requestedModuleIds: string[]): AgentHubModuleActivationReport {
+  const blockById = new Map(AGENTHUB_MODULE_BLOCKS.map((moduleBlock) => [moduleBlock.id, moduleBlock]))
+  const enabled = new Set<string>()
+  const blockers: string[] = []
+
+  const enableWithDependencies = (moduleId: string, visiting: Set<string>): boolean => {
+    const normalizedModuleId = normalizeModuleBlockId(moduleId)
+    const moduleBlock = blockById.get(normalizedModuleId)
+
+    if (!moduleBlock) {
+      blockers.push(`${moduleId} is not a known AgentHub module`)
+      return false
+    }
+
+    if (moduleBlock.access !== 'free') {
+      blockers.push(`${normalizedModuleId} cannot be paid gated`)
+      return false
+    }
+
+    if (visiting.has(normalizedModuleId)) {
+      blockers.push(`${normalizedModuleId} has a circular module dependency`)
+      return false
+    }
+
+    if (enabled.has(normalizedModuleId)) return true
+
+    const nextVisiting = new Set(visiting)
+    nextVisiting.add(normalizedModuleId)
+
+    let dependenciesReady = true
+    for (const dependencyId of moduleBlock.dependencyIds) {
+      dependenciesReady = enableWithDependencies(dependencyId, nextVisiting) && dependenciesReady
+    }
+
+    if (dependenciesReady) {
+      enabled.add(normalizedModuleId)
+    }
+
+    return dependenciesReady
+  }
+
+  for (const moduleId of requestedModuleIds) {
+    enableWithDependencies(moduleId, new Set())
+  }
+
+  const enabledIds = [...enabled]
+  const disabledIds = AGENTHUB_MODULE_BLOCKS.map((moduleBlock) => moduleBlock.id).filter(
+    (moduleId) => !enabled.has(moduleId),
+  )
+
+  return {
+    valid: blockers.length === 0,
+    enabledIds,
+    disabledIds,
+    blockers,
+  }
 }
 
 export function validateModuleComposition(modules: AgentHubModuleBlock[]): AgentHubModuleCompositionReport {
