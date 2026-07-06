@@ -65,7 +65,7 @@ export interface AgentMemoryLearningReport {
     pendingReview: number
     approved: number
     rejected: number
-    latestEvents: Array<Pick<LearningEventRow, 'id' | 'title' | 'status' | 'createdAt'>>
+    latestEvents: Array<Pick<LearningEventRow, 'id' | 'title' | 'type' | 'summary' | 'status' | 'createdAt'>>
     activePlaybooks: number
     draftPlaybooks: number
     archivedPlaybooks: number
@@ -306,6 +306,8 @@ function buildLearningSummary(args: {
     latestEvents: args.learningEvents.slice(0, 5).map((event) => ({
       id: event.id,
       title: event.title,
+      type: event.type,
+      summary: event.summary,
       status: event.status,
       createdAt: event.createdAt,
     })),

@@ -550,7 +550,7 @@ function AgentBrainDetailPanel({ detail }: { detail: AgentBrainDetailView }) {
 
       <div className="grid gap-2 lg:grid-cols-2">
         <DetailList title="最近会注入的上下文" emptyLabel="暂无可召回经验" items={detail.recentContext} />
-        <DetailList title="需要确认" emptyLabel="暂无待审核项" items={detail.reviewQueue} />
+        <ReviewItemList items={detail.reviewItems} />
         <DetailList title="可用工作手册" emptyLabel="暂无启用的工作手册" items={detail.playbooks} />
         <DetailList title="下一步建议" emptyLabel="暂无建议" items={detail.recommendations} />
       </div>
@@ -565,6 +565,39 @@ function MiniStat({ item }: { item: { label: string; value: string; detail: stri
       <div className="mt-1 truncate text-xs font-semibold">{item.value}</div>
       <div className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
         {item.detail}
+      </div>
+    </div>
+  )
+}
+
+function ReviewItemList({
+  items,
+}: {
+  items: AgentBrainDetailView['reviewItems']
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 px-3 py-2">
+      <div className="text-xs font-medium">需要确认</div>
+      <div className="mt-2 space-y-2">
+        {items.length ? (
+          items.slice(0, 4).map((item) => (
+            <div key={item.title} className="rounded-md border bg-muted/15 px-2.5 py-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+                  {item.title}
+                </span>
+                <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                  {item.badge}
+                </span>
+              </div>
+              <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+                {item.detail}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="text-[11px] text-muted-foreground">暂无待审核项</div>
+        )}
       </div>
     </div>
   )

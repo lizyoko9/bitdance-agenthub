@@ -62,7 +62,17 @@ function report(overrides: Partial<AgentBrainSummaryReport> = {}): AgentBrainSum
         {
           id: 'evt1',
           title: '视频导出工作手册草稿',
+          type: 'playbook_proposal',
           status: 'pending_review',
+          summary: '审核后才能成为这个 Agent 的长期工作手册。',
+          createdAt: 1,
+        },
+        {
+          id: 'evt2',
+          title: '剪映导出失败教训共享',
+          type: 'memory_share_review',
+          status: 'pending_review',
+          summary: '先保存在这个 Agent 私有记忆里，确认后再共享给项目。',
           createdAt: 1,
         },
       ],
@@ -180,6 +190,28 @@ describe('agent brain summary', () => {
       '视频导出工作手册草稿',
       '客户账号偏好',
       '字幕错位失败教训',
+    ])
+    expect(detail.reviewItems).toEqual([
+      {
+        title: '视频导出工作手册草稿',
+        badge: '工作手册草稿',
+        detail: '审核后才能成为这个 Agent 的长期工作手册。',
+      },
+      {
+        title: '剪映导出失败教训共享',
+        badge: '记忆共享审核',
+        detail: '先保存在这个 Agent 私有记忆里，确认后再共享给项目。',
+      },
+      {
+        title: '客户账号偏好',
+        badge: '隐私记忆',
+        detail: '确认是否只允许这个 Agent 或项目内使用。',
+      },
+      {
+        title: '字幕错位失败教训',
+        badge: '失败教训',
+        detail: '下次计划时优先提醒这个 Agent 避免重复失败。',
+      },
     ])
     expect(detail.playbooks).toEqual(['短视频导出 SOP'])
     expect(detail.recentContext).toEqual([

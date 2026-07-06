@@ -39,7 +39,9 @@ export interface AgentBrainSummaryReport {
     latestEvents?: Array<{
       id: string
       title: string
+      type?: string
       status: string
+      summary?: string
       createdAt: number
     }>
     latestPlaybooks?: Array<{
@@ -86,6 +88,12 @@ export interface AgentBrainDetailStat {
   detail: string
 }
 
+export interface AgentBrainReviewItem {
+  title: string
+  badge: string
+  detail: string
+}
+
 export interface AgentBrainDetailView {
   title: string
   statusLabel: string
@@ -94,6 +102,7 @@ export interface AgentBrainDetailView {
   recallFlow: AgentBrainDetailStat[]
   recentContext: string[]
   reviewQueue: string[]
+  reviewItems: AgentBrainReviewItem[]
   playbooks: string[]
   recommendations: string[]
 }
@@ -188,6 +197,7 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
     ...report.governance.expiringSoonMemoryTitles,
     ...report.retrieval.gaps,
   ])
+  const reviewItems = buildReviewItems(report)
 
   return {
     title: '员工大脑详情',
@@ -240,6 +250,7 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
       return `${candidate.title} · ${candidate.type} · ${suffix}`
     }),
     reviewQueue,
+    reviewItems,
     playbooks: (report.learningSummary.latestPlaybooks ?? [])
       .filter((playbook) => playbook.status === 'active')
       .map((playbook) => playbook.title.trim())
@@ -247,6 +258,63 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
       .slice(0, 5),
     recommendations: report.recommendations.map((item) => item.trim()).filter(Boolean).slice(0, 5),
   }
+}
+
+function buildReviewItems(report: AgentBrainSummaryReport): AgentBrainReviewItem[] {
+  const items: AgentBrainReviewItem[] = []
+  const pendingEvents = (report.learningSummary.latestEvents ?? [])
+    .filter((event) => event.status === 'pending_review')
+
+  for (const event of pendingEvents) {
+    items.push({
+      title: event.title,
+      badge: labelLearningEventType(event.type),
+      detail: event.summary?.trim() || '确认后才会写入这个 Agent 的长期经验。',
+    })
+  }
+  for (const title of report.governance.pendingLearningTitles) {
+    items.push({
+      title,
+      badge: '待审核经验',
+      detail: '确认后才会成为这个 Agent 的长期经验或工作手册。',
+    })
+  }
+  for (const title of report.governance.sensitiveMemoryTitles ?? []) {
+    items.push({
+      title,
+      badge: '隐私记忆',
+      detail: '确认是否只允许这个 Agent 或项目内使用。',
+    })
+  }
+  for (const title of report.governance.mistakeTitles) {
+    items.push({
+      title,
+      badge: '失败教训',
+      detail: '下次计划时优先提醒这个 Agent 避免重复失败。',
+    })
+  }
+  for (const title of report.governance.expiringSoonMemoryTitles) {
+    items.push({
+      title,
+      badge: '即将过期',
+      detail: '确认这条记忆是否还值得保留。',
+    })
+  }
+  for (const gap of report.retrieval.gaps) {
+    items.push({
+      title: gap,
+      badge: '需要处理',
+      detail: '这会影响这个 Agent 运行前召回经验。',
+    })
+  }
+  return uniqueReviewItems(items).slice(0, 8)
+}
+
+function labelLearningEventType(type: string | undefined): string {
+  if (type === 'playbook_proposal') return '工作手册草稿'
+  if (type === 'memory_share_review') return '记忆共享审核'
+  if (type === 'psm_approval_review') return '学习审核'
+  return '待审核经验'
 }
 
 function resolveStatusLabel(readiness: AgentBrainReadiness, needsReview: boolean): string {
@@ -273,6 +341,22 @@ function unique(values: string[]): string[] {
     if (!trimmed || seen.has(trimmed)) continue
     seen.add(trimmed)
     result.push(trimmed)
+  }
+  return result
+}
+
+function uniqueReviewItems(items: AgentBrainReviewItem[]): AgentBrainReviewItem[] {
+  const seen = new Set<string>()
+  const result: AgentBrainReviewItem[] = []
+  for (const item of items) {
+    const title = item.title.trim()
+    if (!title || seen.has(title)) continue
+    seen.add(title)
+    result.push({
+      title,
+      badge: item.badge,
+      detail: item.detail,
+    })
   }
   return result
 }
