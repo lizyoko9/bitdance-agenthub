@@ -22,6 +22,18 @@ export interface EmployeeRunBrainDigest {
   headline: string
   metrics: Array<{ label: string; value: string }>
   items: string[]
+  nextRunBriefing: EmployeeRunNextRunBriefing
+}
+
+export interface EmployeeRunNextRunBriefing {
+  title: string
+  items: EmployeeRunNextRunBriefingItem[]
+}
+
+export interface EmployeeRunNextRunBriefingItem {
+  label: string
+  detail: string
+  tone: 'ready' | 'warning' | 'muted'
 }
 
 export function buildEmployeeRunBrainDigest(input: EmployeeRunBrainDigestInput): EmployeeRunBrainDigest {
@@ -48,6 +60,16 @@ export function buildEmployeeRunBrainDigest(input: EmployeeRunBrainDigestInput):
         { label: '待审核', value: '0' },
       ],
       items: ['暂无复盘记录'],
+      nextRunBriefing: {
+        title: '下次开工提示',
+        items: [
+          {
+            label: '开工状态',
+            detail: '等待这个员工完成一次任务后生成。',
+            tone: 'muted',
+          },
+        ],
+      },
     }
   }
 
@@ -72,6 +94,60 @@ export function buildEmployeeRunBrainDigest(input: EmployeeRunBrainDigestInput):
       { label: '待审核', value: String(pendingLearningTitles.length) },
     ],
     items: items.length ? items.slice(0, 5) : ['已记录本次运行结果'],
+    nextRunBriefing: buildNextRunBriefing({
+      reusableProcedure: normalizeList(input.reflection?.reusableProcedure ?? []),
+      whatFailed,
+      futureWarnings,
+      pendingLearningTitles,
+    }),
+  }
+}
+
+function buildNextRunBriefing(args: {
+  reusableProcedure: string[]
+  whatFailed: string[]
+  futureWarnings: string[]
+  pendingLearningTitles: string[]
+}): EmployeeRunNextRunBriefing {
+  const items: EmployeeRunNextRunBriefingItem[] = []
+  if (args.reusableProcedure.length) {
+    items.push({
+      label: '优先复用',
+      detail: joinChinese(args.reusableProcedure.slice(0, 3)),
+      tone: 'ready',
+    })
+  }
+  if (args.whatFailed.length) {
+    items.push({
+      label: '先避开',
+      detail: joinChinese(args.whatFailed.slice(0, 2)),
+      tone: 'warning',
+    })
+  }
+  if (args.futureWarnings.length) {
+    items.push({
+      label: '开工前检查',
+      detail: joinChinese(args.futureWarnings.slice(0, 2)),
+      tone: 'warning',
+    })
+  }
+  if (args.pendingLearningTitles.length) {
+    items.push({
+      label: '需要确认',
+      detail: joinChinese(args.pendingLearningTitles.slice(0, 1)),
+      tone: 'warning',
+    })
+  }
+  if (items.length === 0) {
+    items.push({
+      label: '开工状态',
+      detail: '已记录本次结果，下次运行会优先参考这次复盘。',
+      tone: 'ready',
+    })
+  }
+  return {
+    title: '下次开工提示',
+    items: items.slice(0, 4),
   }
 }
 
@@ -85,4 +161,8 @@ function normalizeList(values: string[]): string[] {
     result.push(trimmed)
   }
   return result
+}
+
+function joinChinese(values: string[]): string {
+  return values.map((value) => value.trim()).filter(Boolean).join('、')
 }

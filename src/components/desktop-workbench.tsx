@@ -1424,6 +1424,32 @@ function EmployeeRunBrainDigestPanel({ digest }: { digest: EmployeeRunBrainDiges
           </div>
         ))}
       </div>
+      <EmployeeRunNextRunBriefing briefing={digest.nextRunBriefing} />
+    </div>
+  )
+}
+
+function EmployeeRunNextRunBriefing({
+  briefing,
+}: {
+  briefing: EmployeeRunBrainDigest['nextRunBriefing']
+}) {
+  return (
+    <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+      <div className="text-[11px] font-medium">下次开工提示</div>
+      <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+        {briefing.items.map((item) => (
+          <div key={`${item.label}:${item.detail}`} className="rounded-md bg-background px-2 py-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[10px] font-medium">{item.label}</span>
+              <span className={cn('size-1.5 shrink-0 rounded-full', brainBriefingToneClass(item.tone))} />
+            </div>
+            <div className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+              {item.detail}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -1432,6 +1458,12 @@ function brainDigestToneClass(tone: EmployeeRunBrainDigest['tone']) {
   if (tone === 'ready') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
   if (tone === 'warning') return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
   return 'border-muted bg-muted/40 text-muted-foreground'
+}
+
+function brainBriefingToneClass(tone: EmployeeRunBrainDigest['nextRunBriefing']['items'][number]['tone']) {
+  if (tone === 'ready') return 'bg-emerald-500'
+  if (tone === 'warning') return 'bg-amber-500'
+  return 'bg-muted-foreground/40'
 }
 
 function runBrainStatusClass(status: RunActivitySummary['recentRuns'][number]['brainStatus']) {

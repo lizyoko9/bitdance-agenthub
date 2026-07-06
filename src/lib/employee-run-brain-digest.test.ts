@@ -37,6 +37,31 @@ describe('employee run brain digest', () => {
         '下次提醒：下次先检查项目路径',
         '待确认：剪映失败教训共享审核',
       ],
+      nextRunBriefing: {
+        title: '下次开工提示',
+        items: [
+          {
+            label: '优先复用',
+            detail: '检查素材、导出视频',
+            tone: 'ready',
+          },
+          {
+            label: '先避开',
+            detail: '项目路径不存在，导出失败',
+            tone: 'warning',
+          },
+          {
+            label: '开工前检查',
+            detail: '下次先检查项目路径',
+            tone: 'warning',
+          },
+          {
+            label: '需要确认',
+            detail: '剪映失败教训共享审核',
+            tone: 'warning',
+          },
+        ],
+      },
     })
   })
 
@@ -51,5 +76,15 @@ describe('employee run brain digest', () => {
     expect(digest.tone).toBe('muted')
     expect(digest.headline).toBe('这个员工完成任务后，会在这里显示它学到了什么。')
     expect(digest.items).toEqual(['暂无复盘记录'])
+    expect(digest.nextRunBriefing).toEqual({
+      title: '下次开工提示',
+      items: [
+        {
+          label: '开工状态',
+          detail: '等待这个员工完成一次任务后生成。',
+          tone: 'muted',
+        },
+      ],
+    })
   })
 })
