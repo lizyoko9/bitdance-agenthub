@@ -21,6 +21,10 @@ import {
   type AgentMemoryEvolutionPlan,
   type AgentMemoryRecallResult,
 } from '@/lib/agent-psm-memory-core'
+import {
+  applyAgentMemoryUpdateDeltas,
+  type AgentMemoryAppliedUpdate,
+} from '@/lib/agent-memory-evolution-application'
 import { buildRuntimeAgentLearningPlan } from '@/lib/agent-memory-runtime-learning'
 import { newMemoryItemId, newRunReflectionId } from '@/server/ids'
 
@@ -39,6 +43,7 @@ export interface RuntimeLearningResult {
   reflection: RunReflectionRow | null
   memoryItem: MemoryItemRow | null
   memoryEvolution?: AgentMemoryEvolutionPlan
+  memoryUpdateResults: AgentMemoryAppliedUpdate[]
 }
 
 export async function retrieveRelevantMemories(args: {
@@ -97,7 +102,7 @@ export async function reflectAndLearn(args: {
   agent: AgentProfileRow
   retrievedMemories: RetrievedMemory[]
 }): Promise<RuntimeLearningResult> {
-  if (isMemoryDisabled(args.agent)) return { reflection: null, memoryItem: null }
+  if (isMemoryDisabled(args.agent)) return { reflection: null, memoryItem: null, memoryUpdateResults: [] }
 
   const artifactType = getString(args.agent.outputContract, 'artifactType') ?? 'artifact'
   const learningPlan = buildRuntimeAgentLearningPlan({
@@ -137,8 +142,30 @@ export async function reflectAndLearn(args: {
     confidence: learningPlan.primaryMemoryDraft.confidence,
     importance: learningPlan.primaryMemoryDraft.importance,
   })
+  const memoryUpdateResults = applyAgentMemoryUpdateDeltas({
+    memories: args.retrievedMemories
+      .map(({ item }) => item)
+      .filter((item) => memoryWritableByActor(item, 'agent', args.agent.id))
+      .map((item) => ({
+        id: item.id,
+        confidence: item.confidence,
+        importance: item.importance,
+      })),
+    updates: learningPlan.evolution.memoryUpdates,
+  })
+  for (const update of memoryUpdateResults) {
+    await updateMemoryItem(update.memoryId, {
+      confidence: update.nextConfidence,
+      importance: update.nextImportance,
+    })
+  }
 
-  return { reflection, memoryItem, memoryEvolution: learningPlan.evolution }
+  return {
+    reflection,
+    memoryItem,
+    memoryEvolution: learningPlan.evolution,
+    memoryUpdateResults,
+  }
 }
 
 export function compileRuntimeMemoryContextPack(args: {

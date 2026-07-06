@@ -396,6 +396,8 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
   await recordEmployeeEvent(runId, 'phase', 'reflect_and_learn', 'Runtime reflection and memory write completed.', {
     reflectionId: learning.reflection?.id ?? null,
     memoryItemId: learning.memoryItem?.id ?? null,
+    memoryAppliedUpdateCount: learning.memoryUpdateResults.length,
+    memoryUpdateResults: learning.memoryUpdateResults as unknown as JsonObject[],
     learningEventId: learningProposal.learningEvent?.id ?? null,
     learningEventIds: learningProposal.learningEvents.map((event) => event.id),
     memoryEvolution: learning.memoryEvolution
