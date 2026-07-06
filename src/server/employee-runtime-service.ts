@@ -396,6 +396,14 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
     reflectionId: learning.reflection?.id ?? null,
     memoryItemId: learning.memoryItem?.id ?? null,
     learningEventId: learningProposal.learningEvent?.id ?? null,
+    memoryEvolution: learning.memoryEvolution
+      ? {
+          updateCount: learning.memoryEvolution.memoryUpdates.length,
+          newMemoryCount: learning.memoryEvolution.newMemories.length,
+          hasPlaybookDraft: Boolean(learning.memoryEvolution.playbookDraft),
+          approvalRequests: learning.memoryEvolution.approvalRequests,
+        }
+      : null,
   })
   const continuity = await recordRunContinuity({
     run: completedRun,

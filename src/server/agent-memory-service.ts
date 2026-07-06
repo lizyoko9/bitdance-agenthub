@@ -18,8 +18,10 @@ import {
   recallAgentMemories,
   type AgentMemoryBlock,
   type AgentMemoryContextPack,
+  type AgentMemoryEvolutionPlan,
   type AgentMemoryRecallResult,
 } from '@/lib/agent-psm-memory-core'
+import { buildRuntimeAgentLearningPlan } from '@/lib/agent-memory-runtime-learning'
 import { newMemoryItemId, newRunReflectionId } from '@/server/ids'
 
 export interface RetrievedMemory {
@@ -36,6 +38,7 @@ export interface RuntimeMemoryContext {
 export interface RuntimeLearningResult {
   reflection: RunReflectionRow | null
   memoryItem: MemoryItemRow | null
+  memoryEvolution?: AgentMemoryEvolutionPlan
 }
 
 export async function retrieveRelevantMemories(args: {
@@ -97,44 +100,45 @@ export async function reflectAndLearn(args: {
   if (isMemoryDisabled(args.agent)) return { reflection: null, memoryItem: null }
 
   const artifactType = getString(args.agent.outputContract, 'artifactType') ?? 'artifact'
+  const learningPlan = buildRuntimeAgentLearningPlan({
+    runId: args.run.id,
+    agentId: args.agent.id,
+    projectId: getString(args.agent.memoryPolicy, 'projectId') ?? undefined,
+    role: args.agent.role,
+    goal: args.run.goal,
+    status: args.run.status,
+    error: args.run.error,
+    artifactType,
+    retrievedMemoryIds: args.retrievedMemories.map(({ item }) => item.id),
+  })
   const reflection = await createRunReflection({
     runId: args.run.id,
     agentProfileId: args.agent.id,
-    whatWorked: [
-      `Completed deterministic runtime lifecycle for ${args.agent.role}.`,
-      `Verified required ${artifactType} output contract before finishing.`,
+    whatWorked: learningPlan.reflection.whatWorked,
+    whatFailed: learningPlan.reflection.whatFailed,
+    newKnowledge: learningPlan.reflection.newKnowledge,
+    reusableProcedure: learningPlan.reflection.reusableProcedure,
+    suggestedSkillUpdates: learningPlan.reflection.suggestedSkillUpdates,
+    futureWarnings: [
+      ...learningPlan.reflection.futureWarnings,
+      ...args.retrievedMemories
+        .filter(({ item }) => item.type === 'mistake')
+        .map(({ item }) => item.title),
     ],
-    whatFailed: args.run.error ? [args.run.error] : [],
-    newKnowledge: [
-      `Goal handled: ${args.run.goal}`,
-      `Retrieved ${args.retrievedMemories.length} relevant memories before planning.`,
-    ],
-    reusableProcedure: [
-      `For ${args.agent.role} tasks, retrieve memory, derive a plan, verify the ${artifactType} contract, then checkpoint before handoff.`,
-    ],
-    suggestedSkillUpdates: [],
-    futureWarnings: args.retrievedMemories
-      .filter(({ item }) => item.type === 'mistake')
-      .map(({ item }) => item.title),
   })
 
   const memoryItem = await createMemoryItem({
     agentProfileId: args.agent.id,
-    scope: 'agent',
-    type: args.run.error ? 'mistake' : 'procedural',
-    title: `${args.agent.role}: ${truncate(args.run.goal, 80)}`,
-    content: [
-      `Goal: ${args.run.goal}`,
-      `Outcome: ${args.run.status}`,
-      `Procedure: retrieve memory -> plan -> verify output contract -> checkpoint -> handoff.`,
-      `Required artifact: ${artifactType}.`,
-    ].join('\n'),
+    scope: learningPlan.primaryMemoryDraft.scope,
+    type: learningPlan.primaryMemoryDraft.type,
+    title: learningPlan.primaryMemoryDraft.title,
+    content: learningPlan.primaryMemoryDraft.content,
     sourceRunId: args.run.id,
-    confidence: args.run.error ? 0.65 : 0.9,
-    importance: args.run.error ? 0.85 : 0.72,
+    confidence: learningPlan.primaryMemoryDraft.confidence,
+    importance: learningPlan.primaryMemoryDraft.importance,
   })
 
-  return { reflection, memoryItem }
+  return { reflection, memoryItem, memoryEvolution: learningPlan.evolution }
 }
 
 export function compileRuntimeMemoryContextPack(args: {
@@ -578,8 +582,4 @@ function normalizeNullable(value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null
   const trimmed = value.trim()
   return trimmed.length === 0 ? null : trimmed
-}
-
-function truncate(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}...`
 }
