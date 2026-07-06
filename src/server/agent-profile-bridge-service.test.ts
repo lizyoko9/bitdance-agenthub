@@ -6,6 +6,7 @@ const store = vi.hoisted(() => ({
   agents: [] as AgentRow[],
   profiles: [] as AgentProfileRow[],
   insertedProfiles: [] as AgentProfileRow[],
+  updatedProfiles: [] as Partial<AgentProfileRow>[],
 }))
 
 vi.mock('@/db/client', () => ({
@@ -26,6 +27,17 @@ vi.mock('@/db/client', () => ({
         store.insertedProfiles.push(profile)
       }),
     })),
+    update: vi.fn(() => ({
+      set: vi.fn((updates: Partial<AgentProfileRow>) => ({
+        where: vi.fn(async () => {
+          const index = store.profiles.findIndex((profile) => profile.id === store.currentId)
+          if (index >= 0) {
+            store.profiles[index] = { ...store.profiles[index], ...updates } as AgentProfileRow
+            store.updatedProfiles.push(updates)
+          }
+        }),
+      })),
+    })),
   },
 }))
 
@@ -37,6 +49,7 @@ describe('agent profile bridge service', () => {
     store.agents = []
     store.profiles = []
     store.insertedProfiles = []
+    store.updatedProfiles = []
   })
 
   it('creates a matching employee Agent Profile for a legacy UI Agent', async () => {
@@ -113,6 +126,116 @@ describe('agent profile bridge service', () => {
     })
     expect(profile.memoryPolicy).toEqual({ enabled: false, privateFirst: false })
     expect(store.insertedProfiles).toHaveLength(0)
+    expect(store.updatedProfiles).toHaveLength(0)
+  })
+
+  it('syncs a bridge-owned Agent Profile when the UI Agent capabilities change', async () => {
+    const agent = legacyAgent({
+      id: 'agent_ops',
+      name: '运营员工',
+      description: '负责文案和表格',
+      capabilities: ['报告'],
+      systemPrompt: '旧提示。',
+      toolNames: ['fs_read'],
+      skillIds: ['copywriting'],
+      mcpServerIds: [],
+      cliProfileIds: [],
+    })
+    const existing = agentProfile({
+      id: agent.id,
+      name: '旧运营员工',
+      role: '旧运营员工',
+      description: '旧描述',
+      skillIds: ['old_skill'],
+      mcpServerIds: ['old_mcp'],
+      cliProfileIds: ['old_cli'],
+      memoryPolicy: {
+        enabled: false,
+        sourceAgentId: agent.id,
+        privateFirst: false,
+        customNote: '用户关闭了记忆，不能被同步覆盖',
+      },
+      permissionPolicy: {
+        toolNames: ['old_tool'],
+        modelId: 'old-model',
+      },
+      outputContract: {
+        artifactType: 'document',
+        validationRules: ['旧规则'],
+      },
+      systemPrompt: '旧提示。',
+    })
+    const changedAgent = legacyAgent({
+      ...agent,
+      name: '运营增长员工',
+      description: '负责文案、表格和增长报告',
+      capabilities: ['表格', '报告'],
+      systemPrompt: '新的长期工作规则。',
+      toolNames: ['fs_read', 'fs_write', 'bash'],
+      skillIds: ['copywriting', 'spreadsheet'],
+      mcpServerIds: ['mcp_sheets'],
+      cliProfileIds: ['cli_report'],
+      modelId: 'deepseek-reasoner',
+      supportsVision: true,
+    })
+    store.currentId = agent.id
+    store.agents.push(changedAgent)
+    store.profiles.push(existing)
+
+    const profile = await resolveAgentProfileForAgent(agent.id)
+
+    expect(profile).toMatchObject({
+      id: agent.id,
+      name: '运营增长员工',
+      role: '运营增长员工',
+      description: '负责文案、表格和增长报告',
+      skillIds: ['copywriting', 'spreadsheet'],
+      mcpServerIds: ['mcp_sheets'],
+      cliProfileIds: ['cli_report'],
+      systemPrompt: '新的长期工作规则。',
+    })
+    expect(profile.memoryPolicy).toEqual({
+      enabled: false,
+      sourceAgentId: agent.id,
+      privateFirst: false,
+      customNote: '用户关闭了记忆，不能被同步覆盖',
+    })
+    expect(profile.permissionPolicy).toMatchObject({
+      toolNames: ['fs_read', 'fs_write', 'bash'],
+      modelId: 'deepseek-reasoner',
+      supportsVision: true,
+    })
+    expect(profile.outputContract).toMatchObject({
+      artifactType: 'spreadsheet',
+      validationRules: ['必须输出客户可查看的交付物'],
+    })
+    expect(store.updatedProfiles).toHaveLength(1)
+  })
+
+  it('does not rewrite an unchanged bridge-owned Agent Profile', async () => {
+    const agent = legacyAgent({
+      id: 'agent_same',
+      name: '报告员工',
+      description: '负责客户报告',
+      capabilities: ['报告'],
+      systemPrompt: '按客户要求写报告。',
+      toolNames: ['fs_read'],
+      skillIds: ['reporting'],
+      mcpServerIds: ['mcp_docs'],
+      cliProfileIds: ['cli_doc'],
+    })
+    const existing = agentProfile({
+      ...legacyProfileSnapshot(agent),
+      updatedAt: 123,
+    })
+    store.currentId = agent.id
+    store.agents.push(agent)
+    store.profiles.push(existing)
+
+    const profile = await resolveAgentProfileForAgent(agent.id)
+
+    expect(profile.updatedAt).toBe(123)
+    expect(store.updatedProfiles).toHaveLength(0)
   })
 })
 
@@ -184,5 +307,55 @@ function agentProfile(overrides: Partial<AgentProfileRow>): AgentProfileRow {
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
+  }
+}
+
+function legacyProfileSnapshot(agent: AgentRow): Partial<AgentProfileRow> {
+  return {
+    id: agent.id,
+    name: agent.name,
+    role: agent.name,
+    description: agent.description,
+    skillIds: agent.skillIds,
+    mcpServerIds: agent.mcpServerIds,
+    cliProfileIds: agent.cliProfileIds,
+    memoryPolicy: {
+      enabled: true,
+      sourceAgentId: agent.id,
+      privateFirst: true,
+      reviewBeforeSharing: true,
+    },
+    permissionPolicy: {
+      toolNames: agent.toolNames,
+      supportsVision: agent.supportsVision,
+      adapterName: agent.adapterName,
+      modelProvider: agent.modelProvider,
+      modelId: agent.modelId,
+    },
+    outputContract: {
+      artifactType: 'report',
+      validationRules: ['必须输出客户可查看的交付物'],
+      sourceCapabilities: agent.capabilities,
+    },
+    persona: {
+      avatar: agent.avatar,
+      tone: 'friendly',
+      language: 'zh-CN',
+      communicationStyle: {
+        useEmoji: false,
+        useCodeBlocks: true,
+        preferBulletPoints: true,
+        showThinkingProcess: false,
+        selfReference: agent.name,
+      },
+      personalityTraits: {
+        cautious: 0.7,
+        creative: 0.55,
+        thorough: 0.8,
+        efficient: 0.7,
+      },
+    },
+    systemPrompt: agent.systemPrompt,
+    successCriteria: ['交付物必须能被下一个节点或用户直接查看。', '最终产物类型必须是 report。', '覆盖能力要求：报告。'],
   }
 }

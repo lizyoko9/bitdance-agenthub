@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
+import { resolveAgentProfileForAgent } from '@/server/agent-profile-bridge-service'
 import { newAgentId } from '@/server/ids'
 import {
   validateOpenAICompatibleApiKey,
@@ -77,6 +78,7 @@ export async function createCustomAgent(args: CreateAgentArgs) {
   }
 
   await db.insert(schema.agents).values(row)
+  await resolveAgentProfileForAgent(row.id)
   return row
 }
 
@@ -179,6 +181,7 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
 
   const updated = await db.query.agents.findFirst({ where: eq(schema.agents.id, agentId) })
   if (!updated) throw new Error('Update succeeded but row missing afterwards')
+  await resolveAgentProfileForAgent(updated.id)
   return updated
 }
 

@@ -218,6 +218,17 @@ export function AgentEmployeeSettingsPanel({
 
       const updated = await updateAgent(agent.id, patch)
       upsertAgent(updated)
+      try {
+        setMemoryLoading(true)
+        const report = await fetchAgentMemoryLearningReportForAgent(updated.id)
+        setMemoryReport(report)
+        setMemoryUnavailable(false)
+      } catch (memoryErr) {
+        console.warn('[AgentEmployeeSettingsPanel] memory report refresh failed', memoryErr)
+        setMemoryUnavailable(true)
+      } finally {
+        setMemoryLoading(false)
+      }
       setSavedNotice('已保存到这个智能体。')
     } catch (err) {
       console.error('[AgentEmployeeSettingsPanel] save failed', err)

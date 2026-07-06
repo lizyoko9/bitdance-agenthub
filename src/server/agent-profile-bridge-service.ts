@@ -8,16 +8,30 @@ export async function resolveAgentProfileForAgent(agentId: string): Promise<Agen
   const existing = await db.query.agentProfiles.findFirst({
     where: eq(agentProfiles.id, agentId),
   })
-  if (existing) return existing
 
   const agent = await db.query.agents.findFirst({
     where: eq(agents.id, agentId),
   })
   if (!agent) throw new Error(`Agent not found: ${agentId}`)
 
+  if (existing) return syncBridgeOwnedAgentProfile(existing, agent)
+
   const profile = buildAgentProfileFromLegacyAgent(agent)
   await db.insert(agentProfiles).values(profile)
   return profile
+}
+
+export async function syncBridgeOwnedAgentProfile(
+  existing: AgentProfileRow,
+  agent: AgentRow,
+): Promise<AgentProfileRow> {
+  if (!isBridgeOwnedProfile(existing, agent.id)) return existing
+
+  const updates = buildBridgeSyncPatch(existing, agent)
+  if (Object.keys(updates).length === 0) return existing
+
+  await db.update(agentProfiles).set(updates).where(eq(agentProfiles.id, existing.id))
+  return { ...existing, ...updates }
 }
 
 export function buildAgentProfileFromLegacyAgent(agent: AgentRow): AgentProfileRow {
@@ -119,4 +133,60 @@ function buildSuccessCriteria(capabilities: string[], artifactType: string): str
 
 function containsAny(text: string, values: string[]): boolean {
   return values.some((value) => text.includes(value.toLowerCase()))
+}
+
+function isBridgeOwnedProfile(profile: AgentProfileRow, agentId: string): boolean {
+  return readString(profile.memoryPolicy.sourceAgentId) === agentId
+}
+
+function buildBridgeSyncPatch(
+  existing: AgentProfileRow,
+  agent: AgentRow,
+): Partial<AgentProfileRow> {
+  const artifactType = inferArtifactType(agent.capabilities)
+  const next = {
+    name: agent.name,
+    role: agent.name,
+    description: agent.description,
+    skillIds: agent.skillIds,
+    mcpServerIds: agent.mcpServerIds,
+    cliProfileIds: agent.cliProfileIds,
+    permissionPolicy: {
+      ...existing.permissionPolicy,
+      toolNames: agent.toolNames,
+      supportsVision: agent.supportsVision,
+      adapterName: agent.adapterName,
+      modelProvider: agent.modelProvider,
+      modelId: agent.modelId,
+    },
+    outputContract: {
+      ...existing.outputContract,
+      artifactType,
+      validationRules: ['必须输出客户可查看的交付物'],
+      sourceCapabilities: agent.capabilities,
+    },
+    persona: {
+      ...existing.persona,
+      avatar: agent.avatar,
+      communicationStyle: {
+        ...existing.persona.communicationStyle,
+        selfReference: agent.name,
+      },
+    },
+    systemPrompt: agent.systemPrompt,
+    successCriteria: buildSuccessCriteria(agent.capabilities, artifactType),
+  }
+
+  const updates: Partial<AgentProfileRow> = {}
+  for (const [key, value] of Object.entries(next) as Array<[keyof typeof next, unknown]>) {
+    if (JSON.stringify(existing[key as keyof AgentProfileRow]) !== JSON.stringify(value)) {
+      Object.assign(updates, { [key]: value })
+    }
+  }
+  if (Object.keys(updates).length > 0) updates.updatedAt = Date.now()
+  return updates
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
