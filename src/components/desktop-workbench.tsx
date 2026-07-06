@@ -62,6 +62,10 @@ import {
   type RunActivitySummary,
 } from '@/lib/api'
 import { inferBusinessWorkbenchProfile } from '@/lib/business-workbench-model'
+import {
+  buildEmployeeRunBrainDigest,
+  type EmployeeRunBrainDigest,
+} from '@/lib/employee-run-brain-digest'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 
@@ -1296,6 +1300,13 @@ function RunSnapshotPanel({
   const latestEvents = snapshot ? [...snapshot.events].slice(-4).reverse() : []
   const toolCount = snapshot ? snapshot.cliRuns.length + snapshot.computerActionEvents.length : 0
   const outputStatus = getSnapshotOutputStatus(run?.output)
+  const brainDigest = snapshot
+    ? buildEmployeeRunBrainDigest({
+        reflection: snapshot.reflection,
+        memoryItems: snapshot.memoryItems,
+        learningEvents: snapshot.learningEvents,
+      })
+    : null
 
   return (
     <div data-testid="run-snapshot-panel" className="space-y-3 rounded-lg border bg-muted/20 p-3">
@@ -1338,6 +1349,8 @@ function RunSnapshotPanel({
             </div>
           </div>
 
+          {brainDigest && <EmployeeRunBrainDigestPanel digest={brainDigest} />}
+
           <RuntimeEnvironmentPanel
             snapshot={snapshot}
             environment={runtimeEnvironment}
@@ -1376,6 +1389,46 @@ function RunSnapshotPanel({
       )}
     </div>
   )
+}
+
+function EmployeeRunBrainDigestPanel({ digest }: { digest: EmployeeRunBrainDigest }) {
+  return (
+    <div className="space-y-2 rounded-md border bg-background p-3" data-testid="employee-run-brain-digest">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs font-semibold">
+            <Brain className="size-3.5 text-primary" />
+            <span>{digest.title}</span>
+          </div>
+          <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{digest.headline}</div>
+        </div>
+        <Badge variant="outline" className={cn('shrink-0', brainDigestToneClass(digest.tone))}>
+          {digest.statusLabel}
+        </Badge>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        {digest.metrics.map((metric) => (
+          <div key={metric.label} className="rounded-md border bg-muted/20 px-2 py-1.5">
+            <div className="truncate text-[10px] text-muted-foreground">{metric.label}</div>
+            <div className="text-xs font-semibold">{metric.value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="space-y-1">
+        {digest.items.slice(0, 4).map((item) => (
+          <div key={item} className="truncate text-[11px] text-muted-foreground">
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function brainDigestToneClass(tone: EmployeeRunBrainDigest['tone']) {
+  if (tone === 'ready') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+  if (tone === 'warning') return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  return 'border-muted bg-muted/40 text-muted-foreground'
 }
 
 function RuntimeEnvironmentPanel({
