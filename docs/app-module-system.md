@@ -5,6 +5,7 @@ AgentHub 的主功能入口由三层组成，新增功能时不要直接往侧�
 1. `src/lib/agenthub-module-catalog.ts` 定义产品模块目录、默认启用状态、依赖关系和免费策略。
 2. `src/lib/agenthub-module-manager.ts` 把模块目录转换成“已启用模块 / 可加入模块 / 阻塞原因”的管理视图。
 3. `src/modules/app-modules.tsx` 只负责把已启用模块映射到真实页面组件。
+4. `/api/app-modules` 把同一份模块管理视图提供给前端和未来的模块设置页。
 
 ## 模块字段
 
@@ -58,3 +59,19 @@ AgentHub 的主功能入口由三层组成，新增功能时不要直接往侧�
 4. 需要后端能力时，再单独增加 API 和服务。
 
 不要新增重复导航入口；如果旧入口仍然需要兼容，把它归一到现有模块。
+
+## API
+
+`GET /api/app-modules` 返回默认模块管理视图：
+
+- `activeModules`：当前启用的模块。
+- `availableModules`：可以加入但默认不显示的模块。
+- `blockers`：模块配置问题，例如未知模块或依赖缺失。
+
+也可以用 `enabled` 查询参数预览某组模块启用后的结果：
+
+```txt
+GET /api/app-modules?enabled=memory
+```
+
+这个接口只做本地模块组合预览，不存储用户配置，也不引入付费门槛。

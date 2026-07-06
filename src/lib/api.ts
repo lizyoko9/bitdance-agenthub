@@ -734,6 +734,7 @@ import type {
   PendingWrite,
 } from '@/shared/types'
 import type { AgentConfigDraft, AgentDraftRequest } from '@/shared/agent-builder-config'
+import type { AgentHubModuleManagerView } from '@/lib/agenthub-module-manager'
 
 export interface ArtifactListItem {
   id: string
@@ -754,6 +755,17 @@ async function json<T>(req: Promise<Response>): Promise<T> {
     throw new Error(`HTTP ${res.status}: ${body || res.statusText}`)
   }
   return res.json() as Promise<T>
+}
+
+export async function fetchAppModuleManagerView(enabledModuleIds?: string[]): Promise<AgentHubModuleManagerView> {
+  const suffix =
+    enabledModuleIds && enabledModuleIds.length > 0
+      ? `?enabled=${encodeURIComponent(enabledModuleIds.join(','))}`
+      : ''
+  const { moduleManager } = await json<{ moduleManager: AgentHubModuleManagerView }>(
+    fetch(`/api/app-modules${suffix}`),
+  )
+  return moduleManager
 }
 
 // ─── Agents ─────────────────────────────────────
