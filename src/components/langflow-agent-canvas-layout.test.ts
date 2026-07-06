@@ -99,6 +99,18 @@ describe('Langflow agent canvas layout', () => {
     expect(source).not.toContain('<Controls />')
   })
 
+  it('lets users collapse or expand all canvas nodes from the floating controls', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('setAllNodesExpanded')
+    expect(source).toContain('onCollapseAllNodes')
+    expect(source).toContain('onExpandAllNodes')
+    expect(source).toContain('data-testid="canvas-collapse-all-nodes"')
+    expect(source).toContain('data-testid="canvas-expand-all-nodes"')
+    expect(source).toContain('setAllNodesExpanded(false)')
+    expect(source).toContain('setAllNodesExpanded(true)')
+  })
+
   it('keeps the minimap away from the bottom canvas action bar', () => {
     const source = readCanvasSource()
 

@@ -522,6 +522,13 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     )
   }, [pushCanvasHistory, setNodes])
 
+  const setAllNodesExpanded = useCallback((expanded: boolean) => {
+    pushCanvasHistory()
+    setNodes((current) =>
+      current.map((node) => ({ ...node, data: { ...node.data, expanded } })),
+    )
+  }, [pushCanvasHistory, setNodes])
+
   const nodesForCanvas = useMemo(
     () => nodes.map((node) => ({
       ...node,
@@ -1373,6 +1380,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             onZoomOut={() => void zoomOut()}
             onResetZoom={() => void zoomTo(1)}
             onFitView={fitCanvasView}
+            onCollapseAllNodes={() => setAllNodesExpanded(false)}
+            onExpandAllNodes={() => setAllNodesExpanded(true)}
             canUndo={undoStack.length > 0}
             canRedo={redoStack.length > 0}
           />
@@ -1745,6 +1754,8 @@ function CanvasFloatingControls({
   onZoomOut,
   onResetZoom,
   onFitView,
+  onCollapseAllNodes,
+  onExpandAllNodes,
   canUndo,
   canRedo,
 }: {
@@ -1756,6 +1767,8 @@ function CanvasFloatingControls({
   onZoomOut: () => void
   onResetZoom: () => void
   onFitView: () => void
+  onCollapseAllNodes: () => void
+  onExpandAllNodes: () => void
   canUndo: boolean
   canRedo: boolean
 }) {
@@ -1788,6 +1801,31 @@ function CanvasFloatingControls({
         onClick={redoCanvasEdit}
       >
         <Redo2 className="size-4" />
+      </Button>
+      <div className="mx-1 h-5 w-px bg-border" />
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-8 gap-1 px-2"
+        data-testid="canvas-collapse-all-nodes"
+        title="收起所有节点"
+        onClick={onCollapseAllNodes}
+      >
+        <ChevronRight className="size-3.5" />
+        收起节点
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-8 gap-1 px-2"
+        data-testid="canvas-expand-all-nodes"
+        title="展开所有节点"
+        onClick={onExpandAllNodes}
+      >
+        <ChevronDown className="size-3.5" />
+        展开节点
       </Button>
       <div className="mx-1 h-5 w-px bg-border" />
       <Button
