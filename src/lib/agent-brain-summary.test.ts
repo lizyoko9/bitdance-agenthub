@@ -193,11 +193,13 @@ describe('agent brain summary', () => {
     ])
     expect(detail.reviewItems).toEqual([
       {
+        eventId: 'evt1',
         title: '视频导出工作手册草稿',
         badge: '工作手册草稿',
         detail: '审核后才能成为这个 Agent 的长期工作手册。',
       },
       {
+        eventId: 'evt2',
         title: '剪映导出失败教训共享',
         badge: '记忆共享审核',
         detail: '先保存在这个 Agent 私有记忆里，确认后再共享给项目。',

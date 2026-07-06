@@ -89,6 +89,7 @@ export interface AgentBrainDetailStat {
 }
 
 export interface AgentBrainReviewItem {
+  eventId?: string
   title: string
   badge: string
   detail: string
@@ -267,6 +268,7 @@ function buildReviewItems(report: AgentBrainSummaryReport): AgentBrainReviewItem
 
   for (const event of pendingEvents) {
     items.push({
+      eventId: event.id,
       title: event.title,
       badge: labelLearningEventType(event.type),
       detail: event.summary?.trim() || '确认后才会写入这个 Agent 的长期经验。',
@@ -353,6 +355,7 @@ function uniqueReviewItems(items: AgentBrainReviewItem[]): AgentBrainReviewItem[
     if (!title || seen.has(title)) continue
     seen.add(title)
     result.push({
+      eventId: item.eventId,
       title,
       badge: item.badge,
       detail: item.detail,

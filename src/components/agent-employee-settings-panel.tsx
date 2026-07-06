@@ -16,11 +16,13 @@ import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetSt
 import { Button } from '@/components/ui/button'
 import type { AgentRow, CliProfileRow, McpServerRow, ModelProfileRow, SkillRow } from '@/db/schema'
 import {
+  approveLearningEvent,
   fetchCliProfiles,
   fetchAgentMemoryLearningReportForAgent,
   fetchMcpServers,
   fetchModelProfiles,
   fetchSkillsCenterData,
+  rejectLearningEvent,
   updateAgent,
   type AgentMemoryLearningReport,
   type UpdateAgentBody,
@@ -83,6 +85,7 @@ export function AgentEmployeeSettingsPanel({
   const [memoryReport, setMemoryReport] = useState<AgentMemoryLearningReport | null>(null)
   const [memoryLoading, setMemoryLoading] = useState(false)
   const [memoryUnavailable, setMemoryUnavailable] = useState(false)
+  const [memoryReviewBusyId, setMemoryReviewBusyId] = useState<string | null>(null)
 
   const [selectedModelKey, setSelectedModelKey] = useState('')
   const [selectedToolNames, setSelectedToolNames] = useState<Set<string>>(new Set(agent.toolNames))
@@ -235,6 +238,33 @@ export function AgentEmployeeSettingsPanel({
       setError('保存失败，请检查模型和能力是否仍然存在。')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const reviewBrainLearningEvent = async (
+    eventId: string,
+    action: 'approve' | 'reject',
+  ) => {
+    setMemoryReviewBusyId(`${action}:${eventId}`)
+    setError(null)
+    setSavedNotice(null)
+    try {
+      if (action === 'approve') {
+        await approveLearningEvent(eventId, '从 Agent 设置里收录这条经验')
+      } else {
+        await rejectLearningEvent(eventId, '从 Agent 设置里忽略这条经验')
+      }
+      setMemoryLoading(true)
+      const report = await fetchAgentMemoryLearningReportForAgent(agent.id)
+      setMemoryReport(report)
+      setMemoryUnavailable(false)
+      setSavedNotice(action === 'approve' ? '已收录到这个员工的大脑。' : '已忽略这条学习建议。')
+    } catch (err) {
+      console.error('[AgentEmployeeSettingsPanel] review learning failed', err)
+      setError('审核学习结果失败，请刷新后再试。')
+    } finally {
+      setMemoryLoading(false)
+      setMemoryReviewBusyId(null)
     }
   }
 
@@ -413,7 +443,12 @@ export function AgentEmployeeSettingsPanel({
               {memoryLoading ? (
                 <LoadingLine label="正在读取员工大脑" />
               ) : brainDetail ? (
-                <AgentBrainDetailPanel detail={brainDetail} />
+                <AgentBrainDetailPanel
+                  detail={brainDetail}
+                  reviewBusyId={memoryReviewBusyId}
+                  onApproveLearning={(eventId) => void reviewBrainLearningEvent(eventId, 'approve')}
+                  onRejectLearning={(eventId) => void reviewBrainLearningEvent(eventId, 'reject')}
+                />
               ) : (
                 <EmptyLine
                   label={
@@ -519,7 +554,17 @@ function SettingsBlock({
   )
 }
 
-function AgentBrainDetailPanel({ detail }: { detail: AgentBrainDetailView }) {
+function AgentBrainDetailPanel({
+  detail,
+  reviewBusyId,
+  onApproveLearning,
+  onRejectLearning,
+}: {
+  detail: AgentBrainDetailView
+  reviewBusyId: string | null
+  onApproveLearning: (eventId: string) => void
+  onRejectLearning: (eventId: string) => void
+}) {
   const toneClass =
     detail.statusTone === 'ready'
       ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-300'
@@ -550,7 +595,12 @@ function AgentBrainDetailPanel({ detail }: { detail: AgentBrainDetailView }) {
 
       <div className="grid gap-2 lg:grid-cols-2">
         <DetailList title="最近会注入的上下文" emptyLabel="暂无可召回经验" items={detail.recentContext} />
-        <ReviewItemList items={detail.reviewItems} />
+        <ReviewItemList
+          items={detail.reviewItems}
+          busyId={reviewBusyId}
+          onApprove={onApproveLearning}
+          onReject={onRejectLearning}
+        />
         <DetailList title="可用工作手册" emptyLabel="暂无启用的工作手册" items={detail.playbooks} />
         <DetailList title="下一步建议" emptyLabel="暂无建议" items={detail.recommendations} />
       </div>
@@ -572,8 +622,14 @@ function MiniStat({ item }: { item: { label: string; value: string; detail: stri
 
 function ReviewItemList({
   items,
+  busyId,
+  onApprove,
+  onReject,
 }: {
   items: AgentBrainDetailView['reviewItems']
+  busyId: string | null
+  onApprove: (eventId: string) => void
+  onReject: (eventId: string) => void
 }) {
   return (
     <div className="rounded-md border bg-background/60 px-3 py-2">
@@ -593,6 +649,31 @@ function ReviewItemList({
               <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
                 {item.detail}
               </div>
+              {item.eventId && (
+                <div className="mt-2 flex gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    disabled={busyId === `approve:${item.eventId}` || busyId === `reject:${item.eventId}`}
+                    onClick={() => onApprove(item.eventId!)}
+                  >
+                    {busyId === `approve:${item.eventId}` && <Loader2 className="size-3 animate-spin" />}
+                    收录
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-[11px]"
+                    disabled={busyId === `approve:${item.eventId}` || busyId === `reject:${item.eventId}`}
+                    onClick={() => onReject(item.eventId!)}
+                  >
+                    {busyId === `reject:${item.eventId}` && <Loader2 className="size-3 animate-spin" />}
+                    忽略
+                  </Button>
+                </div>
+              )}
             </div>
           ))
         ) : (
