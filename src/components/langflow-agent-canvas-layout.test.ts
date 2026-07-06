@@ -349,6 +349,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('report-delivery')
   })
 
+  it('lets users describe a goal to generate a free local workflow preset', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('workflowBuilderPrompt')
+    expect(source).toContain('handleWorkflowBuilderSubmit')
+    expect(source).toContain('selectCanvasWorkflowPresetId')
+    expect(source).toContain('data-testid="workflow-builder-prompt"')
+    expect(source).toContain('data-testid="workflow-builder-generate"')
+    expect(source).toContain('用一句话生成流程')
+    expect(source).toContain('视频流程')
+    expect(source).toContain('代码流程')
+  })
+
   it('keeps saved workflows inside the canvas module instead of a separate confusing page', () => {
     const source = readCanvasSource()
 

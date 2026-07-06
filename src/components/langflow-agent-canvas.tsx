@@ -70,6 +70,7 @@ import {
   type AgentFlowNodeTemplateCategory,
   type AgentFlowTemplatePortKind,
 } from '@/lib/agent-flow-node-templates'
+import { selectCanvasWorkflowPresetId, type CanvasWorkflowPresetId } from '@/lib/agent-flow-preset-router'
 import { fetchAgentProfiles, fetchSoftwareCommands } from '@/lib/api'
 import { resolveCanvasKeyboardAction } from '@/lib/canvas-keyboard-actions'
 import {
@@ -214,7 +215,7 @@ interface EdgeRoute {
 }
 
 interface CanvasWorkflowPreset {
-  id: 'report-delivery' | 'content-video' | 'code-delivery'
+  id: CanvasWorkflowPresetId
   name: string
   description: string
   deliverableTemplateId: string
@@ -347,6 +348,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const [templateSearchQuery, setTemplateSearchQuery] = useState('')
   const [workflowDraftId, setWorkflowDraftId] = useState(() => initialWorkflowId ?? createCanvasDraftId())
   const [workflowTitle, setWorkflowTitle] = useState(() => initialWorkflowId ? `流程 ${initialWorkflowId}` : '新建流程')
+  const [workflowBuilderPrompt, setWorkflowBuilderPrompt] = useState('')
   const [savedDrafts, setSavedDrafts] = useState<CanvasDraft[]>([])
   const [undoStack, setUndoStack] = useState<CanvasHistorySnapshot[]>([])
   const [redoStack, setRedoStack] = useState<CanvasHistorySnapshot[]>([])
@@ -1232,6 +1234,15 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     fitCanvasView()
   }, [fitCanvasView, initialWorkflowId, saveWorkflowDraftToLibrary, setEdges, setNodes])
 
+  const handleWorkflowBuilderSubmit = useCallback((promptOverride?: string) => {
+    const prompt = (promptOverride ?? workflowBuilderPrompt).trim()
+    const presetId = selectCanvasWorkflowPresetId(prompt)
+    const preset = canvasWorkflowPresets.find((item) => item.id === presetId)
+    applyWorkflowPreset(presetId)
+    setWorkflowBuilderPrompt('')
+    setNotice(`已根据目标生成${preset?.name ?? '基础流程'}。这是本地免费规则生成的草稿，可以继续拖拽节点微调。`)
+  }, [applyWorkflowPreset, workflowBuilderPrompt])
+
   return (
     <div className="flex h-full min-h-[720px] w-full min-w-0 flex-1 flex-col overflow-hidden bg-background" data-testid="langflow-agent-canvas">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
@@ -1391,10 +1402,64 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             </div>
           )}
           <div className={cn(paletteCollapsed && 'hidden')}>
-          <div className="mb-3 rounded-lg border bg-background p-2" data-testid="canvas-saved-workflows">
-            <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">
-              <span>保存的流程</span>
-              <span>{savedDrafts.length} 个</span>
+            <form
+              className="mb-3 rounded-lg border bg-primary/5 p-2"
+              data-testid="workflow-builder-panel"
+              onSubmit={(event) => {
+                event.preventDefault()
+                handleWorkflowBuilderSubmit()
+              }}
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <Sparkles className="size-3.5 text-primary" />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold">用一句话生成流程</div>
+                  <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                    免费本地规则：识别视频、代码或报告目标，直接生成基础编排。
+                  </div>
+                </div>
+              </div>
+              <Textarea
+                className="min-h-20 resize-none text-xs"
+                data-testid="workflow-builder-prompt"
+                placeholder="例如：帮我做一个剪映短视频交付流程"
+                value={workflowBuilderPrompt}
+                onChange={(event) => setWorkflowBuilderPrompt(event.target.value)}
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="h-7 flex-1 px-2 text-[11px]"
+                  data-testid="workflow-builder-generate"
+                  disabled={!workflowBuilderPrompt.trim()}
+                >
+                  生成流程
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => handleWorkflowBuilderSubmit('视频流程')}
+                >
+                  视频流程
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => handleWorkflowBuilderSubmit('代码流程')}
+                >
+                  代码流程
+                </Button>
+              </div>
+            </form>
+            <div className="mb-3 rounded-lg border bg-background p-2" data-testid="canvas-saved-workflows">
+              <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">
+                <span>保存的流程</span>
+                <span>{savedDrafts.length} 个</span>
             </div>
             {savedDrafts.length === 0 ? (
               <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
