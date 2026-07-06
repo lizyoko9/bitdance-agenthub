@@ -251,6 +251,20 @@ const artifactColors: Record<ArtifactType, string> = {
   any: '#94a3b8',
 }
 
+const primaryDeliverableTypes: ArtifactType[] = [
+  'report',
+  'document',
+  'code',
+  'image',
+  'video',
+  'audio',
+  'spreadsheet',
+  'file_bundle',
+  'structured_data',
+  'data',
+  'result',
+]
+
 const nodeKindLabels: Record<AgentFlowNodeKind, string> = {
   input: '客户输入',
   prompt: '提示词',
@@ -750,8 +764,19 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setEdges((current) =>
       current.flatMap((edge) => {
         if (direction === 'outputs' && edge.source === nodeId && edge.sourceHandle === changedHandle) {
-          const targetInputType = findPortType(nodes, edge.target, 'inputs', edge.targetHandle)
-          if (targetInputType && !canConnect(nextType, targetInputType)) return []
+          const targetNode = nodes.find((item) => item.id === edge.target)
+          const targetInput = targetNode ? findPortByHandle(targetNode, 'inputs', edge.targetHandle) : null
+          const targetInputType = targetInput?.type ?? null
+          const canAutoSyncSingleInputTarget = Boolean(
+            targetNode?.data.kind === 'artifact' &&
+            targetNode.data.inputs.length === 1 &&
+            targetInput,
+          )
+          if (targetInputType && !canConnect(nextType, targetInputType) && !canAutoSyncSingleInputTarget) return []
+
+          const targetPortLabel = canAutoSyncSingleInputTarget
+            ? artifactLabels[nextType]
+            : edge.data?.targetPortLabel ?? artifactLabels[targetInputType ?? nextType]
 
           return [{
             ...edge,
@@ -762,10 +787,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               sourcePortId: edge.data?.sourcePortId ?? portId,
               targetPortId: edge.data?.targetPortId ?? edge.targetHandle?.replace(/^in:/, '') ?? nextType,
               sourcePortLabel: artifactLabels[nextType],
-              targetPortLabel: edge.data?.targetPortLabel ?? artifactLabels[targetInputType ?? nextType],
-              handoffContract: `${artifactLabels[nextType]}: ${artifactLabels[nextType]} -> ${
-                edge.data?.targetPortLabel ?? artifactLabels[targetInputType ?? nextType]
-              }`,
+              targetPortLabel,
+              handoffContract: `${artifactLabels[nextType]}: ${artifactLabels[nextType]} -> ${targetPortLabel}`,
             },
           }]
         }
@@ -796,11 +819,20 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     portId: string,
     nextType: ArtifactType,
   ) => {
+    const changedHandle = direction === 'inputs' ? `in:${portId}` : `out:${portId}`
+    const syncSingleInputTargetIds = new Set(
+      direction === 'outputs'
+        ? edges
+          .filter((edge) => edge.source === nodeId && edge.sourceHandle === changedHandle)
+          .map((edge) => edge.target)
+        : [],
+    )
+
     pushCanvasHistory()
     setNodes((current) =>
-      current.map((node) =>
-        node.id === nodeId
-          ? {
+      current.map((node) => {
+        if (node.id === nodeId) {
+          return {
               ...node,
               data: {
                 ...node.data,
@@ -809,11 +841,30 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                 ),
               },
             }
-          : node,
-      ),
+        }
+
+        if (
+          direction === 'outputs' &&
+          syncSingleInputTargetIds.has(node.id) &&
+          node.data.kind === 'artifact' &&
+          node.data.inputs.length === 1
+        ) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              inputs: node.data.inputs.map((port) =>
+                port.id === node.data.inputs[0]?.id ? { ...port, type: nextType, label: artifactLabels[nextType] } : port,
+              ),
+            },
+          }
+        }
+
+        return node
+      }),
     )
     syncEdgesAfterPortTypeChange(nodeId, direction, portId, nextType)
-  }, [pushCanvasHistory, setNodes, syncEdgesAfterPortTypeChange])
+  }, [edges, pushCanvasHistory, setNodes, syncEdgesAfterPortTypeChange])
 
   const replaceNodePortsForAgent = useCallback((nodeId: string, agent: AgentProfileRow) => {
     const agentPorts = buildAgentFlowPortsFromContracts(agent)
@@ -2217,6 +2268,8 @@ function NodeConfigPanel({
 
           <NodeBusinessSetup node={node} />
 
+          <NodePrimaryOutputSelector node={node} onTypeChange={(outputId, type) => changePortTypeForNode(node.id, 'outputs', outputId, type)} />
+
           <PanelBlock title="客户交付">
             <label className="flex items-center gap-2 text-xs">
               <input
@@ -2299,6 +2352,43 @@ function NodeConfigPanel({
         </details>
       </div>
     </aside>
+  )
+}
+
+function NodePrimaryOutputSelector({
+  node,
+  onTypeChange,
+}: {
+  node: AgentFlowNode
+  onTypeChange: (outputId: string, type: ArtifactType) => void
+}) {
+  const primaryOutput = node.data.outputs[0]
+  if (!primaryOutput) return null
+
+  return (
+    <PanelBlock title="交付类型">
+      <div data-testid="node-primary-output-selector" className="space-y-2">
+        <div className="flex items-center gap-2 rounded-md border bg-primary/5 px-2 py-2">
+          <ArtifactPill type={primaryOutput.type} />
+          <span className="min-w-0 flex-1 truncate text-xs">{primaryOutput.label}</span>
+        </div>
+        <select
+          className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+          data-testid="node-primary-output-type-select"
+          value={primaryOutput.type}
+          onChange={(event) => onTypeChange(primaryOutput.id, event.target.value as ArtifactType)}
+        >
+          {primaryDeliverableTypes.map((type) => (
+            <option key={type} value={type}>
+              {artifactLabels[type]}
+            </option>
+          ))}
+        </select>
+        <div className="text-[11px] leading-4 text-muted-foreground">
+          这个节点只会把这一种产物交给下游；如果要更多出口，再打开高级端口设置。
+        </div>
+      </div>
+    </PanelBlock>
   )
 }
 
@@ -3529,19 +3619,6 @@ function createCanvasHistorySnapshot(
     selectedNodeId,
     selectedEdgeId,
   }
-}
-
-function findPortType(
-  nodes: AgentFlowNode[],
-  nodeId: string,
-  direction: 'inputs' | 'outputs',
-  handleId?: string | null,
-) {
-  const node = nodes.find((item) => item.id === nodeId)
-  if (!node || !handleId) return null
-  const ports = node.data[direction]
-  const match = ports.find((port) => (direction === 'inputs' ? inputHandleId(port) : outputHandleId(port)) === handleId)
-  return match?.type ?? null
 }
 
 function keepEdgesWithKnownHandles(

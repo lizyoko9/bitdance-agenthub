@@ -597,6 +597,30 @@ describe('Langflow agent canvas layout', () => {
     )
   })
 
+  it('lets users choose the primary deliverable type without opening advanced port settings', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodePrimaryOutputSelector node={node}')
+    expect(source).toContain('data-testid="node-primary-output-selector"')
+    expect(source).toContain('data-testid="node-primary-output-type-select"')
+    expect(source).toContain('primaryDeliverableTypes')
+    expect(source).toContain("changePortTypeForNode(node.id, 'outputs', outputId, type)")
+    expect(source.indexOf('NodePrimaryOutputSelector node={node}')).toBeLessThan(
+      source.indexOf('data-testid="advanced-port-settings"'),
+    )
+  })
+
+  it('keeps a single-input downstream deliverable connected when the primary output type changes', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('syncSingleInputTargetIds')
+    expect(source).toContain("node.data.kind === 'artifact'")
+    expect(source).toContain('node.data.inputs.length === 1')
+    expect(source).toContain('const canAutoSyncSingleInputTarget')
+    expect(source).toContain('const targetPortLabel = canAutoSyncSingleInputTarget')
+    expect(source).not.toContain('if (targetInputType && !canConnect(nextType, targetInputType)) return []')
+  })
+
   it('shows missing Agent and tool bindings directly on canvas node cards', () => {
     const source = readCanvasSource()
 
