@@ -319,7 +319,18 @@ const initialNodes: AgentFlowNode[] = [
 
 const initialEdges: AgentFlowEdge[] = [
   createFlowEdge('customer-to-agent', 'input-1', 'agent-2', 'message', 'message', 'out:message', 'in:message', '客户消息', 'message', '任务 / 素材'),
-  createFlowEdge('agent-to-delivery', 'agent-2', 'artifact-3', 'report', 'report'),
+  createFlowEdge(
+    'agent-to-delivery',
+    'agent-2',
+    'artifact-3',
+    'report',
+    'report',
+    'out:report',
+    'in:report',
+    '报告',
+    'report',
+    '交付文件',
+  ),
 ]
 
 const canvasWorkflowPresets: CanvasWorkflowPreset[] = [
@@ -1209,8 +1220,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             connection.target,
             output.id,
             output.type,
-            connection.sourceHandle ?? undefined,
-            connection.targetHandle ?? undefined,
+            outputHandleId(output),
+            inputHandleId(input),
             output.label,
             input.id,
             input.label,
@@ -3920,11 +3931,11 @@ function createFlowEdge(
   target: string,
   outputId: string,
   artifactType: ArtifactType,
-  sourceHandle = `out:${outputId}`,
-  targetHandle = `in:${artifactType}`,
-  sourcePortLabel: string = artifactLabels[artifactType],
-  targetPortId: string = artifactType,
-  targetPortLabel: string = artifactLabels[artifactType],
+  sourceHandle: string,
+  targetHandle: string,
+  sourcePortLabel: string,
+  targetPortId: string,
+  targetPortLabel: string,
 ): AgentFlowEdge {
   const handoffContract = `${artifactLabels[artifactType]}: ${sourcePortLabel} -> ${targetPortLabel}`
 
@@ -4074,7 +4085,18 @@ function createCanvasWorkflowPresetDraft(
   ]
   const edges = [
     createFlowEdge(`${preset.id}-customer-to-agent`, inputId, agentId, 'message', 'message', 'out:message', 'in:message', '客户消息', 'message', '任务 / 素材'),
-    createFlowEdge(`${preset.id}-agent-to-artifact`, agentId, artifactId, preset.artifactType, preset.artifactType),
+    createFlowEdge(
+      `${preset.id}-agent-to-artifact`,
+      agentId,
+      artifactId,
+      preset.artifactType,
+      preset.artifactType,
+      `out:${preset.artifactType}`,
+      `in:${preset.artifactType}`,
+      artifactLabels[preset.artifactType],
+      preset.artifactType,
+      artifactLabels[preset.artifactType],
+    ),
   ]
 
   return {

@@ -1122,6 +1122,20 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('input.label')
   })
 
+  it('requires explicit source and target handles when creating artifact handoff edges', () => {
+    const source = readCanvasSource()
+    const createFlowEdgeSource = source.slice(
+      source.indexOf('function createFlowEdge'),
+      source.indexOf('function inputHandleId'),
+    )
+
+    expect(createFlowEdgeSource).toContain('sourceHandle: string')
+    expect(createFlowEdgeSource).toContain('targetHandle: string')
+    expect(createFlowEdgeSource).not.toContain('sourceHandle =')
+    expect(createFlowEdgeSource).not.toContain('targetHandle =')
+    expect(source).not.toContain('targetHandle = `in:${artifactType}`')
+  })
+
   it('shows computed execution stages on canvas nodes', () => {
     const source = readCanvasSource()
 
