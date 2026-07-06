@@ -42,7 +42,7 @@ describe('Langflow agent canvas layout', () => {
 
     expect(source).toContain('data-testid="canvas-right-inspector"')
     expect(source).toContain('<ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />')
-    expect(source).toContain('<HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />')
+    expect(source).toContain('<HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} onSelectEdge={selectEdgeById} />')
     expect(source).not.toContain('absolute left-[18.5rem] top-3')
     expect(source).not.toContain('absolute bottom-3 left-[18.5rem]')
   })
@@ -720,6 +720,20 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="handoff-preview-panel"')
     expect(source).toContain('data-testid="handoff-route-line"')
     expect(source).toContain('data-testid="handoff-artifact-contract"')
+  })
+
+  it('lets users click a handoff preview card to inspect the actual canvas edge', () => {
+    const source = readCanvasSource()
+    const handoffPanelSource = source.slice(
+      source.indexOf('function HandoffPreviewPanel'),
+      source.indexOf('function CustomerDeliveryPreviewPanel'),
+    )
+
+    expect(source).toContain('<HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} onSelectEdge={selectEdgeById} />')
+    expect(handoffPanelSource).toContain('onSelectEdge')
+    expect(handoffPanelSource).toContain('data-testid="handoff-preview-card"')
+    expect(handoffPanelSource).toContain('onClick={() => onSelectEdge(step.id)}')
+    expect(handoffPanelSource).toContain('aria-label={`查看${step.sourceTitle}到${step.targetTitle}的交付连线`}')
   })
 
   it('summarizes customer visible deliverables separately from raw handoff chains', () => {

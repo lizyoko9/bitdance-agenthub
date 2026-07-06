@@ -1640,7 +1640,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                   />
                 )}
                 <ExecutionPlanPanel steps={executionPlan} visible={preflightVisible} lastRun={lastRun} />
-                <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} />
+                <HandoffPreviewPanel steps={handoffSteps} visible={preflightVisible} onSelectEdge={selectEdgeById} />
                 <CustomerDeliveryPreviewPanel nodes={nodes} edges={edges} />
               </>
             )}
@@ -2876,7 +2876,15 @@ function ContractList({ title, contracts, emptyText }: { title: string; contract
   )
 }
 
-function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible: boolean }) {
+function HandoffPreviewPanel({
+  steps,
+  visible,
+  onSelectEdge,
+}: {
+  steps: HandoffStep[]
+  visible: boolean
+  onSelectEdge: (edgeId: string) => void
+}) {
   return (
     <section
       className={cn('rounded-xl border bg-background p-3', !visible && 'opacity-95')}
@@ -2896,7 +2904,14 @@ function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible
       ) : (
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
           {steps.slice(0, 6).map((step) => (
-            <div key={step.id} className="rounded-lg border bg-background p-2 text-xs">
+            <button
+              key={step.id}
+              type="button"
+              className="rounded-lg border bg-background p-2 text-left text-xs transition hover:border-primary hover:bg-primary/5"
+              data-testid="handoff-preview-card"
+              aria-label={`查看${step.sourceTitle}到${step.targetTitle}的交付连线`}
+              onClick={() => onSelectEdge(step.id)}
+            >
               <div className="truncate font-medium" data-testid="handoff-route-line">
                 {`${step.sourceTitle} -> ${step.targetTitle}`}
               </div>
@@ -2911,7 +2926,7 @@ function HandoffPreviewPanel({ steps, visible }: { steps: HandoffStep[]; visible
               <div className="mt-1 truncate text-[11px] text-muted-foreground">
                 下游只会收到：{step.artifactLabel}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
