@@ -596,6 +596,8 @@ function AgentBrainDetailPanel({
         ))}
       </div>
 
+      <MemorySharingPolicyPanel />
+
       <LearningTraceList items={detail.learningTrace} />
 
       <div className="grid gap-2 lg:grid-cols-2">
@@ -630,6 +632,45 @@ function NextRunBriefingPanel({
             </div>
             <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
               {item.detail}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MemorySharingPolicyPanel() {
+  const rules = [
+    {
+      label: '先私有',
+      detail: '默认先保存在这个员工自己的大脑里',
+      tone: 'ready',
+    },
+    {
+      label: '再确认',
+      detail: '确认后再共享给项目、团队或全局工具经验',
+      tone: 'warning',
+    },
+    {
+      label: '防污染',
+      detail: '失败教训和新工作手册先审核，避免错误经验扩散',
+      tone: 'muted',
+    },
+  ] as const
+
+  return (
+    <div className="rounded-md border bg-background/60 px-3 py-2">
+      <div className="text-xs font-medium">记忆共享规则</div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        {rules.map((rule) => (
+          <div key={rule.label} className="rounded-md border bg-muted/15 px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[11px] font-medium">{rule.label}</span>
+              <span className={cn('size-2 shrink-0 rounded-full', briefingToneClass(rule.tone))} />
+            </div>
+            <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+              {rule.detail}
             </div>
           </div>
         ))}
