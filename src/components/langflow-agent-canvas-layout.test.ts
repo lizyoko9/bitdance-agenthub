@@ -583,6 +583,20 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('describeNodeExecutor')
   })
 
+  it('keeps node inspector focused on executor and handoff before optional text fields', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('data-testid="node-primary-configuration"')
+    expect(source).toContain('data-testid="node-basic-details"')
+    expect(source.indexOf('data-testid="node-primary-configuration"')).toBeLessThan(
+      source.indexOf('data-testid="node-basic-details"'),
+    )
+    expect(source.indexOf('NodeBusinessSetup node={node}')).toBeLessThan(source.indexOf('data-testid="node-basic-details"'))
+    expect(source.indexOf('data-testid="node-basic-details"')).toBeLessThan(
+      source.indexOf('data-testid="advanced-port-settings"'),
+    )
+  })
+
   it('shows missing Agent and tool bindings directly on canvas node cards', () => {
     const source = readCanvasSource()
 

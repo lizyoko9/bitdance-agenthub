@@ -2160,70 +2160,93 @@ function NodeConfigPanel({
       <div className="space-y-3">
         <NodeConfigurationSummary node={node} />
 
-        <PanelBlock title="基础信息">
-          <Input value={node.data.title} onChange={(event) => onUpdateNode(node.id, { title: event.target.value })} />
-          <Textarea
-            className="mt-2 min-h-20 text-xs"
-            value={node.data.description}
-            onChange={(event) => onUpdateNode(node.id, { description: event.target.value })}
-          />
-        </PanelBlock>
+        <section data-testid="node-primary-configuration" className="space-y-3">
+          {node.data.kind === 'agent' && (
+            <PanelBlock title="选择员工 Agent">
+              <select
+                className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                value={node.data.agentId ?? ''}
+                onChange={(event) => {
+                  const agent = agents.find((item) => item.id === event.target.value)
+                  if (agent) {
+                    replaceNodePortsForAgent(node.id, agent)
+                    return
+                  }
+                  onUpdateNode(node.id, {
+                    agentId: undefined,
+                    subtitle: nodeKindLabels.agent,
+                  })
+                }}
+              >
+                <option value="">未指定，运行时自动选择</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name} / {agent.role}
+                  </option>
+                ))}
+              </select>
+            </PanelBlock>
+          )}
 
-        {node.data.kind === 'agent' && (
-          <PanelBlock title="选择员工 Agent">
-            <select
-              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-              value={node.data.agentId ?? ''}
-              onChange={(event) => {
-                const agent = agents.find((item) => item.id === event.target.value)
-                if (agent) {
-                  replaceNodePortsForAgent(node.id, agent)
-                  return
-                }
-                onUpdateNode(node.id, {
-                  agentId: undefined,
-                  subtitle: nodeKindLabels.agent,
-                })
-              }}
-            >
-              <option value="">未指定，运行时自动选择</option>
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name} / {agent.role}
-                </option>
-              ))}
-            </select>
+          {node.data.kind === 'tool' && (
+            <PanelBlock title="选择工具 / 软件命令">
+              <select
+                className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                value={node.data.softwareCommandId ?? ''}
+                onChange={(event) => {
+                  const command = softwareCommands.find((item) => item.id === event.target.value)
+                  if (command) {
+                    replaceNodePortsForSoftwareCommand(node.id, command)
+                    return
+                  }
+                  onUpdateNode(node.id, {
+                    softwareCommandId: undefined,
+                    subtitle: nodeKindLabels.tool,
+                  })
+                }}
+              >
+                <option value="">未选择命令</option>
+                {softwareCommands.map((command) => (
+                  <option key={command.id} value={command.id}>
+                    {command.name}
+                  </option>
+                ))}
+              </select>
+            </PanelBlock>
+          )}
+
+          <NodeBusinessSetup node={node} />
+
+          <PanelBlock title="客户交付">
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={Boolean(node.data.customerVisible)}
+                onChange={(event) => onUpdateNode(node.id, { customerVisible: event.target.checked })}
+              />
+              这个节点产物客户可见
+            </label>
           </PanelBlock>
-        )}
+        </section>
 
-        {node.data.kind === 'tool' && (
-          <PanelBlock title="选择工具 / 软件命令">
-            <select
-              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-              value={node.data.softwareCommandId ?? ''}
-              onChange={(event) => {
-                const command = softwareCommands.find((item) => item.id === event.target.value)
-                if (command) {
-                  replaceNodePortsForSoftwareCommand(node.id, command)
-                  return
-                }
-                onUpdateNode(node.id, {
-                  softwareCommandId: undefined,
-                  subtitle: nodeKindLabels.tool,
-                })
-              }}
-            >
-              <option value="">未选择命令</option>
-              {softwareCommands.map((command) => (
-                <option key={command.id} value={command.id}>
-                  {command.name}
-                </option>
-              ))}
-            </select>
-          </PanelBlock>
-        )}
-
-        <NodeBusinessSetup node={node} />
+        <details
+          data-testid="node-basic-details"
+          className="rounded-lg border bg-background"
+        >
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+            名称和说明
+          </summary>
+          <div className="border-t p-3">
+            <PanelBlock title="基础信息">
+              <Input value={node.data.title} onChange={(event) => onUpdateNode(node.id, { title: event.target.value })} />
+              <Textarea
+                className="mt-2 min-h-20 text-xs"
+                value={node.data.description}
+                onChange={(event) => onUpdateNode(node.id, { description: event.target.value })}
+              />
+            </PanelBlock>
+          </div>
+        </details>
 
         <details
           data-testid="node-flow-details"
@@ -2274,17 +2297,6 @@ function NodeConfigPanel({
             </PanelBlock>
           </div>
         </details>
-
-        <PanelBlock title="交付逻辑">
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={Boolean(node.data.customerVisible)}
-              onChange={(event) => onUpdateNode(node.id, { customerVisible: event.target.checked })}
-            />
-            这个节点产物客户可见
-          </label>
-        </PanelBlock>
       </div>
     </aside>
   )
