@@ -28,7 +28,12 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { AgentRow } from '@/db/schema'
-import { deleteAgent as deleteAgentAPI } from '@/lib/api'
+import {
+  deleteAgent as deleteAgentAPI,
+  fetchAgentMemoryLearningReport,
+  type AgentMemoryLearningReport,
+} from '@/lib/api'
+import { buildAgentBrainSummary, type AgentBrainSummaryView } from '@/lib/agent-brain-summary'
 import { cn } from '@/lib/utils'
 import { useAgentList, useAppStore } from '@/stores/app-store'
 
@@ -299,6 +304,35 @@ function AgentSettingsOverview({
     agent.supportsVision ? '视觉' : null,
   ].filter(Boolean)
   const permissionLabel = permissionHints.length ? permissionHints.join('、') : '基础对话'
+  const [memoryReport, setMemoryReport] = useState<AgentMemoryLearningReport | null>(null)
+  const [memoryLoading, setMemoryLoading] = useState(false)
+  const [memoryUnavailable, setMemoryUnavailable] = useState(false)
+  const brainSummary = useMemo(
+    () => (memoryReport ? buildAgentBrainSummary(memoryReport) : null),
+    [memoryReport],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    setMemoryLoading(true)
+    setMemoryUnavailable(false)
+    setMemoryReport(null)
+    fetchAgentMemoryLearningReport(agent.id)
+      .then((report) => {
+        if (!cancelled) setMemoryReport(report)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        console.warn('[AgentSettingsOverview] memory report unavailable', err)
+        setMemoryUnavailable(true)
+      })
+      .finally(() => {
+        if (!cancelled) setMemoryLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [agent.id])
 
   return (
     <div className="space-y-3">
@@ -344,7 +378,106 @@ function AgentSettingsOverview({
           value="在本员工内设置"
         />
       </div>
+
+      <AgentBrainSummaryCard
+        summary={brainSummary}
+        loading={memoryLoading}
+        unavailable={memoryUnavailable}
+        onOpenSettings={onToggleAdvanced}
+      />
     </div>
+  )
+}
+
+function AgentBrainSummaryCard({
+  summary,
+  loading,
+  unavailable,
+  onOpenSettings,
+}: {
+  summary: AgentBrainSummaryView | null
+  loading: boolean
+  unavailable: boolean
+  onOpenSettings: () => void
+}) {
+  const toneClass = summary
+    ? summary.statusTone === 'ready'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-300'
+      : summary.statusTone === 'warning'
+        ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-300'
+        : 'border-muted bg-muted/30 text-muted-foreground'
+    : 'border-muted bg-muted/30 text-muted-foreground'
+
+  const statusLabel = loading
+    ? '读取中'
+    : summary?.statusLabel ?? (unavailable ? '等待运行' : '暂无数据')
+
+  return (
+    <section className="rounded-md border bg-card p-3" data-testid="agent-brain-summary">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <BrainCircuit className="size-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">员工大脑</h3>
+              <span className={cn('rounded-full border px-2 py-0.5 text-[10px]', toneClass)}>
+                {statusLabel}
+              </span>
+              {summary && <span className="text-[10px] text-muted-foreground">{summary.scoreText}</span>}
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              这里展示这个员工自己的记忆、失败教训和工作手册状态。
+            </p>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={onOpenSettings}>
+          管理记忆
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="mt-3 rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          正在读取这个员工的记忆状态...
+        </div>
+      ) : summary ? (
+        <div className="mt-3 space-y-3">
+          <div className="grid gap-2 sm:grid-cols-4">
+            {summary.metrics.map((metric) => (
+              <div key={metric.label} className="rounded-md border bg-muted/20 px-2.5 py-2">
+                <div className="text-[10px] text-muted-foreground">{metric.label}</div>
+                <div className="mt-1 text-sm font-semibold">{metric.value}</div>
+                <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{metric.detail}</div>
+              </div>
+            ))}
+          </div>
+          {summary.emptyState && (
+            <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+              {summary.emptyState}
+            </div>
+          )}
+          <div className="grid gap-2 lg:grid-cols-2">
+            {summary.sections.map((section) => (
+              <div key={section.title} className="rounded-md border bg-background/60 px-3 py-2">
+                <div className="text-xs font-medium">{section.title}</div>
+                <div className="mt-1 space-y-1">
+                  {section.items.map((item) => (
+                    <div key={item} className="truncate text-[11px] text-muted-foreground">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+          暂时没有拿到员工记忆报告。等这个员工通过运行时执行任务后，会在这里显示经验和失败教训。
+        </div>
+      )}
+    </section>
   )
 }
 
