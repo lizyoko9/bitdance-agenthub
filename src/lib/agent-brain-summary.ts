@@ -122,6 +122,17 @@ export interface AgentBrainLoopItem {
   detail: string
 }
 
+export interface AgentBrainBriefingItem {
+  label: string
+  detail: string
+  tone: 'ready' | 'warning' | 'muted'
+}
+
+export interface AgentBrainNextRunBriefing {
+  title: string
+  items: AgentBrainBriefingItem[]
+}
+
 export interface AgentBrainDetailView {
   title: string
   statusLabel: string
@@ -129,6 +140,7 @@ export interface AgentBrainDetailView {
   memoryBoundaries: AgentBrainDetailStat[]
   recallFlow: AgentBrainDetailStat[]
   brainLoop: AgentBrainLoopItem[]
+  nextRunBriefing: AgentBrainNextRunBriefing
   recentContext: string[]
   reviewQueue: string[]
   reviewItems: AgentBrainReviewItem[]
@@ -279,6 +291,9 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
       contextTypeCount,
       needsReview,
     }),
+    nextRunBriefing: buildNextRunBriefing(report, {
+      memoryEnabled,
+    }),
     recentContext: report.retrieval.candidates.slice(0, 5).map((candidate) => {
       const matched = candidate.matchedTerms?.filter(Boolean).join('、')
       const suffix = matched ? `命中：${matched}` : `评分：${roundNumber(candidate.score)}`
@@ -293,6 +308,95 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
       .filter(Boolean)
       .slice(0, 5),
     recommendations: report.recommendations.map((item) => item.trim()).filter(Boolean).slice(0, 5),
+  }
+}
+
+function buildNextRunBriefing(
+  report: AgentBrainSummaryReport,
+  options: { memoryEnabled: boolean },
+): AgentBrainNextRunBriefing {
+  const items: AgentBrainBriefingItem[] = []
+  const sampleGoal = report.retrieval.sampleGoal?.trim()
+
+  if (sampleGoal) {
+    items.push({
+      label: '任务方向',
+      detail: `按「${sampleGoal}」准备上下文。`,
+      tone: options.memoryEnabled ? 'ready' : 'muted',
+    })
+  }
+
+  if (!options.memoryEnabled) {
+    items.push({
+      label: '记忆状态',
+      detail: '记忆已关闭。这个 Agent 下次运行只会使用当前任务上下文。',
+      tone: 'muted',
+    })
+  } else {
+    const referenceTitles = report.retrieval.candidates
+      .map((candidate) => candidate.title.trim())
+      .filter(Boolean)
+      .slice(0, 2)
+    if (referenceTitles.length) {
+      items.push({
+        label: '优先参考',
+        detail: joinChinese(referenceTitles),
+        tone: 'ready',
+      })
+    }
+  }
+
+  const warningTitles = unique([
+    ...report.governance.mistakeTitles,
+    ...report.governance.expiringSoonMemoryTitles,
+    ...report.retrieval.warnings,
+  ]).slice(0, 2)
+  if (warningTitles.length) {
+    items.push({
+      label: '先避开',
+      detail: joinChinese(warningTitles),
+      tone: 'warning',
+    })
+  }
+
+  const playbookTitles = (report.learningSummary.latestPlaybooks ?? [])
+    .filter((playbook) => playbook.status === 'active')
+    .map((playbook) => playbook.title.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+  if (playbookTitles.length) {
+    items.push({
+      label: '可用手册',
+      detail: joinChinese(playbookTitles),
+      tone: 'ready',
+    })
+  }
+
+  const pendingTitles = unique([
+    ...report.governance.pendingLearningTitles,
+    ...(report.learningSummary.latestEvents ?? [])
+      .filter((event) => event.status === 'pending_review')
+      .map((event) => event.title),
+  ]).slice(0, 1)
+  if (pendingTitles.length) {
+    items.push({
+      label: '需要确认',
+      detail: joinChinese(pendingTitles),
+      tone: 'warning',
+    })
+  }
+
+  if (items.length === 0) {
+    items.push({
+      label: '开工状态',
+      detail: '暂无可用经验。完成一次任务后，这里会自动变成这个 Agent 的开工提示。',
+      tone: 'muted',
+    })
+  }
+
+  return {
+    title: '下次开工提示',
+    items: items.slice(0, 5),
   }
 }
 
@@ -472,6 +576,10 @@ function unique(values: string[]): string[] {
     result.push(trimmed)
   }
   return result
+}
+
+function joinChinese(values: string[]): string {
+  return values.map((value) => value.trim()).filter(Boolean).join('、')
 }
 
 function uniqueReviewItems(items: AgentBrainReviewItem[]): AgentBrainReviewItem[] {

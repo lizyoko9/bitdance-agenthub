@@ -280,6 +280,36 @@ describe('agent brain summary', () => {
       '剪映导出流程 · software · 命中：剪映、导出',
       '客户偏好 1080p MP4 · customer · 命中：客户、MP4',
     ])
+    expect(detail.nextRunBriefing).toEqual({
+      title: '下次开工提示',
+      items: [
+        {
+          label: '任务方向',
+          detail: '按「剪映导出视频」准备上下文。',
+          tone: 'ready',
+        },
+        {
+          label: '优先参考',
+          detail: '剪映导出流程、客户偏好 1080p MP4',
+          tone: 'ready',
+        },
+        {
+          label: '先避开',
+          detail: '字幕错位失败教训',
+          tone: 'warning',
+        },
+        {
+          label: '可用手册',
+          detail: '短视频导出 SOP',
+          tone: 'ready',
+        },
+        {
+          label: '需要确认',
+          detail: '视频导出工作手册草稿',
+          tone: 'warning',
+        },
+      ],
+    })
   })
 
   it('shows a disabled brain detail without pretending the agent can learn', () => {
@@ -315,6 +345,11 @@ describe('agent brain summary', () => {
       value: '未启用',
       state: 'muted',
       detail: '记忆已关闭，这个 Agent 不会在运行前召回长期经验。',
+    })
+    expect(detail.nextRunBriefing.items).toContainEqual({
+      label: '记忆状态',
+      detail: '记忆已关闭。这个 Agent 下次运行只会使用当前任务上下文。',
+      tone: 'muted',
     })
     expect(detail.reviewQueue).toEqual(['Memory policy is disabled for this Agent.'])
   })

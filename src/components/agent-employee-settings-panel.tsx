@@ -588,6 +588,7 @@ function AgentBrainDetailPanel({
       </div>
 
       <BrainLoopPanel items={detail.brainLoop} />
+      <NextRunBriefingPanel briefing={detail.nextRunBriefing} />
 
       <div className="grid gap-2 sm:grid-cols-2">
         {detail.memoryBoundaries.map((item) => (
@@ -610,6 +611,37 @@ function AgentBrainDetailPanel({
       </div>
     </div>
   )
+}
+
+function NextRunBriefingPanel({
+  briefing,
+}: {
+  briefing: AgentBrainDetailView['nextRunBriefing']
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 px-3 py-2">
+      <div className="text-xs font-medium" title={briefing.title}>下次开工提示</div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {briefing.items.map((item) => (
+          <div key={`${item.label}:${item.detail}`} className="rounded-md border bg-muted/15 px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[11px] font-medium">{item.label}</span>
+              <span className={cn('size-2 shrink-0 rounded-full', briefingToneClass(item.tone))} />
+            </div>
+            <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+              {item.detail}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function briefingToneClass(tone: AgentBrainDetailView['nextRunBriefing']['items'][number]['tone']) {
+  if (tone === 'ready') return 'bg-emerald-500'
+  if (tone === 'warning') return 'bg-amber-500'
+  return 'bg-muted-foreground/40'
 }
 
 function BrainLoopPanel({ items }: { items: AgentBrainDetailView['brainLoop'] }) {
