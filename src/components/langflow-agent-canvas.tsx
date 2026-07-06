@@ -814,6 +814,43 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     )
   }, [pushCanvasHistory, setNodes])
 
+  const resetNodePortsFromTemplate = useCallback((
+    nodeId: string,
+    templateId: string,
+    patch: Partial<AgentFlowNodeData> = {},
+  ) => {
+    const template = getAgentFlowNodeTemplate(templateId)
+    if (!template) return
+
+    const inputs = cloneTemplatePorts(template.inputs)
+    const outputs = cloneTemplatePorts(template.outputs)
+
+    pushCanvasHistory()
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                kind: template.kind,
+                title: template.title,
+                subtitle: template.subtitle,
+                description: template.description,
+                status: 'idle',
+                inputs,
+                outputs,
+                customerVisible: Boolean(template.customerVisible),
+                runStepSummary: undefined,
+                ...patch,
+              },
+            }
+          : node,
+      ),
+    )
+    setEdges((current) => keepEdgesWithKnownHandles(current, nodeId, inputs, outputs))
+  }, [pushCanvasHistory, setEdges, setNodes])
+
   const addPortToNode = useCallback((nodeId: string, direction: 'inputs' | 'outputs') => {
     const type: ArtifactType = direction === 'inputs' ? 'any' : 'document'
     const port: AgentFlowPort = {
@@ -1832,6 +1869,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                     changePortTypeForNode={changePortTypeForNode}
                     replaceNodePortsForAgent={replaceNodePortsForAgent}
                     replaceNodePortsForSoftwareCommand={replaceNodePortsForSoftwareCommand}
+                    resetNodePortsFromTemplate={resetNodePortsFromTemplate}
                     onStartOutputConnection={startOutputConnection}
                     onSelectEdge={selectEdgeById}
                   />
@@ -2640,6 +2678,7 @@ function NodeConfigPanel({
   changePortTypeForNode,
   replaceNodePortsForAgent,
   replaceNodePortsForSoftwareCommand,
+  resetNodePortsFromTemplate,
   onStartOutputConnection,
   onSelectEdge,
 }: {
@@ -2655,6 +2694,7 @@ function NodeConfigPanel({
   changePortTypeForNode: (nodeId: string, direction: 'inputs' | 'outputs', portId: string, nextType: ArtifactType) => void
   replaceNodePortsForAgent: (nodeId: string, agent: AgentProfileRow) => void
   replaceNodePortsForSoftwareCommand: (nodeId: string, command: SoftwareCommandRow) => void
+  resetNodePortsFromTemplate: (nodeId: string, templateId: string, patch?: Partial<AgentFlowNodeData>) => void
   onStartOutputConnection: (nodeId: string, type: ArtifactType, outputId: string) => void
   onSelectEdge: (edgeId: string) => void
 }) {
@@ -2703,9 +2743,8 @@ function NodeConfigPanel({
                     replaceNodePortsForAgent(node.id, agent)
                     return
                   }
-                  onUpdateNode(node.id, {
+                  resetNodePortsFromTemplate(node.id, 'employee-agent', {
                     agentId: undefined,
-                    subtitle: nodeKindLabels.agent,
                   })
                 }}
               >
@@ -2730,9 +2769,8 @@ function NodeConfigPanel({
                     replaceNodePortsForSoftwareCommand(node.id, command)
                     return
                   }
-                  onUpdateNode(node.id, {
+                  resetNodePortsFromTemplate(node.id, 'software-command', {
                     softwareCommandId: undefined,
-                    subtitle: nodeKindLabels.tool,
                   })
                 }}
               >

@@ -272,6 +272,17 @@ describe('Langflow agent canvas layout', () => {
     expect(updateNodeSource.indexOf('pushCanvasHistory()')).toBeLessThan(updateNodeSource.indexOf('setNodes((current) =>'))
   })
 
+  it('resets node ports and stale handoffs when an Agent or software binding is cleared', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('const resetNodePortsFromTemplate = useCallback')
+    expect(source).toContain("resetNodePortsFromTemplate(node.id, 'employee-agent', {")
+    expect(source).toContain('agentId: undefined')
+    expect(source).toContain("resetNodePortsFromTemplate(node.id, 'software-command', {")
+    expect(source).toContain('softwareCommandId: undefined')
+    expect(source).toContain('setEdges((current) => keepEdgesWithKnownHandles(current, nodeId, inputs, outputs))')
+  })
+
   it('supports canceling the current artifact connection with the Escape key', () => {
     const source = readCanvasSource()
 
