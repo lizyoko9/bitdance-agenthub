@@ -29,6 +29,7 @@ import type {
 } from '@/db/schema'
 import {
   getRunReflection,
+  compileRuntimeMemoryContextPack,
   listMemoryForRun,
   reflectAndLearn,
   retrieveRelevantMemories,
@@ -444,6 +445,12 @@ async function runPhase(
     payload.retrievedMemoryIds = context.retrievedMemories.map(({ item }) => item.id)
     payload.retrievedMemoryTitles = context.retrievedMemories.map(({ item }) => item.title)
     payload.retrievedMemoryScores = context.retrievedMemories.map(({ score }) => score)
+    payload.memoryContextPack = compileRuntimeMemoryContextPack({
+      agent,
+      goal: run.goal,
+      input: run.input,
+      retrievedMemories: context.retrievedMemories,
+    }) as unknown as JsonObject
   }
 
   if (phase === 'verify_output_contract' && Object.keys(agent.outputContract).length === 0) {

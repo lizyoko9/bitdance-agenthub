@@ -12,6 +12,14 @@ import type {
   MemoryPrivacyWriteAccess,
   RunReflectionRow,
 } from '@/db/schema'
+import {
+  compileAgentMemoryContextPack,
+  extractAgentMemoryCues,
+  recallAgentMemories,
+  type AgentMemoryBlock,
+  type AgentMemoryContextPack,
+  type AgentMemoryRecallResult,
+} from '@/lib/agent-psm-memory-core'
 import { newMemoryItemId, newRunReflectionId } from '@/server/ids'
 
 export interface RetrievedMemory {
@@ -22,6 +30,7 @@ export interface RetrievedMemory {
 
 export interface RuntimeMemoryContext {
   memories: RetrievedMemory[]
+  contextPack?: AgentMemoryContextPack
 }
 
 export interface RuntimeLearningResult {
@@ -45,13 +54,39 @@ export async function retrieveRelevantMemories(args: {
   const agentById = new Map(agentProfiles.map((profile) => [profile.id, profile]))
   const now = Date.now()
   const terms = buildSearchTerms(args.agent, args.goal, args.input ?? {})
+  const artifactType = getString(args.agent.outputContract, 'artifactType')
+  const cuePack = extractAgentMemoryCues({
+    goal: args.goal,
+    explicitCues: [...terms],
+    tags: [args.agent.role, artifactType ?? ''].filter(Boolean),
+  })
 
-  return candidates
-    .filter((item) => memoryVisibleToAgent(item, args.agent, agentById, now))
-    .map((item) => scoreMemory(item, terms))
-    .filter((scored) => scored.score > 0)
-    .sort((a, b) => b.score - a.score || b.item.importance - a.item.importance)
-    .slice(0, args.limit ?? 8)
+  const visibleItems = candidates.filter((item) => memoryVisibleToAgent(item, args.agent, agentById, now))
+  const itemByMemoryId = new Map(visibleItems.map((item) => [item.id, item]))
+  const memoryBlocks = visibleItems.map((item) => toAgentMemoryBlock({
+    item,
+    agent: args.agent,
+    agentById,
+    now,
+  }))
+  return recallAgentMemories(
+    {
+      agentId: args.agent.id,
+      projectId: getString(args.agent.memoryPolicy, 'projectId') ?? undefined,
+      teamId: getString(args.agent.memoryPolicy, 'teamId') ?? undefined,
+      goal: args.goal,
+      cues: cuePack.cues,
+      tags: cuePack.tags,
+      now,
+    },
+    memoryBlocks,
+    [],
+    { limit: args.limit ?? 8 },
+  ).map((result) => ({
+    item: itemByMemoryId.get(result.memory.id) as MemoryItemRow,
+    score: result.score,
+    matchedTerms: [...new Set([...result.matchedCues, ...result.matchedTags])],
+  }))
 }
 
 export async function reflectAndLearn(args: {
@@ -100,6 +135,54 @@ export async function reflectAndLearn(args: {
   })
 
   return { reflection, memoryItem }
+}
+
+export function compileRuntimeMemoryContextPack(args: {
+  agent: AgentProfileRow
+  goal: string
+  input?: JsonObject
+  retrievedMemories: RetrievedMemory[]
+  now?: number
+}): AgentMemoryContextPack {
+  const now = args.now ?? Date.now()
+  const terms = buildSearchTerms(args.agent, args.goal, args.input ?? {})
+  const artifactType = getString(args.agent.outputContract, 'artifactType')
+  const cuePack = extractAgentMemoryCues({
+    goal: args.goal,
+    explicitCues: [...terms],
+    tags: [args.agent.role, artifactType ?? ''].filter(Boolean),
+  })
+  const agentById = new Map([[args.agent.id, args.agent]])
+  const recalledMemories: AgentMemoryRecallResult[] = args.retrievedMemories.map((retrieved) => {
+    const memory = toAgentMemoryBlock({
+      item: retrieved.item,
+      agent: args.agent,
+      agentById,
+      now,
+    })
+    return {
+      memory,
+      score: retrieved.score,
+      matchedCues: retrieved.matchedTerms,
+      matchedTags: [],
+      reasons: retrieved.matchedTerms.length
+        ? [`匹配线索: ${retrieved.matchedTerms.join(', ')}`]
+        : [],
+    }
+  })
+
+  return compileAgentMemoryContextPack(
+    {
+      agentId: args.agent.id,
+      projectId: getString(args.agent.memoryPolicy, 'projectId') ?? undefined,
+      teamId: getString(args.agent.memoryPolicy, 'teamId') ?? undefined,
+      goal: args.goal,
+      cues: cuePack.cues,
+      tags: cuePack.tags,
+      now,
+    },
+    recalledMemories,
+  )
 }
 
 export async function listMemoryForRun(runId: string): Promise<MemoryItemRow[]> {
@@ -320,15 +403,6 @@ export async function createRunReflection(args: {
   return row
 }
 
-function scoreMemory(item: MemoryItemRow, terms: Set<string>): RetrievedMemory {
-  const text = `${item.title} ${item.content} ${item.type} ${item.scope}`.toLowerCase()
-  const matchedTerms = [...terms].filter((term) => text.includes(term))
-  const typeBoost = item.type === 'mistake' || item.type === 'procedural' ? 0.75 : 0
-  const scopeBoost = item.scope === 'agent' ? 0.4 : item.scope === 'project' ? 0.25 : 0
-  const score = matchedTerms.length + item.importance + item.confidence + typeBoost + scopeBoost
-  return { item, score, matchedTerms }
-}
-
 function memoryVisibleToAgent(
   item: MemoryItemRow,
   agent: AgentProfileRow,
@@ -418,6 +492,77 @@ function buildSearchTerms(agent: AgentProfileRow, goal: string, input: JsonObjec
       .map((term) => term.trim())
       .filter((term) => term.length >= 2),
   )
+}
+
+function toAgentMemoryBlock(args: {
+  item: MemoryItemRow
+  agent: AgentProfileRow
+  agentById: Map<string, AgentProfileRow>
+  now: number
+}): AgentMemoryBlock {
+  const owner = args.item.agentProfileId ? args.agentById.get(args.item.agentProfileId) : null
+  const agentProjectId = getString(args.agent.memoryPolicy, 'projectId') ?? undefined
+  const ownerProjectId = owner ? getString(owner.memoryPolicy, 'projectId') ?? undefined : undefined
+  const agentTeamId = getString(args.agent.memoryPolicy, 'teamId') ?? undefined
+  const ownerTeamId = owner ? getString(owner.memoryPolicy, 'teamId') ?? undefined : undefined
+  return {
+    id: args.item.id,
+    agentId: args.item.agentProfileId ?? args.agent.id,
+    projectId: ownerProjectId ?? agentProjectId,
+    teamId: ownerTeamId ?? agentTeamId,
+    scope: mapMemoryScope(args.item.scope),
+    type: mapMemoryType(args.item.type),
+    title: args.item.title,
+    content: args.item.content,
+    cues: buildMemoryBlockCues(args.item),
+    tags: [args.item.type, args.item.scope],
+    importance: args.item.importance,
+    confidence: args.item.confidence,
+    successCount: args.item.type === 'success' ? 1 : 0,
+    failureCount: args.item.type === 'mistake' ? 1 : 0,
+    reviewStatus: args.item.scope === 'agent' ? 'private' : 'approved_for_sharing',
+    sourceRunId: args.item.sourceRunId ?? undefined,
+    createdAt: args.item.createdAt,
+    updatedAt: args.item.updatedAt,
+    lastActivatedAt: args.item.updatedAt || args.now,
+  }
+}
+
+function buildMemoryBlockCues(item: MemoryItemRow): string[] {
+  return [
+    ...tokenizeMemoryText(`${item.title} ${item.content}`),
+    item.type,
+    item.scope,
+  ]
+}
+
+function tokenizeMemoryText(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .toLowerCase()
+        .split(/[^a-z0-9_\u4e00-\u9fff]+/iu)
+        .map((term) => term.trim())
+        .filter((term) => term.length >= 2),
+    ),
+  ]
+}
+
+function mapMemoryScope(scope: MemoryItemRow['scope']): AgentMemoryBlock['scope'] {
+  if (scope === 'agent') return 'agent_private'
+  if (scope === 'project') return 'project_shared'
+  if (scope === 'workspace') return 'team_shared'
+  return 'global_tool'
+}
+
+function mapMemoryType(type: MemoryItemRow['type']): AgentMemoryBlock['type'] {
+  if (type === 'episodic') return 'task'
+  if (type === 'procedural') return 'playbook'
+  if (type === 'project') return 'project_knowledge'
+  if (type === 'customer') return 'user_preference'
+  if (type === 'software') return 'tool_usage'
+  if (type === 'mistake') return 'failure_lesson'
+  return 'experience'
 }
 
 function isMemoryDisabled(agent: AgentProfileRow): boolean {
