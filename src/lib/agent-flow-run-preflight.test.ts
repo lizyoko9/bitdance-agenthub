@@ -99,6 +99,11 @@ describe('validateAgentFlowForRun', () => {
     expect(result.issues.map((issue) => issue.code)).toEqual(
       expect.arrayContaining(['target_port_missing', 'port_type_mismatch']),
     )
+    const mismatch = result.issues.find((issue) => issue.code === 'port_type_mismatch')
+    expect(mismatch?.message).toContain('视频')
+    expect(mismatch?.message).toContain('文档')
+    expect(mismatch?.message).not.toContain('video')
+    expect(mismatch?.message).not.toContain('document')
   })
 
   it('accepts a typed handoff and reports disconnected nodes as warnings only', () => {

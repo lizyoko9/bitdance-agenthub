@@ -1,4 +1,4 @@
-import { canConnectPortKinds, type LangflowPortKind } from './langflow-port-contracts'
+import { LANGFLOW_PORT_KIND_LABELS, canConnectPortKinds, type LangflowPortKind } from './langflow-port-contracts'
 import type { AgentFlowNodeKind, AgentFlowTemplatePortKind } from './agent-flow-node-templates'
 
 export type AgentFlowRunIssueCode =
@@ -141,12 +141,14 @@ export function validateAgentFlowForRun(args: {
 
     const artifactType = edge.data?.artifactType ?? sourcePort.type
     if (!canConnect(String(artifactType), String(targetPort.type))) {
+      const artifactLabel = labelArtifactType(String(artifactType))
+      const targetLabel = labelArtifactType(String(targetPort.type))
       issues.push({
         code: 'port_type_mismatch',
         severity: 'error',
         edgeId: edge.id,
         nodeId: target.id,
-        message: `${nodeTitle(source)} 输出的 ${artifactType} 不能交给 ${nodeTitle(target)} 的 ${targetPort.type} 输入。`,
+        message: `${nodeTitle(source)} 输出的${artifactLabel}不能交给 ${nodeTitle(target)} 的${targetLabel}输入。`,
       })
     }
   }
@@ -187,6 +189,11 @@ function canConnect(sourceType: string, targetType: string) {
   if (targetType === 'any') return true
   if (sourceType === 'any') return false
   return canConnectPortKinds(sourceType as LangflowPortKind, targetType as LangflowPortKind)
+}
+
+function labelArtifactType(type: string) {
+  if (type === 'any') return '任意'
+  return LANGFLOW_PORT_KIND_LABELS[type as LangflowPortKind] ?? type
 }
 
 function nodeTitle(node: AgentFlowRunPreflightNode) {
