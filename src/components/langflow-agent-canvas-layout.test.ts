@@ -686,6 +686,22 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('edge.data?.handoffContract')
   })
 
+  it('keeps the selected node handoff setup visible instead of hiding it in collapsed details', () => {
+    const source = readCanvasSource()
+    const nodePanelSource = source.slice(
+      source.indexOf('function NodeConfigPanel'),
+      source.indexOf('function NodePrimaryOutputSelector'),
+    )
+    const collapsedDetailsIndex = nodePanelSource.indexOf('data-testid="node-flow-details"')
+
+    expect(nodePanelSource.indexOf('NodeInputRequirementPanel node={node}')).toBeLessThan(collapsedDetailsIndex)
+    expect(nodePanelSource.indexOf('NodeDeliveryOutletPanel node={node}')).toBeLessThan(collapsedDetailsIndex)
+    expect(nodePanelSource.indexOf('NodeHandoffSummary node={node} nodes={nodes} edges={edges}')).toBeLessThan(
+      collapsedDetailsIndex,
+    )
+    expect(nodePanelSource.indexOf('NodeSetupGuide node={node}')).toBeLessThan(collapsedDetailsIndex)
+  })
+
   it('keeps existing edges consistent when a port artifact type changes', () => {
     const source = readCanvasSource()
 

@@ -2299,6 +2299,11 @@ function NodeConfigPanel({
           </PanelBlock>
         </section>
 
+        <NodeInputRequirementPanel node={node} />
+        <NodeDeliveryOutletPanel node={node} onStartOutputConnection={onStartOutputConnection} />
+        <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
+        <NodeSetupGuide node={node} />
+
         <details
           data-testid="node-basic-details"
           className="rounded-lg border bg-background"
@@ -2325,11 +2330,13 @@ function NodeConfigPanel({
           <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
             交付和连接
           </summary>
-          <div className="space-y-3 border-t p-3">
-            <NodeInputRequirementPanel node={node} />
-            <NodeDeliveryOutletPanel node={node} onStartOutputConnection={onStartOutputConnection} />
-            <NodeHandoffSummary node={node} nodes={nodes} edges={edges} />
-            <NodeSetupGuide node={node} />
+          <div className="border-t p-3">
+            <div
+              className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground"
+              data-testid="node-flow-details-help"
+            >
+              接收入口、交付出口和实际交付关系已经放在上方主区域。这里保留为连接说明，复杂端口请打开下面的高级端口设置。
+            </div>
           </div>
         </details>
 
