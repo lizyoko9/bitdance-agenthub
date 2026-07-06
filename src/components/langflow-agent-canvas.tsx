@@ -1767,6 +1767,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
                     nodes={nodes}
                     onDeleteEdge={() => deleteEdgeById(selectedEdge.id)}
                     onRerouteEdge={(sourcePort, targetPort) => rerouteEdgeById(selectedEdge.id, sourcePort, targetPort)}
+                    onSelectNode={selectNodeById}
                   />
                 ) : (
                   <NodeConfigPanel
@@ -2414,11 +2415,13 @@ function EdgeConfigPanel({
   nodes,
   onDeleteEdge,
   onRerouteEdge,
+  onSelectNode,
 }: {
   edge: AgentFlowEdge
   nodes: AgentFlowNode[]
   onDeleteEdge: () => void
   onRerouteEdge: (sourcePort: AgentFlowPort, targetPort: AgentFlowPort) => void
+  onSelectNode: (nodeId: string) => void
 }) {
   const route = describeEdgeRoute(edge, nodes)
   const sourceNode = nodes.find((node) => node.id === edge.source)
@@ -2503,12 +2506,26 @@ function EdgeConfigPanel({
           </PanelBlock>
 
           <PanelBlock title="来源端口">
-            <div className="text-sm font-semibold">{route.sourceTitle}</div>
+            <button
+              type="button"
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-left text-sm font-semibold transition hover:border-primary hover:bg-primary/5"
+              data-testid="edge-source-node-button"
+              onClick={() => onSelectNode(edge.source)}
+            >
+              {route.sourceTitle}
+            </button>
             <div className="mt-1 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">{route.sourcePortLabel}</div>
           </PanelBlock>
 
           <PanelBlock title="目标端口">
-            <div className="text-sm font-semibold">{route.targetTitle}</div>
+            <button
+              type="button"
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-left text-sm font-semibold transition hover:border-primary hover:bg-primary/5"
+              data-testid="edge-target-node-button"
+              onClick={() => onSelectNode(edge.target)}
+            >
+              {route.targetTitle}
+            </button>
             <div className="mt-1 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">{route.targetPortLabel}</div>
             <div className="mt-2 text-xs leading-5 text-muted-foreground">
               运行到这条线时，下游只会收到上面显示的这一类产物。

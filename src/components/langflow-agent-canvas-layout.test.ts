@@ -312,6 +312,21 @@ describe('Langflow agent canvas layout', () => {
     expect(rerouteSource).toContain('replaceEdgesForSingleTargetHandle(current.filter((edge) => edge.id !== edgeId), nextEdge)')
   })
 
+  it('lets users jump from a selected handoff edge back to either connected node', () => {
+    const source = readCanvasSource()
+    const edgePanelSource = source.slice(
+      source.indexOf('function EdgeConfigPanel'),
+      source.indexOf('function NodeConfigPanel'),
+    )
+
+    expect(source).toContain('onSelectNode={selectNodeById}')
+    expect(edgePanelSource).toContain('onSelectNode: (nodeId: string) => void')
+    expect(edgePanelSource).toContain('data-testid="edge-source-node-button"')
+    expect(edgePanelSource).toContain('data-testid="edge-target-node-button"')
+    expect(edgePanelSource).toContain('onClick={() => onSelectNode(edge.source)}')
+    expect(edgePanelSource).toContain('onClick={() => onSelectNode(edge.target)}')
+  })
+
   it('supports dragging palette components onto the canvas at the drop position', () => {
     const source = readCanvasSource()
 
