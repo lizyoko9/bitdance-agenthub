@@ -10632,13 +10632,13 @@ export async function approveLearningEvent(
   reviewerNote = '',
 ): Promise<{
   learningEvent: LearningEventRow
-  playbook: PlaybookRow
-  playbookVersion: PlaybookVersionRow
+  playbook: PlaybookRow | null
+  playbookVersion: PlaybookVersionRow | null
 }> {
   return json<{
     learningEvent: LearningEventRow
-    playbook: PlaybookRow
-    playbookVersion: PlaybookVersionRow
+    playbook: PlaybookRow | null
+    playbookVersion: PlaybookVersionRow | null
   }>(
     fetch(`/api/learning-events/${learningEventId}/approve`, {
       method: 'POST',

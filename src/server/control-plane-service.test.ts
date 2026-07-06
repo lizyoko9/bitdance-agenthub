@@ -3194,8 +3194,10 @@ describe('control plane service', () => {
     expect(pendingProposal.learningEvent).not.toBeNull()
     created.learningEvents.push(approvedProposal.learningEvent!.id, pendingProposal.learningEvent!.id)
     const approved = await learningService.approveLearningEvent(approvedProposal.learningEvent!.id, 'approved')
-    created.playbooks.push(approved.playbook.id)
-    created.playbookVersions.push(approved.playbookVersion.id)
+    expect(approved.playbook).not.toBeNull()
+    expect(approved.playbookVersion).not.toBeNull()
+    created.playbooks.push(approved.playbook!.id)
+    created.playbookVersions.push(approved.playbookVersion!.id)
 
     const report = await agentMemoryLearningReportService.getAgentMemoryLearningReport(agent.id, {
       goal: 'write a concise launch brief with pricing caveats',
@@ -9836,8 +9838,10 @@ describe('control plane service', () => {
       proposal.learningEvent!.id,
       'Retirement transfer fixture',
     )
-    created.playbooks.push(approved.playbook.id)
-    created.playbookVersions.push(approved.playbookVersion.id)
+    expect(approved.playbook).not.toBeNull()
+    expect(approved.playbookVersion).not.toBeNull()
+    created.playbooks.push(approved.playbook!.id)
+    created.playbookVersions.push(approved.playbookVersion!.id)
 
     const continuationPlan = await agentContinuityService.createContinuationPlan({
       agentProfileId: sourceAgent.id,
@@ -9901,7 +9905,7 @@ describe('control plane service', () => {
       toAgentProfileId: targetAgent.id,
     })
     expect(transfer.memoryItemIds).toEqual([releaseMemory.id])
-    expect(transfer.playbookIds).toEqual([approved.playbook.id])
+    expect(transfer.playbookIds).toEqual([approved.playbook!.id])
     expect(transfer.createdMemoryItemIds).toHaveLength(1)
     expect(transfer.createdPlaybookIds).toHaveLength(1)
 
@@ -19364,8 +19368,10 @@ describe('control plane service', () => {
     })
 
     const approved = await learningService.approveLearningEvent(snapshot.learningEvents[0].id, 'ship it')
-    created.playbooks.push(approved.playbook.id)
-    created.playbookVersions.push(approved.playbookVersion.id)
+    expect(approved.playbook).not.toBeNull()
+    expect(approved.playbookVersion).not.toBeNull()
+    created.playbooks.push(approved.playbook!.id)
+    created.playbookVersions.push(approved.playbookVersion!.id)
     expect(approved.learningEvent).toMatchObject({ status: 'approved', reviewerNote: 'ship it' })
     expect(approved.playbook).toMatchObject({
       agentProfileId: agent.id,
@@ -19373,7 +19379,7 @@ describe('control plane service', () => {
       sourceLearningEventId: snapshot.learningEvents[0].id,
     })
     expect(approved.playbookVersion).toMatchObject({
-      playbookId: approved.playbook.id,
+      playbookId: approved.playbook!.id,
       version: 1,
       sourceRunId: run.id,
     })

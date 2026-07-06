@@ -1,22 +1,47 @@
-import type { AgentProfileRow, LearningEventRow, RunReflectionRow } from '@/db/schema'
+import type {
+  AgentProfileRow,
+  JsonObject,
+  LearningEventRow,
+  PlaybookRow,
+  PlaybookVersionRow,
+  RunReflectionRow,
+} from '@/db/schema'
 import type { AgentMemoryEvolutionPlan } from '@/lib/agent-psm-memory-core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const store = vi.hoisted(() => ({
   insertedLearningEvents: [] as LearningEventRow[],
+  learningEvents: [] as LearningEventRow[],
+  insertedPlaybooks: [] as PlaybookRow[],
+  insertedPlaybookVersions: [] as PlaybookVersionRow[],
+}))
+
+const schemaMock = vi.hoisted(() => ({
+  learningEvents: { table: 'learning_events' },
+  playbooks: { table: 'playbooks' },
+  playbookVersions: { table: 'playbook_versions' },
 }))
 
 vi.mock('@/db/client', () => ({
   db: {
-    insert: vi.fn(() => ({
-      values: vi.fn(async (row: LearningEventRow) => {
-        store.insertedLearningEvents.push(row)
+    insert: vi.fn((table: { table: string }) => ({
+      values: vi.fn(async (row: LearningEventRow | PlaybookRow | PlaybookVersionRow) => {
+        if (table === schemaMock.learningEvents) {
+          store.learningEvents.push(row as LearningEventRow)
+          store.insertedLearningEvents.push(row as LearningEventRow)
+        }
+        if (table === schemaMock.playbooks) {
+          store.insertedPlaybooks.push(row as PlaybookRow)
+        }
+        if (table === schemaMock.playbookVersions) {
+          store.insertedPlaybookVersions.push(row as PlaybookVersionRow)
+        }
       }),
     })),
     query: {
       learningEvents: {
         findMany: vi.fn(async () => []),
-        findFirst: vi.fn(async () => null),
+        findFirst: vi.fn(async () => store.learningEvents[0] ?? null),
       },
       playbooks: {
         findMany: vi.fn(async () => []),
@@ -26,23 +51,26 @@ vi.mock('@/db/client', () => ({
       },
     },
     update: vi.fn(() => ({
-      set: vi.fn(() => ({
-        where: vi.fn(async () => undefined),
+      set: vi.fn((updates: Partial<LearningEventRow>) => ({
+        where: vi.fn(async () => {
+          if (store.learningEvents[0]) {
+            store.learningEvents[0] = { ...store.learningEvents[0], ...updates }
+          }
+        }),
       })),
     })),
   },
-  schema: {
-    learningEvents: {},
-    playbooks: {},
-    playbookVersions: {},
-  },
+  schema: schemaMock,
 }))
 
-import { proposeLearningEventsFromRuntimeLearning } from './learning-service'
+import { approveLearningEvent, proposeLearningEventsFromRuntimeLearning } from './learning-service'
 
 describe('learning service runtime PSM proposals', () => {
   beforeEach(() => {
     store.insertedLearningEvents = []
+    store.learningEvents = []
+    store.insertedPlaybooks = []
+    store.insertedPlaybookVersions = []
   })
 
   it('persists PSM playbook drafts and approval requests as reviewable agent learning events', async () => {
@@ -133,6 +161,34 @@ describe('learning service runtime PSM proposals', () => {
       reviewBeforeSharing: true,
     })
   })
+
+  it('approves memory sharing reviews without creating a playbook', async () => {
+    store.learningEvents.push(learningEvent({
+      id: 'evt_memory_share',
+      type: 'memory_share_review',
+      title: '剪映失败教训共享审核',
+      summary: '确认后再共享给项目。',
+      proposedPlaybook: {
+        source: 'agent_psm_evolution',
+        kind: 'share_memory',
+        targetId: 'run_1:failure_lesson',
+        privateFirst: true,
+        reviewBeforeSharing: true,
+      },
+    }))
+
+    const result = await approveLearningEvent('evt_memory_share', '允许共享这条经验')
+
+    expect(result.learningEvent).toMatchObject({
+      id: 'evt_memory_share',
+      status: 'approved',
+      reviewerNote: '允许共享这条经验',
+    })
+    expect(result.playbook).toBeNull()
+    expect(result.playbookVersion).toBeNull()
+    expect(store.insertedPlaybooks).toHaveLength(0)
+    expect(store.insertedPlaybookVersions).toHaveLength(0)
+  })
 })
 
 function agentProfile(overrides: Partial<AgentProfileRow> = {}): AgentProfileRow {
@@ -193,6 +249,24 @@ function runReflection(overrides: Partial<RunReflectionRow> = {}): RunReflection
     suggestedSkillUpdates: [],
     futureWarnings: [],
     createdAt: 1,
+    ...overrides,
+  }
+}
+
+function learningEvent(overrides: Partial<LearningEventRow> = {}): LearningEventRow {
+  return {
+    id: 'evt_1',
+    runId: 'run_1',
+    agentProfileId: 'agent_clip',
+    reflectionId: 'reflection_1',
+    type: 'playbook_proposal',
+    title: 'Work manual draft',
+    summary: 'Review this draft.',
+    proposedPlaybook: {} as JsonObject,
+    status: 'pending_review',
+    reviewerNote: null,
+    createdAt: 1,
+    reviewedAt: null,
     ...overrides,
   }
 }

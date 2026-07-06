@@ -129,14 +129,23 @@ export async function approveLearningEvent(
   reviewerNote = '',
 ): Promise<{
   learningEvent: LearningEventRow
-  playbook: PlaybookRow
-  playbookVersion: PlaybookVersionRow
+  playbook: PlaybookRow | null
+  playbookVersion: PlaybookVersionRow | null
 }> {
   const event = await getRequiredLearningEvent(learningEventId)
   if (event.status !== 'pending_review') {
     throw new Error(`Only pending learning events can be approved; current status is ${event.status}.`)
   }
   const now = Date.now()
+  if (!createsPlaybookOnApproval(event)) {
+    await markLearningEventReviewed(event.id, 'approved', reviewerNote, now)
+    return {
+      learningEvent: await getRequiredLearningEvent(event.id),
+      playbook: null,
+      playbookVersion: null,
+    }
+  }
+
   const title = getString(event.proposedPlaybook, 'title') ?? event.title
   const description = getString(event.proposedPlaybook, 'description') ?? event.summary
   const steps = getStringArray(event.proposedPlaybook, 'steps')
@@ -162,14 +171,7 @@ export async function approveLearningEvent(
 
   await db.insert(schema.playbooks).values(playbook)
   await db.insert(schema.playbookVersions).values(version)
-  await db
-    .update(schema.learningEvents)
-    .set({
-      status: 'approved',
-      reviewerNote: reviewerNote.trim() || null,
-      reviewedAt: now,
-    })
-    .where(eq(schema.learningEvents.id, event.id))
+  await markLearningEventReviewed(event.id, 'approved', reviewerNote, now)
   return {
     learningEvent: await getRequiredLearningEvent(event.id),
     playbook,
@@ -185,14 +187,7 @@ export async function rejectLearningEvent(
   if (event.status !== 'pending_review') {
     throw new Error(`Only pending learning events can be rejected; current status is ${event.status}.`)
   }
-  await db
-    .update(schema.learningEvents)
-    .set({
-      status: 'rejected',
-      reviewerNote: reviewerNote.trim() || null,
-      reviewedAt: Date.now(),
-    })
-    .where(eq(schema.learningEvents.id, learningEventId))
+  await markLearningEventReviewed(learningEventId, 'rejected', reviewerNote, Date.now())
   return getRequiredLearningEvent(learningEventId)
 }
 
@@ -334,6 +329,26 @@ function getString(obj: JsonObject, key: string): string | null {
 function getStringArray(obj: JsonObject, key: string): string[] {
   const value = obj[key]
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+async function markLearningEventReviewed(
+  learningEventId: string,
+  status: 'approved' | 'rejected',
+  reviewerNote: string,
+  reviewedAt: number,
+): Promise<void> {
+  await db
+    .update(schema.learningEvents)
+    .set({
+      status,
+      reviewerNote: reviewerNote.trim() || null,
+      reviewedAt,
+    })
+    .where(eq(schema.learningEvents.id, learningEventId))
+}
+
+function createsPlaybookOnApproval(event: LearningEventRow): boolean {
+  return event.type === 'playbook_proposal'
 }
 
 function findApprovalRequests(
