@@ -52,4 +52,30 @@ describe('agenthub module manager', () => {
     expect(view.activeModules).toEqual([])
     expect(view.blockers).toEqual(['unknown-module is not a known AgentHub module'])
   })
+
+  it('adds user-facing module status and dependency guidance for the module store UI', () => {
+    const view = buildAgentHubModuleManagerView()
+    const activeCanvas = view.activeModules.find((module) => module.id === 'agent-canvas')
+    const memory = view.availableModules.find((module) => module.id === 'memory')
+    const analytics = view.availableModules.find((module) => module.id === 'analytics')
+
+    expect(activeCanvas).toMatchObject({
+      statusLabel: '已启用',
+      statusTone: 'ready',
+      actionLabel: '打开',
+      dependencyHint: '依赖已就绪：模型管理、智能体',
+    })
+    expect(memory).toMatchObject({
+      statusLabel: '可加入',
+      statusTone: 'muted',
+      actionLabel: '加入模块',
+      dependencyHint: '加入时会自动带上：模型管理、智能体',
+    })
+    expect(analytics).toMatchObject({
+      statusLabel: '可直接加入',
+      statusTone: 'ready',
+      actionLabel: '加入模块',
+      dependencyHint: '无需额外依赖',
+    })
+  })
 })

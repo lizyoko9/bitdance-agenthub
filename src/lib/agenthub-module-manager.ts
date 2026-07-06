@@ -16,6 +16,10 @@ export type AgentHubManagedModule = {
   defaultEnabled: boolean
   dependencyIds: string[]
   dependencyLabels: string[]
+  statusLabel: string
+  statusTone: 'ready' | 'muted' | 'warning'
+  actionLabel: string
+  dependencyHint: string
 }
 
 export type AgentHubModuleManagerView = {
@@ -49,19 +53,32 @@ export function buildAgentHubModuleManagerView(
 
 function toManagedModule(moduleBlock: AgentHubModuleBlock, activeIdSet: Set<string>): AgentHubManagedModule {
   const dependencyIds = collectDependencyIds(moduleBlock)
+  const active = activeIdSet.has(moduleBlock.id)
+  const dependencyLabels = dependencyIds
+    .map((dependencyId) => AGENTHUB_MODULE_BLOCKS.find((candidate) => candidate.id === dependencyId))
+    .filter((dependency): dependency is AgentHubModuleBlock => Boolean(dependency))
+    .map((dependency) => dependency.label)
+  const hasDependencies = dependencyLabels.length > 0
 
   return {
     id: moduleBlock.id,
     label: moduleBlock.label,
     access: moduleBlock.access,
     layer: moduleBlock.layer,
-    active: activeIdSet.has(moduleBlock.id),
+    active,
     defaultEnabled: moduleBlock.defaultEnabled,
     dependencyIds,
-    dependencyLabels: dependencyIds
-      .map((dependencyId) => AGENTHUB_MODULE_BLOCKS.find((candidate) => candidate.id === dependencyId))
-      .filter((dependency): dependency is AgentHubModuleBlock => Boolean(dependency))
-      .map((dependency) => dependency.label),
+    dependencyLabels,
+    statusLabel: active ? '已启用' : hasDependencies ? '可加入' : '可直接加入',
+    statusTone: active || !hasDependencies ? 'ready' : 'muted',
+    actionLabel: active ? '打开' : '加入模块',
+    dependencyHint: active
+      ? hasDependencies
+        ? `依赖已就绪：${dependencyLabels.join('、')}`
+        : '无需额外依赖'
+      : hasDependencies
+        ? `加入时会自动带上：${dependencyLabels.join('、')}`
+        : '无需额外依赖',
   }
 }
 

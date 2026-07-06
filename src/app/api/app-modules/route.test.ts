@@ -27,6 +27,20 @@ describe('GET /api/app-modules', () => {
       'memory',
       'analytics',
     ])
+    expect(
+      body.moduleManager.activeModules.find((module: { id: string }) => module.id === 'agent-canvas'),
+    ).toMatchObject({
+      statusLabel: '已启用',
+      actionLabel: '打开',
+      dependencyHint: '依赖已就绪：模型管理、智能体',
+    })
+    expect(
+      body.moduleManager.availableModules.find((module: { id: string }) => module.id === 'memory'),
+    ).toMatchObject({
+      statusLabel: '可加入',
+      actionLabel: '加入模块',
+      dependencyHint: '加入时会自动带上：模型管理、智能体',
+    })
   })
 
   it('previews requested module activation from query params', async () => {
