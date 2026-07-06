@@ -1077,6 +1077,27 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
     setEdges((current) => current.map((item) => ({ ...item, selected: item.id === edgeId })))
   }, [clearSelectedNodes, setEdges])
 
+  const openLifecycleStatus = useCallback(() => {
+    setPreflightVisible(true)
+    setPreflightIssues(livePreflight.issues)
+    setNodes((current) => applyPreflightStatusToNodes({ nodes: current, edges, preflight: livePreflight }))
+    setEdges((current) => applyPreflightStatusToEdges({ edges: current, preflight: livePreflight }))
+
+    const firstBlockingIssue = livePreflight.issues.find((issue) => issue.severity === 'error') ?? livePreflight.issues[0]
+    if (firstBlockingIssue?.nodeId) {
+      selectNodeById(firstBlockingIssue.nodeId)
+    } else if (firstBlockingIssue?.edgeId) {
+      selectEdgeById(firstBlockingIssue.edgeId)
+    }
+
+    if (!livePreflight.ready) {
+      setNotice(`Preflight found ${livePreflight.errorCount} blocker(s); opened the first issue.`)
+      return
+    }
+
+    setNotice('Preflight is ready. You can run the workflow check.')
+  }, [edges, livePreflight, selectEdgeById, selectNodeById, setEdges, setNodes])
+
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNode) return
     deleteNodeById(selectedNode.id)
@@ -1453,6 +1474,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             undoCanvasEdit={undoCanvasEdit}
             redoCanvasEdit={redoCanvasEdit}
             lifecycleStatus={lifecycleStatus}
+            onLifecycleStatusClick={openLifecycleStatus}
             saveCanvasDraft={saveCanvasDraft}
             runPreflight={runPreflight}
             onZoomIn={() => void zoomIn()}
@@ -1831,6 +1853,7 @@ function CanvasFloatingControls({
   undoCanvasEdit,
   redoCanvasEdit,
   lifecycleStatus,
+  onLifecycleStatusClick,
   saveCanvasDraft,
   runPreflight,
   onZoomIn,
@@ -1845,6 +1868,7 @@ function CanvasFloatingControls({
   undoCanvasEdit: () => void
   redoCanvasEdit: () => void
   lifecycleStatus: CanvasLifecycleStatus
+  onLifecycleStatusClick: () => void
   saveCanvasDraft: () => void
   runPreflight: () => void
   onZoomIn: () => void
@@ -1957,13 +1981,15 @@ function CanvasFloatingControls({
         适配
       </Button>
       <div className="mx-1 h-5 w-px bg-border" />
-      <div
+      <button
+        type="button"
         className={cn(
-          'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground',
+          'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           lifecycleStatus.state === 'needs_capability'
             ? 'border-amber-500/30 bg-amber-500/10'
             : 'border-emerald-500/30 bg-emerald-500/10',
         )}
+        onClick={onLifecycleStatusClick}
         data-testid="canvas-lifecycle-status"
         data-lifecycle-state={lifecycleStatus.state}
         title="生命周期状态"
@@ -1980,7 +2006,7 @@ function CanvasFloatingControls({
           {lifecycleStatus.statusLabel}
         </span>
         <span className="max-w-28 truncate">{lifecycleStatus.detail}</span>
-      </div>
+      </button>
       <Button
         type="button"
         size="sm"
