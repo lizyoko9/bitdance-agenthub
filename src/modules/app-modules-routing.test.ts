@@ -52,6 +52,6 @@ describe('app module routing', () => {
     expect(primaryIds).not.toContain('agent-orchestration')
     expect(primaryIds).not.toContain('langflow-native')
     expect(primaryIds).not.toContain('infinite-canvas')
-    expect(appModules.some((module) => module.id === 'agenthub-lifecycle')).toBe(false)
+    expect(appModules.some((module) => String(module.id) === 'agenthub-lifecycle')).toBe(false)
   })
 })
