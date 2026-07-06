@@ -122,6 +122,11 @@ interface AgentFlowNodeData extends Record<string, unknown> {
   outgoingHandoffs?: OutgoingHandoff[]
   customerVisible?: boolean
   executionStage?: number
+  runStepSummary?: {
+    stage: number
+    incomingCount: number
+    outgoingCount: number
+  }
   expanded?: boolean
   connectionType?: ArtifactType | null
   activeOutputPortId?: string
@@ -546,20 +551,33 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   }, [pushCanvasHistory, setNodes])
 
   const nodesForCanvas = useMemo(
-    () => nodes.map((node) => ({
-      ...node,
-      data: {
-        ...node.data,
-        connectionType: activeConnectionType,
-        activeOutputPortId: activeOutputPort?.nodeId === node.id ? activeOutputPort.outputId : undefined,
-        incomingHandoffs: buildIncomingHandoffsForNode(node.id, nodes, edges),
-        outgoingHandoffs: buildOutgoingHandoffsForNode(node.id, nodes, edges),
-        executionStage: executionStages.get(node.id),
-        onToggleExpanded: toggleNodeExpanded,
-        onOutputConnectStart: (type: ArtifactType, outputId: string) => {
-          startOutputConnection(node.id, type, outputId)
-        },
-        onInputConnectComplete: (targetNodeId: string, targetInputId: string) => {
+    () => {
+      const runStepByNodeId = new Map(lastRun?.steps.map((step) => [step.nodeId, step]) ?? [])
+
+      return nodes.map((node) => {
+        const runStep = runStepByNodeId.get(node.id)
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            connectionType: activeConnectionType,
+            activeOutputPortId: activeOutputPort?.nodeId === node.id ? activeOutputPort.outputId : undefined,
+            incomingHandoffs: buildIncomingHandoffsForNode(node.id, nodes, edges),
+            outgoingHandoffs: buildOutgoingHandoffsForNode(node.id, nodes, edges),
+            executionStage: executionStages.get(node.id),
+            runStepSummary: runStep
+              ? {
+                  stage: runStep.stage,
+                  incomingCount: runStep.incomingContracts.length,
+                  outgoingCount: runStep.outgoingContracts.length,
+                }
+              : undefined,
+            onToggleExpanded: toggleNodeExpanded,
+            onOutputConnectStart: (type: ArtifactType, outputId: string) => {
+              startOutputConnection(node.id, type, outputId)
+            },
+            onInputConnectComplete: (targetNodeId: string, targetInputId: string) => {
           if (!activeOutputPort) return
           const sourceNode = nodes.find((item) => item.id === activeOutputPort.nodeId)
           const targetNode = nodes.find((item) => item.id === targetNodeId)
@@ -597,10 +615,12 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           setSelectedEdgeId('')
           clearActiveConnection()
           setNotice(`已把 ${sourceNode.data.title} 的 ${sourceOutput.label} 接到 ${targetNode.data.title}。`)
-        },
-      },
-    })),
-    [activeConnectionType, activeOutputPort, clearActiveConnection, edges, executionStages, nodes, pushCanvasHistory, setEdges, startOutputConnection, toggleNodeExpanded],
+            },
+          },
+        }
+      })
+    },
+    [activeConnectionType, activeOutputPort, clearActiveConnection, edges, executionStages, lastRun, nodes, pushCanvasHistory, setEdges, startOutputConnection, toggleNodeExpanded],
   )
 
   const completeActiveConnectionToNode = useCallback((targetNodeId: string) => {
@@ -2083,6 +2103,17 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
       </div>
 
       <div className="px-3 py-2">
+        {data.status === 'done' && data.runStepSummary && (
+          <div
+            className="mb-2 flex items-center justify-between gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-700 dark:text-emerald-300"
+            data-testid="node-run-step-summary"
+          >
+            <span className="font-medium">本次运行</span>
+            <span className="truncate">
+              收到 {data.runStepSummary.incomingCount} 项 / 交出 {data.runStepSummary.outgoingCount} 项
+            </span>
+          </div>
+        )}
         <NodeCardPortContracts inputs={data.inputs} outputs={data.outputs} />
         {!nodeExpanded && <NodeCompactHandleStrip inputs={data.inputs} outputs={data.outputs} />}
         {nodeExpanded && (

@@ -65,6 +65,22 @@ describe('Langflow agent canvas layout', () => {
     )
   })
 
+  it('shows local run evidence directly on completed canvas nodes', () => {
+    const source = readCanvasSource()
+    const nodesForCanvasSource = source.slice(
+      source.indexOf('const nodesForCanvas = useMemo'),
+      source.indexOf('const applyCanvasDraftFromPrompt'),
+    )
+
+    expect(source).toContain('runStepSummary?:')
+    expect(nodesForCanvasSource).toContain('lastRun?.steps.map')
+    expect(nodesForCanvasSource).toContain('runStepSummary: runStep')
+    expect(nodesForCanvasSource).toContain('incomingContracts.length')
+    expect(nodesForCanvasSource).toContain('outgoingContracts.length')
+    expect(source).toContain('data-testid="node-run-step-summary"')
+    expect(source).toContain('本次运行')
+  })
+
   it('shows preflight problems in the right inspector instead of overlaying the canvas', () => {
     const source = readCanvasSource()
     const flowSurfaceSource = source.slice(
