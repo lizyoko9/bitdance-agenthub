@@ -271,6 +271,21 @@ const primaryDeliverableTypes: ArtifactType[] = [
   'result',
 ]
 
+const primaryInputTypes: ArtifactType[] = [
+  'message',
+  'document',
+  'code',
+  'image',
+  'video',
+  'audio',
+  'spreadsheet',
+  'file_bundle',
+  'structured_data',
+  'data',
+  'result',
+  'any',
+]
+
 const nodeKindLabels: Record<AgentFlowNodeKind, string> = {
   input: '客户输入',
   prompt: '提示词',
@@ -2547,6 +2562,7 @@ function NodeConfigPanel({
           <NodeBusinessSetup node={node} />
 
           <NodePrimaryOutputSelector node={node} onTypeChange={(outputId, type) => changePortTypeForNode(node.id, 'outputs', outputId, type)} />
+          <NodePrimaryInputSelector node={node} onTypeChange={(inputId, type) => changePortTypeForNode(node.id, 'inputs', inputId, type)} />
 
           <PanelBlock title="客户交付">
             <label className="flex items-center gap-2 text-xs">
@@ -2679,6 +2695,51 @@ function NodePrimaryOutputSelector({
         </div>
         <div className="text-[11px] leading-4 text-muted-foreground">
           这个节点只会把这一种产物交给下游；如果要更多出口，再打开高级端口设置。
+        </div>
+      </div>
+    </PanelBlock>
+  )
+}
+
+function NodePrimaryInputSelector({
+  node,
+  onTypeChange,
+}: {
+  node: AgentFlowNode
+  onTypeChange: (inputId: string, type: ArtifactType) => void
+}) {
+  const primaryInput = node.data.inputs[0]
+  if (!primaryInput) return null
+
+  return (
+    <PanelBlock title="接收类型">
+      <div data-testid="node-primary-input-selector" className="space-y-2">
+        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-2">
+          <ArtifactPill type={primaryInput.type} />
+          <span className="min-w-0 flex-1 truncate text-xs">{primaryInput.label}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {primaryInputTypes.map((type) => (
+            <button
+              key={type}
+              type="button"
+              className={cn(
+                'flex min-w-0 items-center gap-1.5 rounded-md border bg-background px-2 py-1.5 text-left text-xs transition hover:border-primary hover:bg-primary/5',
+                type === primaryInput.type && 'border-primary bg-primary/10 text-primary',
+              )}
+              data-testid="node-primary-input-type-button"
+              data-artifact-type={type}
+              data-selected-artifact-type={type === primaryInput.type}
+              aria-pressed={type === primaryInput.type}
+              onClick={() => onTypeChange(primaryInput.id, type)}
+            >
+              <ArtifactPill type={type} />
+              <span className="min-w-0 truncate">{artifactLabels[type]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="text-[11px] leading-4 text-muted-foreground">
+          上游只有交付这个类型时才能接入；需要多个入口时再打开高级端口设置。
         </div>
       </div>
     </PanelBlock>

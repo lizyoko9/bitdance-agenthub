@@ -664,6 +664,22 @@ describe('Langflow agent canvas layout', () => {
     )
   })
 
+  it('lets users choose the primary accepted input type before advanced port settings', () => {
+    const source = readCanvasSource()
+
+    expect(source).toContain('NodePrimaryInputSelector node={node}')
+    expect(source).toContain('data-testid="node-primary-input-selector"')
+    expect(source).toContain('data-testid="node-primary-input-type-button"')
+    expect(source).toContain('primaryInputTypes')
+    expect(source).toContain("changePortTypeForNode(node.id, 'inputs', inputId, type)")
+    expect(source.indexOf('NodePrimaryInputSelector node={node}')).toBeLessThan(
+      source.indexOf('NodeInputRequirementPanel'),
+    )
+    expect(source.indexOf('NodePrimaryInputSelector node={node}')).toBeLessThan(
+      source.indexOf('data-testid="advanced-port-settings"'),
+    )
+  })
+
   it('keeps a single-input downstream deliverable connected when the primary output type changes', () => {
     const source = readCanvasSource()
 
