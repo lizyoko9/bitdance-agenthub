@@ -2106,6 +2106,8 @@ function EdgeConfigPanel({
   onDeleteEdge: () => void
 }) {
   const route = describeEdgeRoute(edge, nodes)
+  const handoffStatus = edge.data?.handoffStatus ?? 'pending'
+  const handoffStatusLabel = handoffStatus === 'delivered' ? '已交付' : handoffStatus === 'blocked' ? '已阻塞' : '待交付'
 
   return (
     <aside
@@ -2135,6 +2137,12 @@ function EdgeConfigPanel({
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold">{artifactLabels[route.artifactType]}</div>
               <ArtifactPill type={route.artifactType} />
+            </div>
+            <div
+              className="mt-2 inline-flex items-center rounded-full border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground"
+              data-testid="edge-handoff-status-badge"
+            >
+              {handoffStatusLabel}
             </div>
             <div className="mt-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">{route.handoffContract}</div>
             <div className="mt-2 text-xs leading-5 text-muted-foreground">

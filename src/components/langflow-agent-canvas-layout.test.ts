@@ -871,6 +871,19 @@ describe('Langflow agent canvas layout', () => {
     expect(edgePanelSource).not.toContain('targetHandle:')
   })
 
+  it('shows the selected edge run status inside the handoff inspector', () => {
+    const source = readCanvasSource()
+    const edgePanelSource = source.slice(
+      source.indexOf('function EdgeConfigPanel'),
+      source.indexOf('function NodeConfigPanel'),
+    )
+
+    expect(edgePanelSource).toContain("const handoffStatus = edge.data?.handoffStatus ?? 'pending'")
+    expect(edgePanelSource).toContain("const handoffStatusLabel = handoffStatus === 'delivered' ? '已交付'")
+    expect(edgePanelSource).toContain('data-testid="edge-handoff-status-badge"')
+    expect(edgePanelSource).toContain('{handoffStatusLabel}')
+  })
+
   it('stores the selected source and target ports as an explicit edge handoff contract', () => {
     const source = readCanvasSource()
 
