@@ -11076,11 +11076,66 @@ export interface WorkflowGraph {
   edges: WorkflowEdgeRow[]
 }
 
+export interface WorkflowRunSelectedArtifact {
+  outputKey: string
+  artifactType: string
+  artifactId: string | null
+  value: JsonObject | null
+}
+
+export interface WorkflowRunArtifactHandoff {
+  edgeId: string
+  sourceNodeId: string
+  targetNodeId: string
+  sourceNodeRunId: string | null
+  targetNodeRunId: string | null
+  sourceNodeLabel: string
+  targetNodeLabel: string
+  sourceStatus: WorkflowRunRow['status'] | null
+  targetStatus: WorkflowRunRow['status'] | null
+  outputKey: string
+  targetInputKey: string
+  artifactType: string
+  artifactLabel: string
+  sourcePortLabel: string
+  targetPortLabel: string
+  contract: string
+  artifactId: string | null
+  selectedArtifact: WorkflowRunSelectedArtifact | null
+}
+
+export interface WorkflowRunDeliveryArtifact {
+  id: string
+  nodeId: string
+  nodeRunId: string | null
+  sourceNodeLabel: string
+  title: string
+  description: string
+  artifactType: string
+  artifactLabel: string
+  outputKey: string
+  artifactId: string | null
+  status: 'ready' | 'waiting' | 'failed'
+  fileName: string | null
+  path: string | null
+}
+
+export interface WorkflowRunDeliveryPackage {
+  title: '客户可见交付包'
+  summary: string
+  totalArtifacts: number
+  readyArtifacts: number
+  missingArtifacts: string[]
+  artifacts: WorkflowRunDeliveryArtifact[]
+}
+
 export interface WorkflowRunSnapshot {
   workflowRun: WorkflowRunRow
   nodeRuns: WorkflowNodeRunRow[]
   employeeRuns: EmployeeRunRow[]
   nodeBrainStatuses: WorkflowNodeBrainStatus[]
+  artifactHandoffs: WorkflowRunArtifactHandoff[]
+  deliveryPackage: WorkflowRunDeliveryPackage
   softwareCommandRuns: SoftwareCommandRunRow[]
   computerSessions: ComputerSessionRow[]
   computerActionEvents: ComputerActionEventRow[]

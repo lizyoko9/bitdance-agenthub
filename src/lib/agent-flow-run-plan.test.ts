@@ -32,4 +32,44 @@ describe('buildAgentFlowRunPlan', () => {
     expect(plan[1].outgoingContracts).toEqual(['报告: 写作报告 -> 客户交付'])
     expect(plan[2].incomingContracts).toEqual(['报告: 写作报告 -> 客户交付'])
   })
+
+  it('records the exact selected artifact handoff without passing the source node other outputs', () => {
+    const plan = buildAgentFlowRunPlan({
+      nodes: [
+        { id: 'producer', data: { title: '内容 Agent', kind: 'agent' } },
+        { id: 'video_delivery', data: { title: '视频交付物', kind: 'artifact' } },
+      ],
+      edges: [
+        {
+          id: 'video-only',
+          source: 'producer',
+          target: 'video_delivery',
+          data: {
+            artifactType: 'video',
+            outputId: 'final_video',
+            sourcePortLabel: '成片视频',
+            targetPortId: 'video',
+            targetPortLabel: '视频文件',
+          },
+        },
+      ],
+    })
+
+    expect(plan[1].incomingHandoffs).toEqual([
+      {
+        edgeId: 'video-only',
+        sourceNodeId: 'producer',
+        targetNodeId: 'video_delivery',
+        artifactType: 'video',
+        artifactLabel: '视频',
+        outputId: 'final_video',
+        targetInputId: 'video',
+        sourcePortLabel: '成片视频',
+        targetPortLabel: '视频文件',
+        contract: '视频: 成片视频 -> 视频文件',
+      },
+    ])
+    expect(plan[1].incomingContracts).toEqual(['视频: 成片视频 -> 视频文件'])
+    expect(JSON.stringify(plan[1].incomingHandoffs)).not.toContain('source_code')
+  })
 })

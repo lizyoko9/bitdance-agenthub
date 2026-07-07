@@ -15,7 +15,7 @@ describe('agent employee settings', () => {
         '选择模型',
         '员工工具包',
         '权限边界',
-        '记忆学习',
+        '员工大脑',
         '交付产物',
       ]),
     ).not.toThrow()
@@ -66,5 +66,23 @@ describe('agent employee settings', () => {
         supportsVision: false,
       }),
     ).toBeNull()
+  })
+
+  it('presents memory as the agent employee brain instead of a standalone system', () => {
+    const memorySection = AGENT_EMPLOYEE_SETTING_SECTIONS.find((section) => section.id === 'memory')
+
+    expect(memorySection?.id).toBe('memory')
+    expect(memorySection?.label).toBe('员工大脑')
+    for (const term of [
+      '任务记忆',
+      '长期经验',
+      '工具经验',
+      '失败教训',
+      '工作手册',
+      '自我校准',
+      '反思学习',
+    ]) {
+      expect(memorySection?.description).toContain(term)
+    }
   })
 })

@@ -60,43 +60,43 @@ interface DefaultHelpSurface {
 }
 
 const DEFAULT_HELP_SURFACES: DefaultHelpSurface[] = [
-  makeSurface('agent_factory', '/factory', 'Agent Factory', 'Create Agent employees and configure their model, tools, memory, permissions, and output contract.', '/docs/user-guide/agent-factory.md', 'Agent profile name', 'Launch research assistant'),
-  makeSurface('model_control', '/models', 'Model Control', 'Configure providers, base URLs, fallback models, and network outlets.', '/docs/user-guide/models.md', 'OpenAI compatible endpoint', 'https://api.openai.com/v1'),
-  makeSurface('tool_control', '/tools', 'Tool Control', 'Register CLI, MCP, API, software, macro, SDK, and webhook capabilities.', '/docs/user-guide/tools.md', 'Codex CLI profile', 'codex --approval never'),
-  makeSurface('skills_center', '/skills', 'Skills Center', 'Install local Skills, open SkillsMap, and assign Skills to Agents.', '/docs/user-guide/skills.md', 'Skill source URL', 'https://github.com/example/skill-pack'),
-  makeSurface('agent_canvas', '/canvas', 'Agent Canvas', 'Compose multiple Agent employees, approvals, conditions, software commands, and artifact contracts.', '/docs/user-guide/canvas.md', 'Workflow name', 'Launch review workflow'),
-  makeSurface('memory_center', '/memory', 'Memory Center', 'Review memories, learning events, playbooks, privacy boundaries, and knowledge transfer.', '/docs/user-guide/memory.md', 'Memory title', 'Customer prefers concise launch briefs'),
-  makeSurface('governance_center', '/governance', 'Governance Center', 'Review approvals, autonomy, sandboxing, data lifecycle, feature flags, and implementation audit.', '/docs/advanced/safety.md', 'Sandbox policy name', 'Workspace write guard'),
-  makeSurface('observability_center', '/observability', 'Observability Center', 'Inspect metrics, alerts, debug packages, Agent reputation, and Meta Agent digests.', '/docs/user-guide/monitoring.md', 'Metric name', 'agenthub.task.duration'),
-  makeSurface('config_ops_center', '/config', 'ConfigOps Center', 'Version, restore, export, import-check, and conflict-resolve configuration records.', '/docs/advanced/workflows.md', 'Config entity', 'agent_profile:ap_123'),
-  makeSurface('task_scheduler', '/scheduler', 'Task Scheduler', 'Create queues, recurring schedules, due continuation scans, and safe queue ticks.', '/docs/advanced/workflows.md', 'Queue name', 'Daily follow-up queue'),
+  makeSurface('agent_factory', '/agents', '智能体', '创建和配置员工级智能体；模型、工具、权限、交付物和员工大脑都在这里管理。', '/docs/user-guide/agent-factory.md', '智能体名称', '剪辑助理'),
+  makeSurface('model_control', '/models', '模型管理', '添加模型、测试连接、选择网络出口，并让智能体直接勾选已配置模型。', '/docs/user-guide/models.md', 'OpenAI 兼容地址', 'https://api.deepseek.com'),
+  makeSurface('tool_control', '/tools', '工具连接', '按软件或服务选择 CLI、MCP、API 和软件命令能力。', '/docs/user-guide/tools.md', 'CLI 配置名称', 'Codex CLI'),
+  makeSurface('skills_center', '/skills', '技能管理', '管理本地 Skills、启用或禁用技能，并分配给智能体使用。', '/docs/user-guide/skills.md', '技能来源', '本地技能目录'),
+  makeSurface('agent_canvas', '/canvas', '编排画布', '像工作流一样连接多个智能体，明确每个节点输入、输出和交付物。', '/docs/user-guide/canvas.md', '工作流名称', '短视频交付流程'),
+  makeSurface('memory_center', '/agents', '员工大脑', '在单个智能体设置里查看任务记忆、长期经验、失败教训、自我校准和反思学习。', '/docs/user-guide/agent-brain.md', '记忆标题', '客户偏好简洁交付说明'),
+  makeSurface('governance_center', '/agents', '权限确认', '在智能体设置里确认文件、命令、浏览器和高风险动作权限。', '/docs/advanced/safety.md', '权限策略名称', '工作区写入保护'),
+  makeSurface('observability_center', '/workbench', '任务进度', '在工作台查看任务当前步骤、运行结果、交付物和下一步动作。', '/docs/user-guide/monitoring.md', '指标名称', '任务耗时'),
+  makeSurface('config_ops_center', '/workbench', '工作台', '按用户业务展示常用数据、任务状态、模块入口和待处理动作。', '/docs/advanced/workflows.md', '工作台模块', '智能体任务进度'),
+  makeSurface('task_scheduler', '/canvas', '工作流计划', '在编排画布里组织工作流，必要时再安排队列或周期运行。', '/docs/advanced/workflows.md', '工作流计划', '每日素材整理流程'),
 ]
 
 const DEFAULT_ONBOARDING_FLOW: CreateHelpOnboardingFlowArgs = {
   flowKey: 'first_agent_success_path',
-  title: 'First Agent Success Path',
-  description: 'Create the first Agent, run the first task, and inspect the first artifact.',
+  title: '第一次智能体上手流程',
+  description: '创建第一个智能体，运行第一个任务，并查看第一次交付物。',
   startSurfaceKey: 'agent_factory',
   steps: [
     {
       stepKey: 'create_first_agent',
       surfaceKey: 'agent_factory',
-      title: 'Create the first Agent',
-      action: 'Fill role, model, skills, permissions, and output contract.',
+      title: '创建第一个智能体',
+      action: '填写角色、模型、技能、权限、员工大脑和交付物要求。',
       docHref: '/docs/getting-started/first-agent.md',
     },
     {
       stepKey: 'run_first_task',
       surfaceKey: 'agent_factory',
-      title: 'Run the first task',
-      action: 'Submit a low-risk task and watch the employee run timeline.',
+      title: '运行第一个任务',
+      action: '提交一个低风险任务，然后观察智能体的执行步骤。',
       docHref: '/docs/getting-started/quick-start.md',
     },
     {
       stepKey: 'inspect_first_artifact',
       surfaceKey: 'observability_center',
-      title: 'Inspect the first artifact',
-      action: 'Open the run output, validation result, logs, and next-step notes.',
+      title: '查看第一次交付物',
+      action: '打开任务结果、校验状态、日志和下一步说明。',
       docHref: '/docs/user-guide/monitoring.md',
     },
   ],
@@ -133,6 +133,19 @@ export async function seedHelpCenter(): Promise<{
         description: definition.description,
         docHref: definition.docHref,
       })
+    } else {
+      const updates = {
+        route: definition.route,
+        title: definition.title,
+        description: definition.description,
+        docHref: definition.docHref,
+        updatedAt: Date.now(),
+      }
+      await db
+        .update(schema.helpCenterSurfaces)
+        .set(updates)
+        .where(eq(schema.helpCenterSurfaces.id, surface.id))
+      surface = { ...surface, ...updates }
     }
     surfaces.push(surface)
     for (const itemDefinition of definition.items) {
@@ -142,16 +155,51 @@ export async function seedHelpCenter(): Promise<{
           eq(schema.helpCenterItems.itemKey, itemDefinition.itemKey),
         ),
       })
-      items.push(existingItem ?? await createHelpCenterItem({
-        surfaceId: surface.id,
-        ...itemDefinition,
-      }))
+      if (!existingItem) {
+        items.push(await createHelpCenterItem({
+          surfaceId: surface.id,
+          ...itemDefinition,
+        }))
+      } else {
+        const updates = {
+          itemType: itemDefinition.itemType,
+          label: itemDefinition.label,
+          body: itemDefinition.body ?? '',
+          selector: itemDefinition.selector ?? null,
+          docHref: itemDefinition.docHref ?? '',
+          exampleValue: itemDefinition.exampleValue ?? {},
+          orderIndex: itemDefinition.orderIndex ?? 0,
+          status: itemDefinition.status ?? existingItem.status,
+          updatedAt: Date.now(),
+        }
+        await db
+          .update(schema.helpCenterItems)
+          .set(updates)
+          .where(eq(schema.helpCenterItems.id, existingItem.id))
+        items.push({ ...existingItem, ...updates })
+      }
     }
   }
   let flow = await db.query.helpOnboardingFlows.findFirst({
     where: eq(schema.helpOnboardingFlows.flowKey, DEFAULT_ONBOARDING_FLOW.flowKey),
   })
-  if (!flow) flow = await createHelpOnboardingFlow(DEFAULT_ONBOARDING_FLOW)
+  if (!flow) {
+    flow = await createHelpOnboardingFlow(DEFAULT_ONBOARDING_FLOW)
+  } else {
+    const updates = {
+      title: DEFAULT_ONBOARDING_FLOW.title,
+      description: DEFAULT_ONBOARDING_FLOW.description ?? '',
+      startSurfaceKey: DEFAULT_ONBOARDING_FLOW.startSurfaceKey ?? 'agent_factory',
+      steps: DEFAULT_ONBOARDING_FLOW.steps,
+      status: DEFAULT_ONBOARDING_FLOW.status ?? flow.status,
+      updatedAt: Date.now(),
+    }
+    await db
+      .update(schema.helpOnboardingFlows)
+      .set(updates)
+      .where(eq(schema.helpOnboardingFlows.id, flow.id))
+    flow = { ...flow, ...updates }
+  }
   return {
     surfaces,
     items,
@@ -322,7 +370,7 @@ function makeSurface(
       {
         itemKey: `${surfaceKey}_question`,
         itemType: 'question_button',
-        label: `Open ${title} help`,
+        label: `打开${title}帮助`,
         body: description,
         selector: '[data-help="question"]',
         docHref,
@@ -331,8 +379,8 @@ function makeSurface(
       {
         itemKey: `${surfaceKey}_primary_tooltip`,
         itemType: 'tooltip',
-        label: `${title} tooltip`,
-        body: `Use this page to configure ${title.toLowerCase()} safely before running Agents.`,
+        label: `${title}提示`,
+        body: `在这个页面确认${title}相关设置，再让智能体开始执行。`,
         selector: `[data-help="${surfaceKey}"]`,
         docHref,
         orderIndex: 1,
@@ -341,7 +389,7 @@ function makeSurface(
         itemKey: `${surfaceKey}_example`,
         itemType: 'example_value',
         label: exampleLabel,
-        body: 'Example value shown beside the configuration field.',
+        body: '示例值会显示在对应输入位置旁边。',
         selector: `[data-example="${surfaceKey}"]`,
         docHref,
         exampleValue: { value: exampleText },
@@ -350,8 +398,8 @@ function makeSurface(
       {
         itemKey: `${surfaceKey}_error_link`,
         itemType: 'error_doc_link',
-        label: `${title} error help`,
-        body: 'Show this link when validation fails or a run blocks on this surface.',
+        label: `${title}问题帮助`,
+        body: '当校验失败或任务卡住时显示这个链接。',
         selector: `[data-error="${surfaceKey}"]`,
         docHref: '/docs/troubleshooting/common-issues.md',
         orderIndex: 3,

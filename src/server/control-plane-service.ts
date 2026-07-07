@@ -41,6 +41,14 @@ import {
   type WorkflowNodeBrainStatus,
 } from '@/lib/workflow-node-brain-status'
 import {
+  buildWorkflowRunArtifactHandoffs,
+  type WorkflowRunArtifactHandoff,
+} from '@/server/workflow-run-artifact-handoffs'
+import {
+  buildWorkflowRunDeliveryPackage,
+  type WorkflowRunDeliveryPackage,
+} from '@/server/workflow-run-delivery-package'
+import {
   newAgentProfileId,
   newAgentWorkstationId,
   newApprovalRequestId,
@@ -1698,6 +1706,8 @@ export interface WorkflowRunSnapshot {
   nodeRuns: WorkflowNodeRunRow[]
   employeeRuns: EmployeeRunRow[]
   nodeBrainStatuses: WorkflowNodeBrainStatus[]
+  artifactHandoffs: WorkflowRunArtifactHandoff[]
+  deliveryPackage: WorkflowRunDeliveryPackage
   softwareCommandRuns: SoftwareCommandRunRow[]
   computerSessions: ComputerSessionRow[]
   computerActionEvents: ComputerActionEventRow[]
@@ -1712,6 +1722,25 @@ export async function getWorkflowRunSnapshot(runId: string): Promise<WorkflowRun
   const nodeRuns = await db.query.workflowNodeRuns.findMany({
     where: eq(schema.workflowNodeRuns.workflowRunId, runId),
     orderBy: [asc(schema.workflowNodeRuns.startedAt)],
+  })
+  const [workflowNodes, workflowEdges] = await Promise.all([
+    db.query.workflowNodes.findMany({
+      where: eq(schema.workflowNodes.workflowId, workflowRun.workflowId),
+      orderBy: [asc(schema.workflowNodes.createdAt)],
+    }),
+    db.query.workflowEdges.findMany({
+      where: eq(schema.workflowEdges.workflowId, workflowRun.workflowId),
+      orderBy: [asc(schema.workflowEdges.createdAt)],
+    }),
+  ])
+  const artifactHandoffs = buildWorkflowRunArtifactHandoffs({
+    nodes: workflowNodes,
+    edges: workflowEdges,
+    nodeRuns,
+  })
+  const deliveryPackage = buildWorkflowRunDeliveryPackage({
+    nodes: workflowNodes,
+    nodeRuns,
   })
   const employeeRuns = await listWorkflowEmployeeRuns(runId)
   const employeeRunIds = employeeRuns.map((run) => run.id)
@@ -1767,6 +1796,8 @@ export async function getWorkflowRunSnapshot(runId: string): Promise<WorkflowRun
     nodeRuns,
     employeeRuns,
     nodeBrainStatuses,
+    artifactHandoffs,
+    deliveryPackage,
     softwareCommandRuns,
     computerSessions,
     computerActionEvents,

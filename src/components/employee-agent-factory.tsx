@@ -132,6 +132,8 @@ import {
   type CreateAgentProfileBody,
   type OnboardingWorkType,
 } from '@/lib/api'
+import type { EmployeeRunCliExecutionSummary } from '@/lib/employee-run-cli-execution-summary'
+import type { EmployeeRuntimeBrainOutput } from '@/lib/employee-runtime-brain-output'
 import { cn } from '@/lib/utils'
 
 type FactoryTab = 'control' | 'agent' | 'run'
@@ -672,9 +674,228 @@ function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
 }
 
+function numberValue(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
 function stringArrayValue(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+function employeeBrainFromRunOutput(output: EmployeeRunRow['output']): EmployeeRuntimeBrainOutput | null {
+  const brain = asRecord(asRecord(output).employeeBrain)
+  if (typeof brain.title !== 'string') return null
+
+  const nextRunBriefing = asRecord(brain.nextRunBriefing)
+  const learningSummary = asRecord(brain.learningSummary)
+  return {
+    title: '员工大脑',
+    owner: brainOwnerValue(brain.owner),
+    statusLabel: stringValue(brain.statusLabel, '等待经验积累'),
+    headline: stringValue(brain.headline, '这个员工还没有生成运行学习简报。'),
+    contextSummary: stringValue(brain.contextSummary, '本次运行还没有可复用的脑内上下文。'),
+    metrics: brainMetricArrayValue(brain.metrics),
+    recalledSections: brainSectionArrayValue(brain.recalledSections),
+    nextRunBriefing: {
+      title: '下次开工提示',
+      items: brainBriefingItemArrayValue(nextRunBriefing.items),
+    },
+    learningSummary: {
+      memoryUpdateCount: numberValue(learningSummary.memoryUpdateCount, 0),
+      learningEventCount: numberValue(learningSummary.learningEventCount, 0),
+      approvalRequestCount: numberValue(learningSummary.approvalRequestCount, 0),
+      playbookDraftTitle:
+        typeof learningSummary.playbookDraftTitle === 'string'
+          ? learningSummary.playbookDraftTitle
+          : null,
+    },
+    contextCache: brainContextCacheValue(brain.contextCache),
+    memoryBoundary: brainMemoryBoundaryValue(brain.memoryBoundary),
+  }
+}
+
+function cliExecutionSummaryFromRunOutput(
+  output: EmployeeRunRow['output'],
+): EmployeeRunCliExecutionSummary | null {
+  const summary = asRecord(asRecord(output).cliExecutionSummary)
+  if (summary.title !== 'CLI 执行证据') return null
+  const counts = asRecord(summary.counts)
+  return {
+    title: 'CLI 执行证据',
+    total: numberValue(summary.total, 0),
+    counts: {
+      planned: numberValue(counts.planned, 0),
+      executed: numberValue(counts.executed, 0),
+      completed: numberValue(counts.completed, 0),
+      failed: numberValue(counts.failed, 0),
+      blocked: numberValue(counts.blocked, 0),
+    },
+    hasExecutableEvidence: summary.hasExecutableEvidence === true,
+    needsReview: summary.needsReview === true,
+    evidenceCandidates: cliEvidenceCandidateArrayValue(summary.evidenceCandidates),
+    issues: cliExecutionIssueArrayValue(summary.issues),
+  }
+}
+
+function cliEvidenceCandidateArrayValue(
+  value: unknown,
+): EmployeeRunCliExecutionSummary['evidenceCandidates'] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const row = asRecord(item)
+      const cliRunId = stringValue(row.cliRunId, '')
+      const cliProfileId = stringValue(row.cliProfileId, '')
+      const commandLine = stringValue(row.commandLine, '')
+      const preview = stringValue(row.preview, '')
+      if (!cliRunId || !cliProfileId || !commandLine || !preview) return null
+      return {
+        cliRunId,
+        cliProfileId,
+        commandLine,
+        preview,
+        status: row.status === 'failed' || row.status === 'blocked' || row.status === 'planned'
+          ? row.status
+          : 'complete',
+      }
+    })
+    .filter((item): item is EmployeeRunCliExecutionSummary['evidenceCandidates'][number] =>
+      Boolean(item),
+    )
+}
+
+function cliExecutionIssueArrayValue(
+  value: unknown,
+): EmployeeRunCliExecutionSummary['issues'] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const row = asRecord(item)
+      const cliRunId = stringValue(row.cliRunId, '')
+      const cliProfileId = stringValue(row.cliProfileId, '')
+      const message = stringValue(row.message, '')
+      const status = row.status === 'failed' ? 'failed' : row.status === 'blocked' ? 'blocked' : null
+      if (!cliRunId || !cliProfileId || !message || !status) return null
+      return {
+        cliRunId,
+        cliProfileId,
+        status,
+        message,
+      }
+    })
+    .filter((item): item is EmployeeRunCliExecutionSummary['issues'][number] => Boolean(item))
+}
+
+function brainOwnerValue(value: unknown): EmployeeRuntimeBrainOutput['owner'] {
+  const owner = asRecord(value)
+  const agentName = stringValue(owner.agentName, '当前员工')
+  return {
+    agentId: stringValue(owner.agentId, 'unknown_agent'),
+    agentName,
+    role: stringValue(owner.role, '智能体员工'),
+    label: stringValue(owner.label, `${agentName}自己的大脑`),
+  }
+}
+
+function brainMemoryBoundaryValue(value: unknown): EmployeeRuntimeBrainOutput['memoryBoundary'] {
+  const boundary = asRecord(value)
+  return {
+    privateFirst: true,
+    reviewBeforeSharing: true,
+    privateScopeLabel: stringValue(boundary.privateScopeLabel, '默认先保存在这个员工自己的大脑里'),
+    sharingScopeLabel: stringValue(boundary.sharingScopeLabel, '确认后再共享给项目、团队或全局工具经验'),
+    visibleScopeLabels: stringArrayValue(boundary.visibleScopeLabels).length > 0
+      ? stringArrayValue(boundary.visibleScopeLabels)
+      : ['员工私有记忆', '项目共享记忆', '团队共享记忆', '全局工具经验'],
+    pendingReviewItems: brainPendingReviewItemsValue(boundary.pendingReviewItems),
+  }
+}
+
+function brainContextCacheValue(value: unknown): EmployeeRuntimeBrainOutput['contextCache'] {
+  const cache = asRecord(value)
+  if (cache.mode !== 'append_only_stable_prefix') return null
+  const stablePrefix = stringValue(cache.stablePrefix, '')
+  const prompt = stringValue(cache.prompt, stringValue(cache.promptPreview, ''))
+  if (!stablePrefix || !prompt) return null
+  return {
+    mode: 'append_only_stable_prefix',
+    stablePrefix,
+    prompt,
+    promptPreview: stringValue(cache.promptPreview, prompt),
+    byteLength: numberValue(cache.byteLength, new TextEncoder().encode(prompt).length),
+    truncated: cache.truncated === true,
+    cacheHint: stringValue(cache.cacheHint, '逐字节复用 stablePrefix，只把本轮新增内容追加到后面。'),
+  }
+}
+
+function brainPendingReviewItemsValue(
+  value: unknown,
+): EmployeeRuntimeBrainOutput['memoryBoundary']['pendingReviewItems'] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const review = asRecord(item)
+      const targetId = stringValue(review.targetId, '')
+      if (!targetId) return null
+      const kind = review.kind === 'activate_playbook' ? 'activate_playbook' : 'share_memory'
+      return {
+        kind,
+        targetId,
+        label: stringValue(review.label, kind === 'activate_playbook' ? '工作手册待审核' : '记忆共享待审核'),
+        reason: stringValue(review.reason, '需要用户确认后再进入长期共享经验。'),
+      }
+    })
+    .filter((item): item is EmployeeRuntimeBrainOutput['memoryBoundary']['pendingReviewItems'][number] =>
+      Boolean(item),
+    )
+}
+
+function brainMetricArrayValue(value: unknown): EmployeeRuntimeBrainOutput['metrics'] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const metric = asRecord(item)
+      const label = stringValue(metric.label, '')
+      const metricValue = stringValue(metric.value, '')
+      return label && metricValue ? { label, value: metricValue } : null
+    })
+    .filter((item): item is EmployeeRuntimeBrainOutput['metrics'][number] => Boolean(item))
+}
+
+function brainSectionArrayValue(value: unknown): EmployeeRuntimeBrainOutput['recalledSections'] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const section = asRecord(item)
+      const title = stringValue(section.title, '')
+      const itemTitles = stringArrayValue(section.itemTitles)
+      return title ? { title, itemTitles } : null
+    })
+    .filter((item): item is EmployeeRuntimeBrainOutput['recalledSections'][number] =>
+      Boolean(item),
+    )
+}
+
+function brainBriefingItemArrayValue(value: unknown): EmployeeRuntimeBrainOutput['nextRunBriefing']['items'] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const briefing = asRecord(item)
+      const label = stringValue(briefing.label, '')
+      const detail = stringValue(briefing.detail, '')
+      const tone = brainBriefingToneValue(briefing.tone)
+      return label && detail ? { label, detail, tone } : null
+    })
+    .filter((item): item is EmployeeRuntimeBrainOutput['nextRunBriefing']['items'][number] =>
+      Boolean(item),
+    )
+}
+
+function brainBriefingToneValue(
+  value: unknown,
+): EmployeeRuntimeBrainOutput['nextRunBriefing']['items'][number]['tone'] {
+  return value === 'ready' || value === 'warning' || value === 'muted' ? value : 'muted'
 }
 
 function nestedBoolean(
@@ -3271,7 +3492,7 @@ function RunMonitor({
         </div>
       </Section>
 
-      <Section icon={<CheckCircle2 className="size-3.5" />} title="Selected Run">
+      <Section icon={<CheckCircle2 className="size-3.5" />} title="已选运行">
         {selectedRun ? (
           <>
             <div className="rounded-md border bg-muted/30 p-2 text-[11px]">
@@ -3282,6 +3503,10 @@ function RunMonitor({
               <div className="mt-1 text-muted-foreground">{selectedRun.currentStep}</div>
               <CodeLine value={selectedRun.id} />
             </div>
+            <EmployeeRuntimeBrainOutputCard brain={employeeBrainFromRunOutput(selectedRun.output)} />
+            <EmployeeRunCliExecutionSummaryCard
+              summary={cliExecutionSummaryFromRunOutput(selectedRun.output)}
+            />
             <div className="grid grid-cols-3 gap-2">
               <Button
                 variant="outline"
@@ -3291,7 +3516,7 @@ function RunMonitor({
                 disabled={saving !== null || !['queued', 'running'].includes(selectedRun.status)}
               >
                 <Pause className="size-3.5" />
-                Pause
+                暂停
               </Button>
               <Button
                 variant="outline"
@@ -3301,7 +3526,7 @@ function RunMonitor({
                 disabled={saving !== null || selectedRun.status !== 'paused'}
               >
                 <RotateCcw className="size-3.5" />
-                Resume
+                继续
               </Button>
               <Button
                 variant="outline"
@@ -3314,7 +3539,7 @@ function RunMonitor({
                 }
               >
                 <Square className="size-3.5" />
-                Stop
+                停止
               </Button>
             </div>
             <CliRunList cliRuns={runCliRuns} />
@@ -3338,7 +3563,7 @@ function RunMonitor({
             />
             <div className="space-y-1">
               {runEvents.length === 0 ? (
-                <EmptyLine text="No events loaded." />
+                <EmptyLine text="还没有事件记录。" />
               ) : (
                 runEvents.map((event) => (
                   <div key={event.id} className="rounded-md border px-2 py-1.5 text-[11px]">
@@ -3359,11 +3584,183 @@ function RunMonitor({
             <MemoryWriteList memories={runMemories} />
           </>
         ) : (
-          <EmptyLine text="Select a run to inspect events." />
+          <EmptyLine text="选择一次运行后查看事件。" />
         )}
       </Section>
     </>
   )
+}
+
+function EmployeeRuntimeBrainOutputCard({
+  brain,
+}: {
+  brain: EmployeeRuntimeBrainOutput | null
+}) {
+  if (!brain) return <EmptyLine text="员工大脑还没有生成本次运行简报。" />
+
+  const learningSummary = brain.learningSummary
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-2 text-[11px]">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs font-semibold">
+            <BrainCircuit className="size-3.5 text-primary" />
+            <span>{brain.title}</span>
+          </div>
+          <div className="mt-1 line-clamp-2 text-muted-foreground">{brain.headline}</div>
+        </div>
+        <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
+          {brain.statusLabel}
+        </Badge>
+      </div>
+
+      <div className="rounded-md bg-background/70 px-2 py-1.5 text-muted-foreground">
+        {brain.contextSummary}
+      </div>
+
+      {brain.contextCache && (
+        <div className="space-y-1 rounded-md border bg-background px-2 py-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[10px] font-medium uppercase text-muted-foreground">上下文缓存</div>
+              <div className="mt-0.5 line-clamp-1 font-medium">{brain.contextCache.cacheHint}</div>
+            </div>
+            <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
+              {brain.contextCache.truncated ? '已裁剪' : '完整'}
+            </Badge>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 text-[10px] text-muted-foreground">
+            <div className="rounded-md border bg-muted/20 px-2 py-1">
+              <div className="font-mono text-[11px] text-foreground">{brain.contextCache.byteLength}</div>
+              <div>UTF-8 字节</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-2 py-1">
+              <div className="font-mono text-[11px] text-foreground">stable</div>
+              <div>逐字节复用</div>
+            </div>
+          </div>
+          <div className="line-clamp-2 rounded-md bg-muted/20 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+            {brain.contextCache.stablePrefix}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1 rounded-md border bg-background px-2 py-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[10px] font-medium uppercase text-muted-foreground">大脑边界</div>
+            <div className="mt-0.5 truncate font-medium">{brain.owner.label}</div>
+          </div>
+          <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
+            {brain.owner.role}
+          </Badge>
+        </div>
+        <div className="space-y-0.5 text-[10px] text-muted-foreground">
+          <div>{brain.memoryBoundary.privateScopeLabel}</div>
+          <div>{brain.memoryBoundary.sharingScopeLabel}</div>
+          <div className="line-clamp-1">
+            可见范围：{brain.memoryBoundary.visibleScopeLabels.join('、')}
+          </div>
+        </div>
+        {brain.memoryBoundary.pendingReviewItems.length > 0 && (
+          <div className="space-y-1 pt-1">
+            {brain.memoryBoundary.pendingReviewItems.slice(0, 2).map((item) => (
+              <div
+                key={`${item.kind}:${item.targetId}`}
+                className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300"
+              >
+                <div className="font-medium">{item.label}</div>
+                <div className="mt-0.5 line-clamp-1">{item.reason}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {brain.metrics.length > 0 && (
+        <div className="grid grid-cols-3 gap-1.5">
+          {brain.metrics.map((metric) => (
+            <div key={metric.label} className="rounded-md border bg-background px-2 py-1.5">
+              <div className="truncate text-[10px] text-muted-foreground">{metric.label}</div>
+              <div className="font-mono text-xs font-semibold">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-1">
+        <div className="text-[10px] font-medium uppercase text-muted-foreground">脑内上下文</div>
+        {brain.recalledSections.length === 0 ? (
+          <EmptyLine text="本次运行还没有召回可展示的经验。" />
+        ) : (
+          brain.recalledSections.slice(0, 4).map((section) => (
+            <div key={section.title} className="rounded-md border bg-background px-2 py-1.5">
+              <div className="truncate font-medium">{section.title}</div>
+              <div className="mt-1 space-y-0.5 text-muted-foreground">
+                {section.itemTitles.slice(0, 3).map((item) => (
+                  <div key={item} className="line-clamp-1">
+                    {item}
+                  </div>
+                ))}
+                {section.itemTitles.length === 0 && <div>这个上下文分区还没有具体条目。</div>}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <div className="text-[10px] font-medium uppercase text-muted-foreground">下次开工提示</div>
+        {brain.nextRunBriefing.items.length === 0 ? (
+          <EmptyLine text="还没有下次运行前需要提醒的事项。" />
+        ) : (
+          brain.nextRunBriefing.items.map((item) => (
+            <div key={`${item.label}:${item.detail}`} className="rounded-md border bg-background px-2 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate font-medium">{item.label}</span>
+                <span className={cn('size-1.5 shrink-0 rounded-full', brainBriefingDotClass(item.tone))} />
+              </div>
+              <div className="mt-1 line-clamp-2 text-muted-foreground">{item.detail}</div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-1.5 text-[10px] text-muted-foreground">
+        <div className="rounded-md border bg-background px-2 py-1.5">
+          <div className="font-mono text-[11px] text-foreground">
+            {learningSummary.memoryUpdateCount}
+          </div>
+          <div>记忆更新</div>
+        </div>
+        <div className="rounded-md border bg-background px-2 py-1.5">
+          <div className="font-mono text-[11px] text-foreground">
+            {learningSummary.learningEventCount}
+          </div>
+          <div>学习建议</div>
+        </div>
+        <div className="rounded-md border bg-background px-2 py-1.5">
+          <div className="font-mono text-[11px] text-foreground">
+            {learningSummary.approvalRequestCount}
+          </div>
+          <div>待审核</div>
+        </div>
+      </div>
+      {learningSummary.playbookDraftTitle && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-300">
+          工作手册草稿：{learningSummary.playbookDraftTitle}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function brainBriefingDotClass(
+  tone: EmployeeRuntimeBrainOutput['nextRunBriefing']['items'][number]['tone'],
+) {
+  if (tone === 'ready') return 'bg-emerald-500'
+  if (tone === 'warning') return 'bg-amber-500'
+  return 'bg-muted-foreground/40'
 }
 
 function AgentSettingsSummary({
@@ -3622,11 +4019,81 @@ function Section({
   )
 }
 
+function EmployeeRunCliExecutionSummaryCard({
+  summary,
+}: {
+  summary: EmployeeRunCliExecutionSummary | null
+}) {
+  if (!summary || summary.total === 0) return null
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-2 text-[11px]">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs font-semibold">
+            <Terminal className="size-3.5 text-primary" />
+            <span>{summary.title}</span>
+          </div>
+          <div className="mt-1 text-muted-foreground">
+            已执行 {summary.counts.executed} 个，完成 {summary.counts.completed} 个，失败 {summary.counts.failed} 个
+          </div>
+        </div>
+        <Badge
+          variant={summary.needsReview ? 'destructive' : 'outline'}
+          className="h-5 shrink-0 px-1.5 text-[9px]"
+        >
+          {summary.needsReview ? '需要复核' : '可交付'}
+        </Badge>
+      </div>
+
+      <div className="grid grid-cols-4 gap-1.5 text-[10px] text-muted-foreground">
+        <Metric label="已计划" value={summary.counts.planned} />
+        <Metric label="已执行" value={summary.counts.executed} />
+        <Metric label="已完成" value={summary.counts.completed} />
+        <Metric label="阻塞" value={summary.counts.blocked} />
+      </div>
+
+      {summary.evidenceCandidates.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[10px] font-medium uppercase text-muted-foreground">证据候选</div>
+          {summary.evidenceCandidates.slice(0, 3).map((candidate) => (
+            <div key={candidate.cliRunId} className="rounded-md border bg-background px-2 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate font-mono text-[10px]">
+                  {candidate.commandLine}
+                </span>
+                <StatusPill status={candidate.status} />
+              </div>
+              <div className="mt-1 line-clamp-2 whitespace-pre-wrap text-muted-foreground">
+                {candidate.preview}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {summary.issues.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[10px] font-medium uppercase text-muted-foreground">需要处理</div>
+          {summary.issues.slice(0, 3).map((issue) => (
+            <div key={issue.cliRunId} className="rounded-md border bg-background px-2 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate font-mono text-[10px]">{issue.cliProfileId}</span>
+                <StatusPill status={issue.status} />
+              </div>
+              <div className="mt-1 line-clamp-2 text-muted-foreground">{issue.message}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CliRunList({ cliRuns }: { cliRuns: CliRunRow[] }) {
-  if (cliRuns.length === 0) return <EmptyLine text="No CLI dry-runs for this run." />
+  if (cliRuns.length === 0) return <EmptyLine text="本次运行还没有 CLI 记录。" />
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase text-muted-foreground">CLI dry-runs</div>
+      <div className="text-[10px] uppercase text-muted-foreground">CLI 运行</div>
       {cliRuns.map((cliRun) => (
         <div key={cliRun.id} className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="flex items-center justify-between gap-2">
@@ -3676,7 +4143,7 @@ function ComputerSessionList({
   onMark?: (session: ComputerSessionRow, kind: 'observe' | 'screenshot') => void
   busy?: boolean
 }) {
-  if (sessions.length === 0) return <EmptyLine text="No computer sessions for this run." />
+  if (sessions.length === 0) return <EmptyLine text="本次运行没有电脑会话。" />
   return (
     <div className="space-y-1">
       <div className="text-[10px] uppercase text-muted-foreground">Computer sessions</div>
@@ -3754,7 +4221,7 @@ function ContextSnapshotList({
   contextSnapshots: RuntimeContextSnapshotRow[]
 }) {
   if (contextSnapshots.length === 0) {
-    return <EmptyLine text="No context snapshots for this run." />
+    return <EmptyLine text="本次运行没有上下文快照。" />
   }
   return (
     <div className="space-y-1">
@@ -3790,20 +4257,20 @@ function BudgetAuditList({
   decisionAudits: DecisionAuditTrailRow[]
 }) {
   if (budgetEvents.length === 0 && decisionAudits.length === 0) {
-    return <EmptyLine text="No budget or decision audit records for this run." />
+    return <EmptyLine text="本次运行没有预算或决策审计记录。" />
   }
   const totalCents = budgetEvents.reduce((sum, event) => sum + event.amountCents, 0)
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase text-muted-foreground">Budget and audit</div>
+      <div className="text-[10px] uppercase text-muted-foreground">预算和审计</div>
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="font-mono text-[12px]">{totalCents}c</div>
-          <div className="text-[10px] text-muted-foreground">{budgetEvents.length} budget events</div>
+          <div className="text-[10px] text-muted-foreground">{budgetEvents.length} 条预算事件</div>
         </div>
         <div className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="font-mono text-[12px]">{decisionAudits.length}</div>
-          <div className="text-[10px] text-muted-foreground">decisions</div>
+          <div className="text-[10px] text-muted-foreground">决策记录</div>
         </div>
       </div>
       {decisionAudits.slice(0, 3).map((audit) => (
@@ -3811,7 +4278,7 @@ function BudgetAuditList({
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate font-mono text-[10px]">{audit.decisionType}</span>
             <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
-              audit
+              审计
             </Badge>
           </div>
           <div className="mt-1 line-clamp-2 text-muted-foreground">{audit.rationale}</div>
@@ -3822,10 +4289,10 @@ function BudgetAuditList({
 }
 
 function SecurityAuditList({ auditLogs }: { auditLogs: AuditLogRow[] }) {
-  if (auditLogs.length === 0) return <EmptyLine text="No security audit records for this run." />
+  if (auditLogs.length === 0) return <EmptyLine text="本次运行没有安全审计记录。" />
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase text-muted-foreground">Security audit</div>
+      <div className="text-[10px] uppercase text-muted-foreground">安全审计</div>
       {auditLogs.slice(0, 4).map((audit) => (
         <div key={audit.id} className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="flex items-center justify-between gap-2">
@@ -3845,10 +4312,10 @@ function SecurityAuditList({ auditLogs }: { auditLogs: AuditLogRow[] }) {
 }
 
 function RecoveryEventList({ recoveryEvents }: { recoveryEvents: RecoveryEventRow[] }) {
-  if (recoveryEvents.length === 0) return <EmptyLine text="No recovery events for this run." />
+  if (recoveryEvents.length === 0) return <EmptyLine text="本次运行没有恢复事件。" />
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase text-muted-foreground">Recovery events</div>
+      <div className="text-[10px] uppercase text-muted-foreground">恢复事件</div>
       {recoveryEvents.slice(0, 4).map((event) => (
         <div key={event.id} className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="flex items-center justify-between gap-2">
@@ -3865,10 +4332,10 @@ function RecoveryEventList({ recoveryEvents }: { recoveryEvents: RecoveryEventRo
 }
 
 function ArtifactValidationList({ validations }: { validations: ArtifactValidationRow[] }) {
-  if (validations.length === 0) return <EmptyLine text="No artifact validations for this run." />
+  if (validations.length === 0) return <EmptyLine text="本次运行没有产物验证记录。" />
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase text-muted-foreground">Artifact validations</div>
+      <div className="text-[10px] uppercase text-muted-foreground">产物验证</div>
       {validations.map((validation) => {
         const styleSummary = styleGuideValidationSummary(validation.result)
         const accessibilitySummary = accessibilityValidationSummary(validation.result)
@@ -3876,7 +4343,7 @@ function ArtifactValidationList({ validations }: { validations: ArtifactValidati
           <div key={validation.id} className="rounded-md border px-2 py-1.5 text-[11px]">
             <div className="flex items-center justify-between gap-2">
               <span className="min-w-0 truncate font-medium">
-                {validation.rules.length > 0 ? validation.rules.join(', ') : 'output contract'}
+                {validation.rules.length > 0 ? validation.rules.join(', ') : '输出契约'}
               </span>
               <Badge
                 variant={validation.status === 'failed' ? 'destructive' : 'default'}
@@ -3887,12 +4354,12 @@ function ArtifactValidationList({ validations }: { validations: ArtifactValidati
             </div>
             {styleSummary && (
               <div className="mt-1 line-clamp-1 text-[10px] text-muted-foreground">
-                style: {styleSummary}
+                风格：{styleSummary}
               </div>
             )}
             {accessibilitySummary && (
               <div className="mt-1 line-clamp-1 text-[10px] text-muted-foreground">
-                accessibility: {accessibilitySummary}
+                无障碍：{accessibilitySummary}
               </div>
             )}
             <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
@@ -3913,15 +4380,15 @@ function MultimodalIoList({
   outputs: MultimodalOutputRow[]
 }) {
   if (inputs.length === 0 && outputs.length === 0) {
-    return <EmptyLine text="No multimodal IO registered for this run." />
+    return <EmptyLine text="本次运行没有登记多模态输入输出。" />
   }
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase text-muted-foreground">Multimodal IO</div>
+      <div className="text-[10px] uppercase text-muted-foreground">多模态输入输出</div>
       {inputs.slice(0, 4).map((input) => (
         <div key={input.id} className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate font-medium">input: {input.kind}</span>
+            <span className="min-w-0 truncate font-medium">输入：{input.kind}</span>
             <StatusPill status={input.status} />
           </div>
           <div className="mt-1 grid grid-cols-2 gap-2 font-mono text-[10px] text-muted-foreground">
@@ -3933,11 +4400,11 @@ function MultimodalIoList({
       {outputs.slice(0, 4).map((output) => (
         <div key={output.id} className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate font-medium">output: {output.kind}</span>
+            <span className="min-w-0 truncate font-medium">输出：{output.kind}</span>
             <StatusPill status={output.status} />
           </div>
           <div className="mt-1 grid grid-cols-2 gap-2 font-mono text-[10px] text-muted-foreground">
-            <span className="truncate">{output.format ?? output.artifactId ?? 'contract'}</span>
+            <span className="truncate">{output.format ?? output.artifactId ?? '契约'}</span>
             <span className="truncate text-right">{output.path ?? output.caption ?? output.id}</span>
           </div>
         </div>
@@ -3957,10 +4424,10 @@ function LearningEventList({
   onApprove: (id: string) => Promise<void>
   onReject: (id: string) => Promise<void>
 }) {
-  if (learningEvents.length === 0) return <EmptyLine text="No learning proposals for this run." />
+  if (learningEvents.length === 0) return <EmptyLine text="本次运行没有学习建议。" />
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase text-muted-foreground">Learning proposals</div>
+      <div className="text-[10px] uppercase text-muted-foreground">学习建议</div>
       {learningEvents.map((event) => (
         <div key={event.id} className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="flex items-center justify-between gap-2">
@@ -3982,7 +4449,7 @@ function LearningEventList({
                 disabled={saving !== null}
                 onClick={() => void onReject(event.id)}
               >
-                Reject
+                拒绝
               </Button>
               <Button
                 size="sm"
@@ -3990,7 +4457,7 @@ function LearningEventList({
                 disabled={saving !== null}
                 onClick={() => void onApprove(event.id)}
               >
-                Publish
+                发布
               </Button>
             </div>
           )}
@@ -4001,30 +4468,30 @@ function LearningEventList({
 }
 
 function LearningReflection({ reflection }: { reflection: RunReflectionRow | null }) {
-  if (!reflection) return <EmptyLine text="No reflection written for this run." />
+  if (!reflection) return <EmptyLine text="本次运行还没有写入复盘。" />
   return (
     <div className="space-y-1 rounded-md border p-2 text-[11px]">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">Learning reflection</span>
+        <span className="font-medium">运行复盘</span>
         <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
-          reflection
+          复盘
         </Badge>
       </div>
-      <MiniList title="Worked" items={reflection.whatWorked} />
-      <MiniList title="New knowledge" items={reflection.newKnowledge} />
-      <MiniList title="Procedure" items={reflection.reusableProcedure} />
+      <MiniList title="有效做法" items={reflection.whatWorked} />
+      <MiniList title="新知识" items={reflection.newKnowledge} />
+      <MiniList title="流程" items={reflection.reusableProcedure} />
       {reflection.futureWarnings.length > 0 && (
-        <MiniList title="Warnings" items={reflection.futureWarnings} />
+        <MiniList title="提醒" items={reflection.futureWarnings} />
       )}
     </div>
   )
 }
 
 function MemoryWriteList({ memories }: { memories: MemoryItemRow[] }) {
-  if (memories.length === 0) return <EmptyLine text="No memory writes for this run." />
+  if (memories.length === 0) return <EmptyLine text="本次运行没有写入记忆。" />
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase text-muted-foreground">Memory writes</div>
+      <div className="text-[10px] uppercase text-muted-foreground">记忆写入</div>
       {memories.map((memory) => (
         <div key={memory.id} className="rounded-md border px-2 py-1.5 text-[11px]">
           <div className="flex items-center justify-between gap-2">

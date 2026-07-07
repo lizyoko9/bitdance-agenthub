@@ -9,7 +9,6 @@ import {
   MessageSquare,
   MonitorCog,
   Package,
-  Settings2,
   ShieldCheck,
   Users,
   Wrench,
@@ -22,12 +21,9 @@ import type { ReactNode } from 'react'
 import { AgentLibrary } from '@/components/agent-library'
 import { ArtifactLibrary } from '@/components/artifact-library'
 import { ChatPanel } from '@/components/chat-panel'
-import { ConfigOpsCenter } from '@/components/config-ops-center'
 import { DesktopWorkbench } from '@/components/desktop-workbench'
 import { LangflowAgentCanvas } from '@/components/langflow-agent-canvas'
-import { MemoryManagementCenter } from '@/components/memory-management-center'
 import { ModelControlCenter } from '@/components/model-control-center'
-import { ProductionIntegrationsCenter } from '@/components/production-integrations-center'
 import { SkillsCenter } from '@/components/skills-center'
 import { ToolControlCenter } from '@/components/tool-control-center'
 import { UsageDashboard } from '@/components/usage-dashboard'
@@ -61,6 +57,9 @@ export type AppModuleGroup = 'primary' | 'advanced' | 'hidden'
 
 export interface AppModuleRenderContext {
   onModeChange: (mode: AppModuleId) => void
+  enabledModuleIds?: string[]
+  onEnableModule: (mode: AppModuleId) => void
+  onDisableModule: (mode: AppModuleId) => void
   agentSettingsRequestKey: number
   canvasWorkflowId: string | null
   onOpenWorkflow: (workflowId: string) => void
@@ -84,7 +83,14 @@ export const appModules: AppModuleDefinition[] = [
     description: '按用户业务动态展示任务、数据、运行状态和下一步动作。',
     icon: MonitorCog,
     group: 'primary',
-    render: ({ onModeChange }) => <DesktopWorkbench onModeChange={onModeChange} />,
+    render: ({ onModeChange, enabledModuleIds, onEnableModule, onDisableModule }) => (
+      <DesktopWorkbench
+        onModeChange={onModeChange}
+        enabledModuleIds={enabledModuleIds}
+        onEnableModule={onEnableModule}
+        onDisableModule={onDisableModule}
+      />
+    ),
   },
   {
     id: 'conversations',
@@ -185,8 +191,9 @@ export const appModules: AppModuleDefinition[] = [
     label: '记忆管理',
     description: '查看、编辑和清理智能体长期记忆与学习结果。',
     icon: Brain,
-    group: 'advanced',
-    render: () => <MemoryManagementCenter />,
+    group: 'hidden',
+    normalizeTo: 'agents',
+    render: () => <AgentLibrary defaultSettingsOpen />,
   },
   {
     id: 'analytics',
@@ -243,19 +250,35 @@ export const appModules: AppModuleDefinition[] = [
   },
   {
     id: 'configops',
-    label: '配置管理',
-    description: '高级配置版本、冲突、锁和发布影响检查。',
-    icon: Settings2,
+    label: '工作台',
+    description: '旧入口兼容模块，统一收口到工作台。',
+    icon: MonitorCog,
     group: 'hidden',
-    render: () => <ConfigOpsCenter />,
+    normalizeTo: 'workbench',
+    render: ({ onModeChange, enabledModuleIds, onEnableModule, onDisableModule }) => (
+      <DesktopWorkbench
+        onModeChange={onModeChange}
+        enabledModuleIds={enabledModuleIds}
+        onEnableModule={onEnableModule}
+        onDisableModule={onDisableModule}
+      />
+    ),
   },
   {
     id: 'production',
-    label: '交付检查',
-    description: '交付前检查、真实控制、虚拟工位和现场试运行。',
-    icon: ShieldCheck,
+    label: '工作台',
+    description: '旧入口兼容模块，统一收口到工作台。',
+    icon: MonitorCog,
     group: 'hidden',
-    render: () => <ProductionIntegrationsCenter />,
+    normalizeTo: 'workbench',
+    render: ({ onModeChange, enabledModuleIds, onEnableModule, onDisableModule }) => (
+      <DesktopWorkbench
+        onModeChange={onModeChange}
+        enabledModuleIds={enabledModuleIds}
+        onEnableModule={onEnableModule}
+        onDisableModule={onDisableModule}
+      />
+    ),
   },
 ]
 

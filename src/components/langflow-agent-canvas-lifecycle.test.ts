@@ -16,8 +16,11 @@ describe('LangflowAgentCanvas lifecycle UI', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/langflow-agent-canvas.tsx'), 'utf8')
 
     expect(source).toContain('deriveCanvasLifecycleStatus')
+    expect(source).toContain('deriveCanvasLifecycleReport')
     expect(source).toContain('const livePreflight = useMemo')
+    expect(source).toContain('const lifecycleReport = useMemo')
     expect(source).toContain('const lifecycleStatus = useMemo')
+    expect(source).toContain('lifecycleReport,')
     expect(source).toContain('lifecycleStatus={lifecycleStatus}')
     expect(source).toContain('data-lifecycle-state={lifecycleStatus.state}')
     expect(source).toContain('{lifecycleStatus.statusLabel}')

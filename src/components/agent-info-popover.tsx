@@ -11,6 +11,10 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import type { AgentRow } from '@/db/schema'
+import {
+  localizeAgentHubDisplayText,
+  localizeGeneratedAgentProfileName,
+} from '@/lib/agenthub-display-text'
 import { cn } from '@/lib/utils'
 
 type Size = 'xs' | 'sm' | 'md' | 'lg'
@@ -19,7 +23,7 @@ type Size = 'xs' | 'sm' | 'md' | 'lg'
  * AgentInfoPopover —— 包一层 AgentAvatar，点击弹出 popover 显示 agent 资料。
  *
  * popover 内容：放大头像 + 名字 + 描述 + capabilities tags + 底层 model +
- * 各种 badge（内置 / Orchestrator / 视觉）+ 「编辑配置」按钮（打开 CreateAgentDialog）
+ * 各种 badge（内置 / 调度 / 视觉）+ 「编辑配置」按钮（打开 CreateAgentDialog）
  */
 export function AgentInfoPopover({
   agent,
@@ -44,7 +48,7 @@ export function AgentInfoPopover({
             'inline-flex shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
             className,
           )}
-          aria-label={`查看 ${agent.name} 的资料`}
+          aria-label={`查看 ${localizeGeneratedAgentProfileName(agent.name)} 的资料`}
         >
           <AgentAvatar agent={agent} size={size} className={avatarClassName} />
         </PopoverTrigger>
@@ -54,14 +58,14 @@ export function AgentInfoPopover({
             <AgentAvatar agent={agent} size="lg" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-semibold">{agent.name}</span>
+                <span className="truncate text-sm font-semibold">{localizeGeneratedAgentProfileName(agent.name)}</span>
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-1">
                 {agent.isBuiltin && <Badge tone="muted">内置</Badge>}
                 {agent.isOrchestrator && (
                   <Badge tone="primary">
                     <Sparkles className="size-2.5" />
-                    Orchestrator
+                    调度
                   </Badge>
                 )}
                 {agent.supportsVision && (
@@ -75,7 +79,9 @@ export function AgentInfoPopover({
           </div>
 
           {agent.description && (
-            <p className="text-xs leading-5 text-muted-foreground">{agent.description}</p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {safeAgentDisplayText(agent.description, '')}
+            </p>
           )}
 
           {/* 能力标签 */}
@@ -128,6 +134,12 @@ export function AgentInfoPopover({
       <CreateAgentDialog open={editOpen} onOpenChange={setEditOpen} agent={agent} />
     </>
   )
+}
+
+function safeAgentDisplayText(value: string | null | undefined, fallback: string) {
+  const text = value?.trim() ?? ''
+  if (!text) return fallback
+  return localizeAgentHubDisplayText(text, fallback)
 }
 
 function Badge({

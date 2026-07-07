@@ -2,19 +2,29 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
+import {
+  buildElectronBuilderNodeArgs,
+  buildPackageBridgeNodeArgs,
+  isPathInsideRoot,
+  pathContainsNonAscii,
+  selectAvailableBridgeDrive,
+} from './electron-package-paths.mjs'
+
 const root = process.cwd()
+const asciiBridgeActiveEnv = 'AGENTHUB_ELECTRON_ASCII_BRIDGE_ACTIVE'
+
+if (process.platform === 'win32' && pathContainsNonAscii(root) && process.env[asciiBridgeActiveEnv] !== '1') {
+  process.exit(runWithAsciiBridge())
+}
+
 const stageDir = path.join(root, '.electron-package')
 const releaseDir = process.env.AGENTHUB_RELEASE_DIR
   ? path.resolve(root, process.env.AGENTHUB_RELEASE_DIR)
   : path.join(root, 'release')
 
 function assertInsideRoot(target, label) {
-  const resolvedRoot = path.resolve(root)
   const resolvedTarget = path.resolve(target)
-  if (
-    resolvedTarget !== resolvedRoot &&
-    !resolvedTarget.startsWith(resolvedRoot + path.sep)
-  ) {
+  if (!isPathInsideRoot(root, resolvedTarget)) {
     throw new Error(`${label} is outside project root: ${resolvedTarget}`)
   }
 }
@@ -23,6 +33,59 @@ function resetDir(target, label) {
   assertInsideRoot(target, label)
   fs.rmSync(target, { recursive: true, force: true })
   fs.mkdirSync(target, { recursive: true })
+}
+
+function runWithAsciiBridge() {
+  const drive = selectAvailableBridgeDrive(getUsedWindowsDrives())
+  if (!drive) {
+    console.error('✗ Electron packaging needs an ASCII Windows path, but no free bridge drive was found.')
+    return 1
+  }
+
+  const bridgeRoot = `${drive}\\`
+  const mapResult = spawnSync('subst', [drive, root], { stdio: 'inherit' })
+  if (mapResult.error) {
+    throw mapResult.error
+  }
+  if (mapResult.status !== 0) {
+    return mapResult.status ?? 1
+  }
+
+  try {
+    const bridgedScript = path.join(bridgeRoot, 'scripts', 'electron-package.mjs')
+    const result = spawnSync(process.execPath, buildPackageBridgeNodeArgs(bridgedScript), {
+      cwd: bridgeRoot,
+      env: {
+        ...process.env,
+        [asciiBridgeActiveEnv]: '1',
+        AGENTHUB_ELECTRON_ASCII_ORIGINAL_ROOT: root,
+        AGENTHUB_ELECTRON_ASCII_BRIDGE_ROOT: bridgeRoot,
+        ELECTRON_BUILDER_CACHE: process.env.ELECTRON_BUILDER_CACHE ?? path.join(bridgeRoot, '.electron-builder-cache'),
+      },
+      stdio: 'inherit',
+    })
+
+    if (result.error) {
+      throw result.error
+    }
+    return result.status ?? 1
+  } finally {
+    const cleanup = spawnSync('subst', [drive, '/D'], { stdio: 'inherit' })
+    if (cleanup.error) {
+      console.warn(`⚠ Failed to remove Electron package bridge drive ${drive}: ${cleanup.error.message}`)
+    }
+  }
+}
+
+function getUsedWindowsDrives() {
+  const used = new Set()
+  for (let code = 65; code <= 90; code += 1) {
+    const drive = `${String.fromCharCode(code)}:`
+    if (fs.existsSync(`${drive}\\`)) {
+      used.add(drive)
+    }
+  }
+  return used
 }
 
 function copyDir(src, dest, label) {
@@ -48,6 +111,9 @@ const builderCli = path.join(
   'cli',
   'cli.js',
 )
+const builderEntry = process.env.AGENTHUB_ELECTRON_ASCII_ORIGINAL_ROOT
+  ? path.join(root, 'scripts', 'electron-builder-nsis-wrapper.mjs')
+  : builderCli
 
 resetDir(stageDir, 'Electron staging directory')
 if (process.env.AGENTHUB_RELEASE_DIR) {
@@ -102,11 +168,11 @@ fs.writeFileSync(
   JSON.stringify(stagePkg, null, 2) + '\n',
 )
 
-if (!fs.existsSync(builderCli)) {
-  throw new Error(`electron-builder CLI not found: ${builderCli}`)
+if (!fs.existsSync(builderEntry)) {
+  throw new Error(`electron-builder entry not found: ${builderEntry}`)
 }
 
-const result = spawnSync(process.execPath, [builderCli, '--projectDir', stageDir], {
+const result = spawnSync(process.execPath, buildElectronBuilderNodeArgs(builderEntry, stageDir), {
   cwd: root,
   env: {
     ...process.env,

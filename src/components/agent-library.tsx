@@ -34,6 +34,10 @@ import {
   type AgentMemoryLearningReport,
 } from '@/lib/api'
 import { buildAgentBrainSummary, type AgentBrainSummaryView } from '@/lib/agent-brain-summary'
+import {
+  localizeAgentHubDisplayText,
+  localizeGeneratedAgentProfileName,
+} from '@/lib/agenthub-display-text'
 import { cn } from '@/lib/utils'
 import { useAgentList, useAppStore } from '@/stores/app-store'
 
@@ -262,7 +266,7 @@ export function AgentLibrary({
           <DialogHeader>
             <DialogTitle>删除智能体</DialogTitle>
             <DialogDescription>
-              确定删除「{deleteTarget?.name}」吗？已经使用这个智能体的会话将无法继续使用它。这个操作不可恢复。
+              确定删除「{localizeGeneratedAgentProfileName(deleteTarget?.name)}」吗？已经使用这个智能体的会话将无法继续使用它。这个操作不可恢复。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -341,9 +345,9 @@ function AgentSettingsOverview({
           <div className="flex items-center gap-2">
             <AgentAvatar agent={agent} size="md" />
             <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold">{agent.name}</h2>
+              <h2 className="truncate text-base font-semibold">{localizeGeneratedAgentProfileName(agent.name)}</h2>
               <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-                {agent.description || '还没有填写岗位说明'}
+                {safeAgentDisplayText(agent.description, '还没有填写岗位说明')}
               </p>
             </div>
           </div>
@@ -501,6 +505,12 @@ function OverviewTile({
   )
 }
 
+function safeAgentDisplayText(value: string | null | undefined, fallback: string) {
+  const text = value?.trim() ?? ''
+  if (!text) return fallback
+  return localizeAgentHubDisplayText(text, fallback)
+}
+
 function AgentPlainSettingCard({
   icon,
   title,
@@ -563,12 +573,12 @@ function AgentCard({
         'group flex cursor-pointer items-start gap-3 rounded-md border bg-card px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected ? 'border-primary bg-primary/5 shadow-sm' : 'hover:border-primary/50 hover:bg-muted/20',
       )}
-      aria-label={`设置智能体 ${agent.name}`}
+      aria-label={`设置智能体 ${localizeGeneratedAgentProfileName(agent.name)}`}
     >
       <AgentAvatar agent={agent} size="md" />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-medium">{agent.name}</span>
+          <span className="truncate text-sm font-medium">{localizeGeneratedAgentProfileName(agent.name)}</span>
           {agent.isBuiltin && (
             <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
               内置
@@ -580,7 +590,9 @@ function AgentCard({
             </span>
           )}
         </div>
-        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{agent.description}</div>
+        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+          {safeAgentDisplayText(agent.description, '还没有填写岗位说明')}
+        </div>
         {agent.modelId && (
           <div className="mt-1 truncate text-[11px] text-muted-foreground">
             模型：<span className="font-mono">{agent.modelId}</span>

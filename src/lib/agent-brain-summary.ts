@@ -163,6 +163,7 @@ export function buildAgentBrainSummary(report: AgentBrainSummaryReport): AgentBr
     .filter(Boolean)
     .slice(0, 4)
   const recommendationItems = report.recommendations
+    .map(localizeAgentBrainRecommendation)
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 3)
@@ -307,8 +308,56 @@ export function buildAgentBrainDetail(report: AgentBrainSummaryReport): AgentBra
       .map((playbook) => playbook.title.trim())
       .filter(Boolean)
       .slice(0, 5),
-    recommendations: report.recommendations.map((item) => item.trim()).filter(Boolean).slice(0, 5),
+    recommendations: report.recommendations
+      .map(localizeAgentBrainRecommendation)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 5),
   }
+}
+
+function localizeAgentBrainRecommendation(item: string): string {
+  const normalized = item.trim()
+  if (normalized === 'Enable memoryPolicy.enabled when this Agent should learn from completed tasks.') {
+    return '如果希望这个员工从任务里学习，请先打开员工大脑。'
+  }
+  if (
+    normalized ===
+    'Seed at least one semantic, procedural, customer, or project memory before assigning long-running work.'
+  ) {
+    return '先给这个员工补一条知识、流程、客户偏好或项目记忆，再安排长任务。'
+  }
+  if (
+    normalized ===
+    'Add memories whose title/content match the Agent role, artifact type, customer, or common goals.'
+  ) {
+    return '新增记忆时，标题和内容要贴合员工角色、交付物类型、客户或常见目标。'
+  }
+  if (
+    normalized ===
+    'Run the Agent through the employee runtime so reflections can record what worked, failed, and should be reused.'
+  ) {
+    return '让这个员工跑一次真实任务，系统会记录做对了什么、哪里失败、哪些经验可复用。'
+  }
+  if (normalized === 'Review pending learning events before turning them into active Playbooks.') {
+    return '先审核待确认的学习结果，再把它们变成正式工作手册。'
+  }
+  if (normalized === 'Approve high-confidence reusable procedures into Playbooks after human review.') {
+    return '高置信的可复用流程需要人工确认后，再沉淀成工作手册。'
+  }
+  if (normalized === 'Keep mistake memories visible during planning so the Agent can avoid repeated failures.') {
+    return '计划任务时保留失败教训提示，帮助这个员工避免重复犯错。'
+  }
+  if (normalized === 'Review expiring memories and extend only the ones that are still useful.') {
+    return '检查即将过期的记忆，只延长仍然有用的内容。'
+  }
+  if (normalized === 'Set memoryPolicy.projectId for clearer project-scoped retrieval and sharing boundaries.') {
+    return '给这个员工绑定项目范围，让项目记忆的召回和共享边界更清楚。'
+  }
+  if (normalized === 'Memory and learning state is ready for runtime retrieval and post-run reflection.') {
+    return '员工大脑已可用于运行前召回经验，并在任务后继续复盘学习。'
+  }
+  return normalized
 }
 
 function buildNextRunBriefing(

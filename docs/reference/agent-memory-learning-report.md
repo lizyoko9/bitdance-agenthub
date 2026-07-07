@@ -1,6 +1,6 @@
 # Agent Memory Learning Report
 
-The Agent memory learning report turns Section 5 into a control-plane view for an employee Agent's memory and learning state. It is side-effect free: it does not write memories, approve learning events, or change Playbooks.
+The Agent memory learning report is the data source for one employee Agent's internal brain. 用户看到的是“员工大脑”，不是一个独立的 memory product surface. The report is side-effect free: it does not write memories, approve learning events, or change Playbooks.
 
 ## API
 
@@ -62,7 +62,7 @@ This matches the v1 policy:
 
 ## UI Usage
 
-Agent Factory can show the readiness score beside memory settings. Memory Center can use the same report to highlight:
+Agent settings can show the readiness score inside the employee brain card. The same report highlights:
 
 - pending learning reviews
 - missing seed memories
@@ -72,3 +72,11 @@ Agent Factory can show the readiness score beside memory settings. Memory Center
 - retrieval candidates for the current task goal
 
 Runtime can use the report as a pre-run explanation of what memory context is likely to be available before it calls `retrieveRelevantMemories`.
+
+Memory and learning should stay attached to the Agent that owns them:
+
+- private Agent memory is visible only to that Agent by default
+- project, team, and global tool knowledge require an explicit sharing path
+- reusable procedures become Playbook drafts before they are activated
+- failed lessons remain visible to the owning Agent so the next run can avoid the same mistake
+- the UI should label this area as employee brain, Agent memory, Agent experience, learning, Playbooks, failed lessons, 自我校准, and 反思学习

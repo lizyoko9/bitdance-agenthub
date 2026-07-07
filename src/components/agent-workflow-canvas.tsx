@@ -92,6 +92,8 @@ import {
   runWorkflowPreset,
   startWorkflowRun,
   updateWorkflow,
+  type WorkflowRunArtifactHandoff,
+  type WorkflowRunDeliveryPackage,
   type WorkflowNodeBrainStatus,
   type WorkflowPresetDto,
   type WorkflowRunSnapshot,
@@ -252,6 +254,8 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
   const [workflowPreflights, setWorkflowPreflights] = useState<WorkflowPreflightRow[]>([])
   const [nodeRuns, setNodeRuns] = useState<WorkflowNodeRunRow[]>([])
   const [nodeBrainStatuses, setNodeBrainStatuses] = useState<WorkflowNodeBrainStatus[]>([])
+  const [artifactHandoffs, setArtifactHandoffs] = useState<WorkflowRunArtifactHandoff[]>([])
+  const [deliveryPackage, setDeliveryPackage] = useState<WorkflowRunDeliveryPackage | null>(null)
   const [employeeRuns, setEmployeeRuns] = useState<EmployeeRunRow[]>([])
   const [softwareCommandRuns, setSoftwareCommandRuns] = useState<SoftwareCommandRunRow[]>([])
   const [computerSessions, setComputerSessions] = useState<ComputerSessionRow[]>([])
@@ -380,6 +384,8 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
   const clearWorkflowRunSnapshot = useCallback(() => {
     setNodeRuns([])
     setNodeBrainStatuses([])
+    setArtifactHandoffs([])
+    setDeliveryPackage(null)
     setEmployeeRuns([])
     setSoftwareCommandRuns([])
     setComputerSessions([])
@@ -392,6 +398,8 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
   const setWorkflowRunSnapshot = useCallback((snapshot: WorkflowRunSnapshot) => {
     setNodeRuns(snapshot.nodeRuns)
     setNodeBrainStatuses(snapshot.nodeBrainStatuses)
+    setArtifactHandoffs(snapshot.artifactHandoffs)
+    setDeliveryPackage(snapshot.deliveryPackage)
     setEmployeeRuns(snapshot.employeeRuns)
     setSoftwareCommandRuns(snapshot.softwareCommandRuns)
     setComputerSessions(snapshot.computerSessions)
@@ -1913,11 +1921,13 @@ export function AgentWorkflowCanvas({ initialWorkflowId }: { initialWorkflowId?:
               emptyLabel="选择运行记录"
             />
             <RunStatusList runs={workflowRuns.slice(0, 6)} selectedRunId={selectedRunId} />
+            <DeliveryPackageSummary deliveryPackage={deliveryPackage} />
             <NodeRunList
               nodeRuns={nodeRuns}
               nodes={nodes}
               agentById={agentById}
               nodeBrainStatusByNodeRunId={nodeBrainStatusByNodeRunId}
+              artifactHandoffs={artifactHandoffs}
             />
             <EmployeeRunList runs={employeeRuns} agentById={agentById} />
             <SoftwareCommandRunList runs={softwareCommandRuns} commandById={softwareCommandById} />
@@ -4000,16 +4010,88 @@ function RunStatusList({
   )
 }
 
+function DeliveryPackageSummary({
+  deliveryPackage,
+}: {
+  deliveryPackage: WorkflowRunDeliveryPackage | null
+}) {
+  if (!deliveryPackage) {
+    return <EmptyLine text="选择或启动一次运行后，这里会整理客户可见交付包" />
+  }
+
+  if (deliveryPackage.totalArtifacts === 0) {
+    return <EmptyLine text="这个工作流还没有客户可见产物，请在节点产出里打开客户可见" />
+  }
+
+  return (
+    <div className="rounded-md border bg-muted/20 p-2 text-[11px]">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 font-medium">
+            <Package className="size-3.5 shrink-0" />
+            <span className="truncate">客户可见交付包</span>
+          </div>
+          <div className="mt-0.5 line-clamp-2 text-muted-foreground">
+            {deliveryPackage.summary}
+          </div>
+        </div>
+        <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[9px]">
+          {deliveryPackage.readyArtifacts}/{deliveryPackage.totalArtifacts}
+        </Badge>
+      </div>
+      <div className="mt-2 space-y-1">
+        {deliveryPackage.artifacts.slice(0, 6).map((artifact) => {
+          const status = deliveryArtifactStatus(artifact.status)
+          const fileText =
+            artifact.fileName || artifact.path || artifact.artifactId || '运行完成后生成'
+          return (
+            <div key={artifact.id} className="rounded-md border bg-background/70 px-2 py-1.5">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <ArtifactChip type={artifact.artifactType} compact />
+                  <span className="min-w-0 truncate font-medium">{artifact.title}</span>
+                </div>
+                <Badge variant={status.variant} className="h-5 shrink-0 px-1.5 text-[9px]">
+                  {status.label}
+                </Badge>
+              </div>
+              <div className="mt-1 flex min-w-0 items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                <span className="min-w-0 truncate">{artifact.sourceNodeLabel}</span>
+                <span className="min-w-0 truncate font-mono">{fileText}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {deliveryPackage.missingArtifacts.length > 0 && (
+        <div className="mt-2 truncate text-[10px] text-muted-foreground">
+          待补齐：{deliveryPackage.missingArtifacts.slice(0, 4).join('、')}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function deliveryArtifactStatus(
+  status: WorkflowRunDeliveryPackage['artifacts'][number]['status'],
+): { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' } {
+  if (status === 'ready') return { label: '准备交付', variant: 'default' }
+  if (status === 'failed') return { label: '需要处理', variant: 'destructive' }
+  return { label: '等待产出', variant: 'outline' }
+}
+
 function NodeRunList({
   nodeRuns,
   nodes,
   agentById,
   nodeBrainStatusByNodeRunId,
+  artifactHandoffs,
 }: {
   nodeRuns: WorkflowNodeRunRow[]
   nodes: DraftNode[]
   agentById: Map<string, AgentProfileRow>
   nodeBrainStatusByNodeRunId: Map<string, WorkflowNodeBrainStatus>
+  artifactHandoffs: WorkflowRunArtifactHandoff[]
 }) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
   if (nodeRuns.length === 0) return <EmptyLine text="选择或启动一次运行后，这里会显示节点进度" />
@@ -4019,6 +4101,9 @@ function NodeRunList({
         const node = nodeMap.get(run.nodeId)
         const agent = node?.agentProfileId ? agentById.get(node.agentProfileId) : null
         const brainStatus = nodeBrainStatusByNodeRunId.get(run.id)
+        const nodeHandoffs = artifactHandoffs.filter(
+          (handoff) => handoff.sourceNodeId === run.nodeId || handoff.targetNodeId === run.nodeId,
+        )
         return (
           <div key={run.id} className="rounded-md border px-2 py-1.5 text-[11px]">
             <div className="flex items-center justify-between gap-2">
@@ -4036,6 +4121,37 @@ function NodeRunList({
                 <span className="truncate">员工大脑 · {brainStatus.label}</span>
               </div>
             )}
+            {nodeHandoffs.length > 0 && (
+              <NodeRunArtifactHandoffList nodeId={run.nodeId} handoffs={nodeHandoffs} />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function NodeRunArtifactHandoffList({
+  nodeId,
+  handoffs,
+}: {
+  nodeId: string
+  handoffs: WorkflowRunArtifactHandoff[]
+}) {
+  return (
+    <div className="mt-2 space-y-1 rounded-md bg-muted/30 p-2">
+      <div className="text-[10px] font-medium text-muted-foreground">运行产物交付</div>
+      {handoffs.slice(0, 4).map((handoff) => {
+        const direction = handoff.targetNodeId === nodeId ? '收到' : '交出'
+        const peer = handoff.targetNodeId === nodeId ? handoff.sourceNodeLabel : handoff.targetNodeLabel
+        return (
+          <div key={`${handoff.edgeId}-${direction}`} className="flex min-w-0 items-center gap-1 text-[10px]">
+            <ArtifactChip type={handoff.artifactType} compact />
+            <span className="shrink-0 text-muted-foreground">{direction}</span>
+            <span className="min-w-0 truncate">
+              {handoff.artifactLabel}: {handoff.sourcePortLabel} -&gt; {handoff.targetPortLabel}
+            </span>
+            <span className="shrink-0 text-muted-foreground">· {peer}</span>
           </div>
         )
       })}

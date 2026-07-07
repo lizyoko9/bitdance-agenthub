@@ -68,11 +68,19 @@ import {
   buildEmployeeRunBrainDigest,
   type EmployeeRunBrainDigest,
 } from '@/lib/employee-run-brain-digest'
+import {
+  localizeAgentHubDisplayText,
+  localizeGeneratedConversationTitle,
+  localizeGeneratedAgentProfileName,
+} from '@/lib/agenthub-display-text'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 
 interface DesktopWorkbenchProps {
   onModeChange: (mode: SidebarMode) => void
+  enabledModuleIds?: string[]
+  onEnableModule?: (mode: SidebarMode) => void
+  onDisableModule?: (mode: SidebarMode) => void
 }
 
 interface ReadinessItem {
@@ -272,7 +280,7 @@ function buildBusinessWorkbench(args: {
     focus: business.focus,
     nextAction,
     aiEditSummary: liveCount > 0
-      ? '工作台已把运行现场放到前面'
+      ? '工作台已把任务进度放到前面'
       : artifactCount > 0
         ? '工作台已把交付结果放到前面'
         : '工作台已按当前业务自动整理',
@@ -358,7 +366,12 @@ function buildBusinessWorkbench(args: {
   }
 }
 
-export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
+export function DesktopWorkbench({
+  onModeChange,
+  enabledModuleIds,
+  onEnableModule,
+  onDisableModule,
+}: DesktopWorkbenchProps) {
   const upsertConversation = useAppStore((s) => s.upsertConversation)
   const setActiveConversation = useAppStore((s) => s.setActiveConversation)
   const addLocalUserMessage = useAppStore((s) => s.addLocalUserMessage)
@@ -496,7 +509,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
   ])
   const assigneeLabel = workMode === 'team'
     ? selectedEmployeeProfiles.length
-      ? selectedEmployeeProfiles.map((agent) => agent.name).join(' / ')
+      ? selectedEmployeeProfiles.map((agent) => localizeGeneratedAgentProfileName(agent.name)).join(' / ')
       : '等待创建员工配置'
     : selectedModel
       ? selectedModel.name
@@ -543,7 +556,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
         fetchSoftwareProfiles().catch(() => []),
         fetchSkillsCenterData().catch(() => ({ skills: [] })),
       ])
-      const moduleManagerView = await fetchAppModuleManagerView().catch(() => null)
+      const moduleManagerView = await fetchAppModuleManagerView(enabledModuleIds).catch(() => null)
       setAgents(agentList)
       setEmployeeProfiles(employeeProfileList)
       setModels(modelList)
@@ -560,7 +573,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [enabledModuleIds])
 
   useEffect(() => {
     void load()
@@ -695,6 +708,8 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
           moduleManager={moduleManager}
           loading={loading}
           onNavigate={onModeChange}
+          onEnableModule={onEnableModule ?? onModeChange}
+          onDisableModule={onDisableModule ?? onModeChange}
         />
 
         <section className="grid min-h-[32rem] gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
@@ -735,7 +750,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
                     active={workMode === 'team'}
                     icon={<Bot className="size-4" />}
                     title="团队员工执行"
-                    body={selectedEmployeeProfiles.length ? selectedEmployeeProfiles.map((agent) => agent.name).join(' / ') : '需要先创建员工配置'}
+                    body={selectedEmployeeProfiles.length ? selectedEmployeeProfiles.map((agent) => localizeGeneratedAgentProfileName(agent.name)).join(' / ') : '需要先创建员工配置'}
                     onClick={() => setWorkMode('team')}
                   />
                   <WorkModeButton
@@ -794,9 +809,9 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
                         >
                           <EmployeeProfileAvatar profile={agent} />
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-semibold">{agent.name}</div>
+                            <div className="truncate text-sm font-semibold">{localizeGeneratedAgentProfileName(agent.name)}</div>
                             <div className="truncate text-xs text-muted-foreground">
-                              {agent.description || agent.role || '等待配置职责与能力'}
+                              {safeDisplayText(agent.description || agent.role, '等待配置职责与能力')}
                             </div>
                             <div className="mt-1 truncate text-[11px] text-muted-foreground">
                               {agent.modelProfileId || '未绑定模型'}
@@ -934,7 +949,7 @@ export function DesktopWorkbench({ onModeChange }: DesktopWorkbenchProps) {
                       className="flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition hover:border-primary/60 hover:bg-accent"
                     >
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">{conversation.title}</span>
+                        <span className="block truncate text-sm font-medium">{localizeGeneratedConversationTitle(conversation.title)}</span>
                         <span className="block truncate text-xs text-muted-foreground">
                           {conversation.mode === 'group' ? '工作对话区' : '普通对话'} · {conversation.agentIds.length || 1} 个执行对象
                         </span>
@@ -1151,7 +1166,7 @@ function phaseToLabel(phase: string) {
     produce_artifact: '生成产物',
     reflect: '总结学习',
   }
-  return table[phase] ?? phase
+  return table[phase] ?? localizeAgentHubDisplayText(phase, phase)
 }
 
 function RunActivityCard({
@@ -1255,7 +1270,7 @@ function RunActivityCard({
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">{safeDisplayText(run.title, '未命名任务')}</div>
                     <div className="mt-1 truncate text-xs text-muted-foreground">
-                      {safeDisplayText(run.agentName ?? '未命名员工', '未命名员工')} · {safeDisplayText(run.currentStep, '等待更新')}
+                      {localizeGeneratedAgentProfileName(run.agentName ?? '未命名员工')} · {safeDisplayText(run.currentStep, '等待更新')}
                     </div>
                   </div>
                   <Badge variant={statusBadgeVariant(run.status)}>{statusToLabel(run.status)}</Badge>
@@ -1359,7 +1374,7 @@ function RunSnapshotPanel({
             <div className="text-xs font-medium text-muted-foreground">当前状态</div>
             <div className="rounded-md bg-background px-3 py-2 text-xs leading-5">
               <span className="font-medium">{phaseToLabel(run.currentPhase)}</span>
-              <span className="text-muted-foreground"> · {run.currentStep ?? outputStatus}</span>
+              <span className="text-muted-foreground"> · {safeDisplayText(run.currentStep, outputStatus)}</span>
             </div>
           </div>
 
@@ -1391,7 +1406,7 @@ function RunSnapshotPanel({
                 {latestEvents.map((event) => (
                   <div key={event.id} className="rounded-md bg-background px-2.5 py-1.5 text-xs">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="line-clamp-1 font-medium">{event.message}</span>
+                      <span className="line-clamp-1 font-medium">{safeDisplayText(event.message, '运行事件')}</span>
                       <Badge variant="outline">{phaseToLabel(event.phase)}</Badge>
                     </div>
                   </div>
@@ -1765,12 +1780,16 @@ function ModuleStorePreview({
   moduleManager,
   loading,
   onNavigate,
+  onEnableModule,
+  onDisableModule,
 }: {
   moduleManager: AgentHubModuleManagerView | null
   loading: boolean
   onNavigate: (mode: SidebarMode) => void
+  onEnableModule: (mode: SidebarMode) => void
+  onDisableModule: (mode: SidebarMode) => void
 }) {
-  const activeModules = moduleManager?.activeModules.slice(0, 5) ?? []
+  const activeModules = prioritizeWorkbenchActiveModules(moduleManager?.activeModules ?? []).slice(0, 8)
   const availableModules = moduleManager?.availableModules.slice(0, 4) ?? []
 
   return (
@@ -1796,12 +1815,16 @@ function ModuleStorePreview({
           emptyLabel={loading ? '正在读取模块...' : '暂无启用模块'}
           modules={activeModules}
           onNavigate={onNavigate}
+          onEnableModule={onEnableModule}
+          onDisableModule={onDisableModule}
         />
         <ModuleBlockColumn
           title="可加入模块"
           emptyLabel={loading ? '正在读取模块...' : '暂无可加入模块'}
           modules={availableModules}
           onNavigate={onNavigate}
+          onEnableModule={onEnableModule}
+          onDisableModule={onDisableModule}
         />
       </div>
     </section>
@@ -1813,11 +1836,15 @@ function ModuleBlockColumn({
   emptyLabel,
   modules,
   onNavigate,
+  onEnableModule,
+  onDisableModule,
 }: {
   title: string
   emptyLabel: string
   modules: AgentHubModuleManagerView['activeModules']
   onNavigate: (mode: SidebarMode) => void
+  onEnableModule: (mode: SidebarMode) => void
+  onDisableModule: (mode: SidebarMode) => void
 }) {
   return (
     <div className="min-w-0 rounded-md bg-background p-2.5">
@@ -1828,7 +1855,15 @@ function ModuleBlockColumn({
             <button
               key={module.id}
               type="button"
-              onClick={() => onNavigate(module.id as SidebarMode)}
+              onClick={() => {
+                const moduleAction =
+                  module.active && !module.defaultEnabled
+                    ? onDisableModule
+                    : module.active
+                      ? onNavigate
+                      : onEnableModule
+                moduleAction(module.id as SidebarMode)
+              }}
               className="min-w-0 rounded-md border px-2.5 py-2 text-left transition hover:border-primary/60 hover:bg-accent"
             >
               <div className="flex min-w-0 items-center justify-between gap-2">
@@ -1851,6 +1886,15 @@ function ModuleBlockColumn({
       )}
     </div>
   )
+}
+
+function prioritizeWorkbenchActiveModules(
+  modules: AgentHubModuleManagerView['activeModules'],
+): AgentHubModuleManagerView['activeModules'] {
+  return [...modules].sort((a, b) => {
+    if (a.defaultEnabled !== b.defaultEnabled) return a.defaultEnabled ? 1 : -1
+    return a.label.localeCompare(b.label, 'zh-Hans-CN')
+  })
 }
 
 function LayersIcon() {
@@ -1911,7 +1955,7 @@ function safeDisplayText(value: string | null | undefined, fallback: string) {
   if (!text) return fallback
   const questionMarks = text.match(/\?/g)?.length ?? 0
   if (text.length >= 6 && questionMarks / text.length > 0.55) return fallback
-  return text
+  return localizeAgentHubDisplayText(text, fallback)
 }
 
 function EmptyHint({

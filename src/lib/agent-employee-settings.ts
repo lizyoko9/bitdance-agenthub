@@ -72,8 +72,8 @@ export const AGENT_EMPLOYEE_SETTING_SECTIONS: AgentEmployeeSettingSection[] = [
   },
   {
     id: 'memory',
-    label: '记忆学习',
-    description: '设置它如何记录项目经验、客户偏好和失败教训。',
+    label: '员工大脑',
+    description: '管理这个员工的任务记忆、长期经验、工具经验、失败教训、工作手册、自我校准和反思学习。',
   },
   {
     id: 'output',

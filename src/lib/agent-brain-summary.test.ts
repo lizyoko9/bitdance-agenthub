@@ -353,4 +353,23 @@ describe('agent brain summary', () => {
     })
     expect(detail.reviewQueue).toEqual(['Memory policy is disabled for this Agent.'])
   })
+
+  it('localizes fixed memory-learning recommendations before showing them to Chinese users', () => {
+    const detail = buildAgentBrainDetail(
+      report({
+        recommendations: [
+          'Seed at least one semantic, procedural, customer, or project memory before assigning long-running work.',
+          'Add memories whose title/content match the Agent role, artifact type, customer, or common goals.',
+          'Run the Agent through the employee runtime so reflections can record what worked, failed, and should be reused.',
+        ],
+      }),
+    )
+
+    expect(detail.recommendations).toEqual([
+      '先给这个员工补一条知识、流程、客户偏好或项目记忆，再安排长任务。',
+      '新增记忆时，标题和内容要贴合员工角色、交付物类型、客户或常见目标。',
+      '让这个员工跑一次真实任务，系统会记录做对了什么、哪里失败、哪些经验可复用。',
+    ])
+    expect(detail.recommendations.join('\n')).not.toMatch(/[A-Za-z]{4,}/)
+  })
 })

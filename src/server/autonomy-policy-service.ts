@@ -185,6 +185,7 @@ function decide(args: {
 }
 
 function defaultRiskForAction(actionType: AutonomyActionType): RiskLevel {
+  if (actionType === 'cli_profile') return 'low'
   if (
     actionType === 'read_file' ||
     actionType === 'network_request' ||
@@ -196,8 +197,7 @@ function defaultRiskForAction(actionType: AutonomyActionType): RiskLevel {
     actionType === 'write_file' ||
     actionType === 'run_command' ||
     actionType === 'software_command' ||
-    actionType === 'mcp_tool' ||
-    actionType === 'cli_profile'
+    actionType === 'mcp_tool'
   ) {
     return 'medium'
   }
@@ -236,7 +236,7 @@ function permissionPathsForAction(actionType: AutonomyActionType): string[][] {
   if (actionType === 'run_command' || actionType === 'install_dependency') {
     return [['canRunCommands'], ['command', 'run']]
   }
-  if (actionType === 'cli_profile') return [['canRunCommands'], ['cli', 'run']]
+  if (actionType === 'cli_profile') return [['canRunCommands'], ['commands', 'run'], ['cli', 'run']]
   if (actionType === 'network_request') return [['canUseNetwork'], ['network', 'access']]
   if (actionType === 'browser_operation') return [['canOperateBrowser'], ['browser', 'operate']]
   if (actionType === 'desktop_operation') return [['canOperateDesktop'], ['desktop', 'operate']]

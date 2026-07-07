@@ -35,11 +35,15 @@ export type BuildAgentHubModuleManagerViewInput = {
 export function buildAgentHubModuleManagerView(
   input: BuildAgentHubModuleManagerViewInput = {},
 ): AgentHubModuleManagerView {
-  const activeModuleIds = input.enabledModuleIds
-    ? resolveModuleActivation(input.enabledModuleIds).enabledIds
-    : getDefaultModuleLayout().map((moduleBlock) => moduleBlock.id)
-  const activation = input.enabledModuleIds ? resolveModuleActivation(input.enabledModuleIds) : null
-  const activeIdSet = new Set(activeModuleIds)
+  const defaultModuleIds = getDefaultModuleLayout().map((moduleBlock) => moduleBlock.id)
+  const requestedModuleIds = input.enabledModuleIds
+    ? [...defaultModuleIds, ...input.enabledModuleIds]
+    : defaultModuleIds
+  const activation = input.enabledModuleIds ? resolveModuleActivation(requestedModuleIds) : null
+  const activeIdSet = new Set(input.enabledModuleIds ? (activation?.enabledIds ?? []) : defaultModuleIds)
+  const activeModuleIds = AGENTHUB_MODULE_BLOCKS.filter((moduleBlock) => activeIdSet.has(moduleBlock.id)).map(
+    (moduleBlock) => moduleBlock.id,
+  )
   const managedModules = AGENTHUB_MODULE_BLOCKS.map((moduleBlock) => toManagedModule(moduleBlock, activeIdSet))
 
   return {
@@ -71,7 +75,7 @@ function toManagedModule(moduleBlock: AgentHubModuleBlock, activeIdSet: Set<stri
     dependencyLabels,
     statusLabel: active ? '已启用' : hasDependencies ? '可加入' : '可直接加入',
     statusTone: active || !hasDependencies ? 'ready' : 'muted',
-    actionLabel: active ? '打开' : '加入模块',
+    actionLabel: active ? (moduleBlock.defaultEnabled ? '打开' : '移除模块') : '加入模块',
     dependencyHint: active
       ? hasDependencies
         ? `依赖已就绪：${dependencyLabels.join('、')}`

@@ -12,6 +12,9 @@ import type {
   CliRunRow,
   EmployeeRunRow,
 } from '@/db/schema'
+import { splitRenderedCliArgs } from '@/lib/cli-command-args'
+import { resolveEmployeeRunCliMode } from '@/lib/employee-run-cli-mode'
+import { runAgentHubCommand } from '@/server/agenthub-command-runner'
 import { evaluateAutonomyAction } from '@/server/autonomy-policy-service'
 import { newApprovalRequestId, newCliRunId } from '@/server/ids'
 
@@ -41,7 +44,7 @@ export async function runCliProfile(args: RunCliProfileArgs): Promise<CliRunRow>
     resourceType: 'cli_profile',
     resourceId: profile.id,
     requestedMode: mode,
-    riskLevel: mode === 'execute' ? 'high' : profile.requiresApproval ? 'medium' : 'low',
+    riskLevel: profile.requiresApproval ? 'high' : 'low',
     payload: {
       command: profile.command,
       renderedArgs,
@@ -51,8 +54,10 @@ export async function runCliProfile(args: RunCliProfileArgs): Promise<CliRunRow>
   })
   const policyError =
     autonomy.decision.status === 'blocked' ? autonomy.decision.reason : null
+  const needsApproval =
+    profile.requiresApproval || autonomy.decision.requiresApproval || mode === 'execute' && autonomy.decision.status === 'requires_approval'
   const approvalRequest =
-    mode === 'execute' && !cwdResult.error && !authError && !policyError
+    mode === 'execute' && needsApproval && !cwdResult.error && !authError && !policyError
       ? await createCliExecutionApprovalRequest({
           profile,
           agentProfileId: agent?.id ?? args.agentProfileId ?? null,
@@ -65,12 +70,28 @@ export async function runCliProfile(args: RunCliProfileArgs): Promise<CliRunRow>
         })
       : null
   const executeError =
-    mode === 'execute'
-      ? 'CLI execution is waiting for approval; live process execution is not enabled in this runtime slice.'
+    mode === 'execute' && approvalRequest
+      ? 'CLI execution is waiting for approval.'
       : null
   const error = cwdResult.error ?? authError ?? policyError ?? executeError
+  const shouldExecute = mode === 'execute' && !error && !needsApproval
+  const commandResult = shouldExecute
+    ? await runAgentHubCommand({
+        command: profile.command,
+        args: splitRenderedCliArgs(renderedArgs),
+        cwd: cwdResult.cwd,
+        env: profile.env ?? {},
+        timeoutMs: profile.timeoutMs,
+      })
+    : null
   const now = Date.now()
-  const status = error ? 'blocked' : 'planned'
+  const status = error
+    ? 'blocked'
+    : commandResult
+      ? commandResult.exitCode === 0
+        ? 'complete'
+        : 'failed'
+      : 'planned'
   const row = {
     id: newCliRunId(),
     cliProfileId: profile.id,
@@ -83,7 +104,21 @@ export async function runCliProfile(args: RunCliProfileArgs): Promise<CliRunRow>
     cwd: cwdResult.cwd,
     envKeys: Object.keys(profile.env ?? {}).sort(),
     stdinPreview: truncatePreview(args.stdin),
-    output: error
+    output: commandResult
+      ? {
+          commandRunner: 'agenthub',
+          commandLine: [profile.command, renderedArgs].filter(Boolean).join(' '),
+          inputMode: profile.inputMode,
+          outputMode: profile.outputMode,
+          timeoutMs: profile.timeoutMs,
+          exitCode: commandResult.exitCode,
+          stdout: commandResult.stdout,
+          stderr: commandResult.stderr,
+          timedOut: commandResult.timedOut,
+          startedAt: commandResult.startedAt,
+          finishedAt: commandResult.finishedAt,
+        }
+      : error
       ? null
       : {
           dryRun: true,
@@ -92,12 +127,12 @@ export async function runCliProfile(args: RunCliProfileArgs): Promise<CliRunRow>
           outputMode: profile.outputMode,
           timeoutMs: profile.timeoutMs,
         },
-    error,
+    error: error ?? (commandResult && commandResult.exitCode !== 0 ? commandResult.stderr || `CLI exited with code ${commandResult.exitCode}` : null),
     requiresApproval:
-      profile.requiresApproval || autonomy.decision.requiresApproval || mode === 'execute',
+      needsApproval,
     approvalRequestId: approvalRequest?.id ?? null,
     createdAt: now,
-    finishedAt: now,
+    finishedAt: commandResult ? parseCommandFinishedAt(commandResult.finishedAt, now) : now,
   } satisfies CliRunRow
 
   await db.insert(schema.cliRuns).values(row)
@@ -163,7 +198,7 @@ export async function runCliProfilesForEmployeeRun(args: {
           workflowRunId: args.employeeRun.workflowRunId,
           ...args.variables,
         },
-        mode: 'dry_run',
+        mode: resolveEmployeeRunCliMode(args.agent),
       }),
     )
   }
@@ -267,6 +302,11 @@ function getAuthorizationError(profile: CliProfileRow, agentProfileId: string | 
 function truncatePreview(value: string | null | undefined): string | null {
   if (!value) return null
   return value.length > 500 ? `${value.slice(0, 500)}...` : value
+}
+
+function parseCommandFinishedAt(value: string, fallback: number): number {
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : fallback
 }
 
 function safeSegment(value: string): string {

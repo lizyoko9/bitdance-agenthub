@@ -17,6 +17,9 @@ describe('free product policy', () => {
     expect(containsForbiddenProductMonetization('升级到会员后解锁高级模块')).toBe(true)
     expect(containsForbiddenProductMonetization('Professional plan subscription')).toBe(true)
     expect(containsForbiddenProductMonetization('付费墙后才可以使用')).toBe(true)
+    expect(containsForbiddenProductMonetization('这里是商业化配置入口')).toBe(true)
+    expect(containsForbiddenProductMonetization('收费后才能启用自动化')).toBe(true)
+    expect(containsForbiddenProductMonetization('Commercial strategy and monetization setup')).toBe(true)
   })
 
   it('allows model usage cost language when it is clearly external', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAgentMemoryContextCacheFrame,
   compileAgentMemoryContextPack,
   extractAgentMemoryCues,
   planAgentMemoryEvolution,
@@ -222,6 +223,63 @@ describe('agent PSM memory core', () => {
     expect(pack.sections[0]?.items[0]?.title).toBe('剪映 CLI 导出')
     expect(pack.summary).toContain('3 条记忆')
     expect(JSON.stringify(pack)).not.toContain('PSM')
+  })
+
+  it('serializes context as an append-only stable prefix frame for model prefix cache', () => {
+    const pack = compileAgentMemoryContextPack(
+      {
+        agentId: 'agent-editor',
+        goal: '剪映导出视频',
+        cues: ['剪映', '字幕'],
+        tags: ['视频剪辑'],
+        now: baseNow,
+      },
+      [
+        {
+          memory: memory({
+            id: 'tool',
+            agentId: 'agent-editor',
+            type: 'tool_usage',
+            title: '剪映 CLI 导出',
+            content: '先检查项目路径，再执行导出命令。',
+            cues: ['剪映'],
+            tags: ['工具经验'],
+          }),
+          score: 5.2,
+          matchedCues: ['剪映'],
+          matchedTags: [],
+          reasons: ['匹配线索: 剪映'],
+        },
+        {
+          memory: memory({
+            id: 'failure',
+            agentId: 'agent-editor',
+            type: 'failure_lesson',
+            title: '字幕错位失败教训',
+            content: '字幕错位时不要直接交付，需要回到时间线检查。',
+            cues: ['字幕'],
+            tags: ['失败教训'],
+          }),
+          score: 4.9,
+          matchedCues: ['字幕'],
+          matchedTags: [],
+          reasons: ['包含失败教训'],
+        },
+      ],
+    )
+
+    const frame = buildAgentMemoryContextCacheFrame(pack, { maxPromptCharacters: 420 })
+    const repeated = buildAgentMemoryContextCacheFrame(pack, { maxPromptCharacters: 420 })
+
+    expect(frame.mode).toBe('append_only_stable_prefix')
+    expect(frame.prompt).toBe(repeated.prompt)
+    expect(frame.prompt.startsWith(frame.stablePrefix)).toBe(true)
+    expect(frame.stablePrefix).toContain('AgentHub 员工大脑上下文 v1')
+    expect(frame.stablePrefix).toContain('缓存策略: append-only stable-prefix')
+    expect(frame.prompt).toContain('剪映 CLI 导出')
+    expect(frame.prompt).toContain('字幕错位失败教训')
+    expect(frame.byteLength).toBe(Buffer.byteLength(frame.prompt, 'utf8'))
+    expect(JSON.stringify(frame)).not.toContain('PSM')
   })
 
   it('keeps new lessons private first and requests review before sharing or activating playbooks', () => {

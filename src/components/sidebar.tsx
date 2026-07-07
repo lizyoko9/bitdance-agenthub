@@ -22,9 +22,8 @@ import { createConversation, fetchAgents, fetchConversations, fetchModelProfiles
 import { subscribeUiCommand } from '@/lib/ui-command-events'
 import { cn } from '@/lib/utils'
 import {
-  advancedAppModules,
+  getVisibleAppModules,
   getAppModuleLabel,
-  primaryAppModules,
   type AppModuleDefinition,
   type AppModuleId,
 } from '@/modules/app-modules'
@@ -35,10 +34,11 @@ export type SidebarMode = AppModuleId
 
 interface SidebarProps {
   mode: SidebarMode
+  enabledModuleIds?: string[]
   onModeChange: (mode: SidebarMode) => void
 }
 
-export function Sidebar({ mode, onModeChange }: SidebarProps) {
+export function Sidebar({ mode, enabledModuleIds, onModeChange }: SidebarProps) {
   const mobileOpen = useAppStore((s) => s.mobileSidebarOpen)
   const setMobileSidebarOpen = useAppStore((s) => s.setMobileSidebarOpen)
   const conversations = useConversationList()
@@ -54,7 +54,9 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const [showMore, setShowMore] = useState(false)
   const [search, setSearch] = useState('')
   const [creatingConversation, setCreatingConversation] = useState(false)
-  const hasAdvancedModules = advancedAppModules.length > 0
+  const primaryModules = useMemo(() => getVisibleAppModules('primary', enabledModuleIds), [enabledModuleIds])
+  const advancedModules = useMemo(() => getVisibleAppModules('advanced', enabledModuleIds), [enabledModuleIds])
+  const hasAdvancedModules = advancedModules.length > 0
 
   const visibleConversations = useMemo(() => {
     const active = conversations.filter((conversation) => !conversation.archived)
@@ -178,7 +180,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
               collapsed ? 'p-1' : 'space-y-1 p-3',
             )}
           >
-            {primaryAppModules.map((item) => (
+            {primaryModules.map((item) => (
               <ModuleNavButton
                 key={item.id}
                 active={mode === item.id}
@@ -197,9 +199,9 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 {showMore ? '收起更多功能' : '更多功能'}
               </button>
             )}
-            {hasAdvancedModules && (showMore || collapsed || advancedAppModules.some((item) => item.id === mode)) && (
+            {hasAdvancedModules && (showMore || collapsed || advancedModules.some((item) => item.id === mode)) && (
               <div className={cn('space-y-1', !collapsed && 'pt-1')}>
-                {advancedAppModules.map((item) => (
+                {advancedModules.map((item) => (
                   <ModuleNavButton
                     key={item.id}
                     active={mode === item.id}

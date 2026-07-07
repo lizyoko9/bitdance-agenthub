@@ -111,6 +111,21 @@ export interface CompileAgentMemoryContextPackOptions {
   maxItemsPerSection?: number
 }
 
+export interface BuildAgentMemoryContextCacheFrameOptions {
+  maxPromptCharacters?: number
+  maxItemsPerSection?: number
+}
+
+export interface AgentMemoryContextCacheFrame {
+  mode: 'append_only_stable_prefix'
+  stablePrefix: string
+  prompt: string
+  promptPreview: string
+  byteLength: number
+  truncated: boolean
+  cacheHint: string
+}
+
 export type AgentMemoryRunOutcome = 'succeeded' | 'failed'
 
 export interface AgentMemoryRunObservation {
@@ -282,6 +297,43 @@ export function compileAgentMemoryContextPack(
     goal: signal.goal,
     summary: `已为这个 Agent 编译 ${memoryCount} 条记忆，供本轮计划、执行和验证使用。`,
     sections,
+  }
+}
+
+export function buildAgentMemoryContextCacheFrame(
+  pack: AgentMemoryContextPack,
+  options: BuildAgentMemoryContextCacheFrameOptions = {},
+): AgentMemoryContextCacheFrame {
+  const maxPromptCharacters = options.maxPromptCharacters ?? 8_000
+  const maxItemsPerSection = options.maxItemsPerSection ?? 4
+  const stablePrefix = [
+    'AgentHub 员工大脑上下文 v1',
+    `员工ID: ${pack.agentId}`,
+    `目标: ${pack.goal}`,
+    '缓存策略: append-only stable-prefix',
+    '使用规则:',
+    '- 保持上述前缀逐字节不变，后续只追加新观察。',
+    '- 只参考和目标相关的经验，失败教训优先用于避坑。',
+    '记忆:',
+    '',
+  ].join('\n')
+  const bodyLines = pack.sections.flatMap((section) => {
+    const itemLines = section.items.slice(0, maxItemsPerSection).map((item) => {
+      const reason = item.reasons[0] ? ` | ${item.reasons[0]}` : ''
+      return `- ${item.title} | 评分 ${item.score}${reason} | ${item.content}`
+    })
+    return [`[${section.title}]`, ...itemLines, '']
+  })
+  const { prompt, truncated } = appendLinesWithinBudget(stablePrefix, bodyLines, maxPromptCharacters)
+
+  return {
+    mode: 'append_only_stable_prefix',
+    stablePrefix,
+    prompt,
+    promptPreview: prompt,
+    byteLength: utf8ByteLength(prompt),
+    truncated,
+    cacheHint: '逐字节复用 stablePrefix，只把本轮新增内容追加到后面。',
   }
 }
 
@@ -500,6 +552,32 @@ function normalizeForSearch(value: string): string {
 
 function sameTerm(a: string, b: string): boolean {
   return normalizeForSearch(a) === normalizeForSearch(b)
+}
+
+function appendLinesWithinBudget(
+  stablePrefix: string,
+  lines: string[],
+  maxPromptCharacters: number,
+): { prompt: string; truncated: boolean } {
+  let prompt = stablePrefix
+  let truncated = false
+  for (const line of lines) {
+    const next = `${prompt}${line}\n`
+    if (next.length > maxPromptCharacters) {
+      truncated = true
+      break
+    }
+    prompt = next
+  }
+  const notice = '[后续记忆因上下文预算限制已裁剪，可在下一轮继续追加。]\n'
+  if (truncated && `${prompt}${notice}`.length <= maxPromptCharacters) {
+    prompt = `${prompt}${notice}`
+  }
+  return { prompt, truncated }
+}
+
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).length
 }
 
 function recencyScore(time: number | undefined, now: number): number {

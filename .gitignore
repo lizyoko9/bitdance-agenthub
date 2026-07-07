@@ -19,7 +19,9 @@
 /out/
 
 # production
-/build
+/build/*
+!/build/
+!/build/icon.ico
 
 # misc
 .DS_Store
@@ -35,6 +37,7 @@ dev-server*.log
 dev-server*.err
 electron*.log
 electron*.err
+/.next-start-logs/
 
 # env files (can opt-in for committing if needed)
 .env*
@@ -55,6 +58,7 @@ __pycache__/
 # AgentHub runtime data
 /.agenthub-data/
 /.agenthub-data-e2e/
+/.external/
 /.tmp/
 /tmp/
 /drizzle/
@@ -71,6 +75,7 @@ __pycache__/
 /release-latest/
 /release-*/
 /.electron-package/
+/.electron-builder-cache/
 
 # Mobile app build outputs
 /apps/mobile/dist/

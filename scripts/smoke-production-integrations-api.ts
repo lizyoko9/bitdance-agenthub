@@ -1492,7 +1492,7 @@ async function main() {
     postRequest('/api/production-integrations/final-acceptance/evidence', {
       category: 'customer_authorization',
       title: 'Smoke rejected sensitive evidence',
-      evidence: ['password=super-secret-smoke-value'],
+      evidence: ['password=fake'],
       operator: 'smoke-runner',
       riskLevel: 'high',
     }),

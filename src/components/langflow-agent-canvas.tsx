@@ -61,10 +61,19 @@ import {
   wouldCreateDirectedCycle,
 } from '@/lib/agent-flow-graph'
 import { applyPreflightStatusToEdges, applyPreflightStatusToNodes } from '@/lib/agent-flow-node-status'
-import { buildAgentFlowRunPlan, type AgentFlowRunPlanStep } from '@/lib/agent-flow-run-plan'
+import {
+  buildAgentFlowRunPlan,
+  type AgentFlowRunPlanHandoff,
+  type AgentFlowRunPlanStep,
+} from '@/lib/agent-flow-run-plan'
 import { validateAgentFlowForRun, type AgentFlowRunIssue } from '@/lib/agent-flow-run-preflight'
+import { deriveCanvasLifecycleReport } from '@/lib/agenthub-canvas-lifecycle-report'
 import { buildSoftwareCommandFlowPorts } from '@/lib/agent-flow-software-command-contracts'
 import { deriveCanvasLifecycleStatus, type CanvasLifecycleStatus } from '@/lib/agenthub-canvas-lifecycle-status'
+import {
+  localizeAgentHubDisplayText,
+  localizeGeneratedAgentProfileName,
+} from '@/lib/agenthub-display-text'
 import {
   agentFlowNodeTemplates,
   cloneTemplatePorts,
@@ -206,6 +215,8 @@ interface CanvasRunRecord {
     stage: number
     incomingContracts: string[]
     outgoingContracts: string[]
+    incomingHandoffs: AgentFlowRunPlanHandoff[]
+    outgoingHandoffs: AgentFlowRunPlanHandoff[]
   }>
 }
 
@@ -298,7 +309,7 @@ const nodeKindLabels: Record<AgentFlowNodeKind, string> = {
   prompt: '提示词',
   model: '模型',
   memory: '记忆',
-  agent: '员工 Agent',
+  agent: '员工智能体',
   tool: '工具 / 软件',
   approval: '人工确认',
   artifact: '交付产物',
@@ -337,7 +348,7 @@ const canvasWorkflowPresets: CanvasWorkflowPreset[] = [
   {
     id: 'report-delivery',
     name: '报告交付流程',
-    description: '客户需求进来后，让员工 Agent 产出一份客户可见报告。',
+    description: '客户需求进来后，让员工智能体产出一份客户可见报告。',
     deliverableTemplateId: 'customer-deliverable',
     artifactType: 'report',
     badge: '报告',
@@ -345,7 +356,7 @@ const canvasWorkflowPresets: CanvasWorkflowPreset[] = [
   {
     id: 'content-video',
     name: '视频交付流程',
-    description: '客户给目标和素材，员工 Agent 只把视频产物交给下游。',
+    description: '客户给目标和素材，员工智能体只把视频产物交给下游。',
     deliverableTemplateId: 'video-deliverable',
     artifactType: 'video',
     badge: '视频',
@@ -353,7 +364,7 @@ const canvasWorkflowPresets: CanvasWorkflowPreset[] = [
   {
     id: 'code-delivery',
     name: '代码交付流程',
-    description: '客户提出开发目标，员工 Agent 交付源码、Diff 或脚本。',
+    description: '客户提出开发目标，员工智能体交付源码、Diff 或脚本。',
     deliverableTemplateId: 'code-deliverable',
     artifactType: 'code',
     badge: '代码',
@@ -478,9 +489,24 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
   const executionPlan = useMemo(() => buildAgentFlowRunPlan({ nodes, edges }), [edges, nodes])
   const executionStages = useMemo(() => buildExecutionStages(nodes, edges), [edges, nodes])
   const livePreflight = useMemo(() => validateAgentFlowForRun({ nodes, edges }), [edges, nodes])
+  const lifecycleReport = useMemo(
+    () =>
+      deriveCanvasLifecycleReport({
+        workflowDraftId,
+        workflowTitle,
+        preflight: livePreflight,
+        lastRun,
+      }),
+    [lastRun, livePreflight, workflowDraftId, workflowTitle],
+  )
   const lifecycleStatus = useMemo(
-    () => deriveCanvasLifecycleStatus({ preflight: livePreflight, hasRun: Boolean(lastRun) }),
-    [lastRun, livePreflight],
+    () =>
+      deriveCanvasLifecycleStatus({
+        preflight: livePreflight,
+        hasRun: Boolean(lastRun),
+        lifecycleReport,
+      }),
+    [lastRun, lifecycleReport, livePreflight],
   )
   const activeConnectionSource = useMemo(() => {
     if (!activeOutputPort) return null
@@ -1030,8 +1056,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               data: {
                 ...node.data,
                 agentId: agent.id,
-                title: agent.name,
-                subtitle: `员工 Agent · ${agent.modelProfileId ?? '未绑定模型'}`,
+                title: localizeGeneratedAgentProfileName(agent.name),
+                subtitle: `员工智能体 · ${agent.modelProfileId ?? '未绑定模型'}`,
                 inputs: agentPorts.inputs,
                 outputs: agentPorts.outputs,
               },
@@ -1201,7 +1227,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
 
       if (!source || !target || !output || !input) return
       if (wouldCreateDirectedCycle(edges, { source: connection.source, target: connection.target })) {
-        setNotice('这条连线不能形成循环：Agent 工作流需要保持从上游到下游的执行顺序。')
+        setNotice('这条连线不能形成循环：智能体工作流需要保持从上游到下游的执行顺序。')
         return
       }
 
@@ -1265,6 +1291,8 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
         stage: step.stage,
         incomingContracts: step.incomingContracts,
         outgoingContracts: step.outgoingContracts,
+        incomingHandoffs: step.incomingHandoffs,
+        outgoingHandoffs: step.outgoingHandoffs,
       })),
     }
     saveCanvasRunHistory(upsertCanvasRunHistory(loadCanvasRunHistory(), run))
@@ -1423,7 +1451,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
             <span>编排工作流</span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            把员工 Agent、工具和交付物连成一条工作流。每条线都代表一种明确产物，下游只接收这条线上的内容。
+            把员工智能体、工具和交付物连成一条工作流。每条线都代表一种明确产物，下游只接收这条线上的内容。
             {initialWorkflowId ? ` 当前流程：${initialWorkflowId}` : ''}
           </p>
         </div>
@@ -1716,7 +1744,7 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
           <Input
             data-testid="component-palette-search"
             className="mb-3 h-9"
-            placeholder="搜索节点、Agent、产物"
+            placeholder="搜索节点、智能体、产物"
             value={templateSearchQuery}
             onChange={(event) => setTemplateSearchQuery(event.target.value)}
           />
@@ -1725,8 +1753,41 @@ function LangflowAgentCanvasInner({ initialWorkflowId }: { initialWorkflowId?: s
               data-testid="active-connection-filter"
               className="mb-3 rounded-lg border bg-primary/5 p-2 text-xs text-muted-foreground"
             >
-              正在连接 <span className="font-medium text-foreground">{artifactLabels[activeConnectionType]}</span>
-              ，这里只显示能接收这种产物的节点。
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  正在连接 <span className="font-medium text-foreground">{artifactLabels[activeConnectionType]}</span>
+                  ，这里只显示能接收这种产物的节点。
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-md border bg-background px-2 py-1 text-[11px] font-medium text-foreground transition hover:border-primary hover:bg-primary/5"
+                  data-testid="active-connection-filter-cancel"
+                  onClick={clearActiveConnection}
+                >
+                  取消
+                </button>
+              </div>
+              {filteredTemplateGroups.length === 0 && (
+                <div
+                  className="mt-2 rounded-md border border-dashed bg-background px-2 py-2 text-[11px] leading-4 text-muted-foreground"
+                  data-testid="active-connection-compatible-empty"
+                >
+                  <div>
+                    没有能接收 {artifactLabels[activeConnectionType]} 的节点。可以先显示全部可接收节点，或修改下游节点的接收类型。
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 rounded-md border bg-background px-2 py-1 text-[11px] font-medium text-foreground transition hover:border-primary hover:bg-primary/5"
+                    data-testid="active-connection-show-compatible"
+                    onClick={() => {
+                      setActiveTemplateCategory('全部')
+                      setTemplateSearchQuery('')
+                    }}
+                  >
+                    显示全部可接收节点
+                  </button>
+                </div>
+              )}
             </div>
           )}
           <div className="mb-3 flex flex-wrap gap-1" data-testid="component-category-filter">
@@ -2305,6 +2366,8 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
                 data-port-compatible={isInputCompatible}
                 data-testid="node-input-port-button"
                 data-input-port-compatible={isInputCompatible}
+                data-input-port-expected-type={input.type}
+                data-active-connection-type={data.connectionType ?? ''}
                 onPointerDownCapture={(event) => handleInputPortPointerDown(event, input)}
                 aria-label={`连接到${input.label}`}
                 onClick={() => handleInputPortClick(input)}
@@ -2318,6 +2381,19 @@ function AgentFlowNodeCard({ id, data, selected }: NodeProps<AgentFlowNode>) {
                 />
                 <span className="min-w-0 flex-1 truncate text-[11px]">{input.label}</span>
                 <ArtifactPill type={input.type} />
+                {data.connectionType && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                      isInputCompatible
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                    data-testid="node-input-port-compatibility-label"
+                  >
+                    {isInputCompatible ? '可接收' : '类型不匹配'}
+                  </span>
+                )}
                 {data.connectionType && isInputCompatible && (
                   <span
                     className="rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white"
@@ -2393,6 +2469,8 @@ function NodeCompactHandleStrip({
           position={Position.Left}
           id={inputHandleId(input)}
           className="!size-3 !border-2 !border-background"
+          title={`接收：${input.label} / ${artifactLabels[input.type]}`}
+          aria-label={`接收端口：${input.label}`}
           style={{
             backgroundColor: artifactColors[input.type],
             left: -7,
@@ -2408,6 +2486,8 @@ function NodeCompactHandleStrip({
           position={Position.Right}
           id={outputHandleId(output)}
           className="!size-3 !border-2 !border-background"
+          title={`输出：${output.label} / ${artifactLabels[output.type]}`}
+          aria-label={`输出端口：${output.label}`}
           style={{
             backgroundColor: artifactColors[output.type],
             pointerEvents: 'auto',
@@ -2490,6 +2570,7 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
   const type = data?.artifactType ?? 'any'
   const handoffStatus = data?.handoffStatus ?? 'pending'
   const handoffStatusLabel = handoffStatus === 'delivered' ? '已交付' : handoffStatus === 'blocked' ? '已阻塞' : '待交付'
+  const edgeRouteLabel = `${data?.sourcePortLabel ?? artifactLabels[type]} -> ${data?.targetPortLabel ?? artifactLabels[type]}`
   const selectThisEdge = (event: PointerEvent<SVGGElement | SVGPathElement>) => {
     event.stopPropagation()
     window.dispatchEvent(new CustomEvent('agenthub:canvas-edge-select', { detail: { edgeId: id } }))
@@ -2521,13 +2602,14 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
         markerEnd={markerEnd}
         style={{ stroke: artifactColors[type], strokeWidth: selected ? 4 : 2.4 }}
       />
-      <foreignObject x={labelX - (selected ? 64 : 38)} y={labelY - 14} width={selected ? 128 : 76} height={28}>
+      <foreignObject x={labelX - (selected ? 95 : 78)} y={labelY - 17} width={selected ? 190 : 156} height={34}>
         {selected && (
           <div
-            className="flex h-7 items-center justify-center gap-1 rounded-full border bg-background px-2 text-[10px] shadow-sm"
+            className="flex h-8 items-center justify-center gap-1 rounded-full border bg-background px-2 text-[10px] shadow-sm"
             data-testid="edge-inline-toolbar"
           >
-            <span className="min-w-0 truncate">{artifactLabels[type]} · {handoffStatusLabel}</span>
+            <span className="min-w-0 flex-1 truncate" data-testid="edge-route-label">{edgeRouteLabel}</span>
+            <span className="shrink-0 text-muted-foreground" data-testid="edge-status-label">{handoffStatusLabel}</span>
             <button
               type="button"
               className="inline-flex size-5 items-center justify-center rounded-full text-destructive transition hover:bg-destructive/10"
@@ -2540,8 +2622,9 @@ function AgentArtifactEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, 
           </div>
         )}
         {!selected && (
-          <div className="rounded-full border bg-background px-2 py-1 text-center text-[10px] shadow-sm">
-            {artifactLabels[type]} · {handoffStatusLabel}
+          <div className="flex items-center justify-center gap-1 rounded-full border bg-background px-2 py-1 text-[10px] shadow-sm">
+            <span className="min-w-0 flex-1 truncate" data-testid="edge-route-label">{edgeRouteLabel}</span>
+            <span className="shrink-0 text-muted-foreground" data-testid="edge-idle-status-label">{handoffStatusLabel}</span>
           </div>
         )}
       </foreignObject>
@@ -2713,7 +2796,7 @@ function NodeConfigPanel({
     return (
       <aside className="rounded-xl border bg-background p-3">
         <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-          选中一个节点后，这里会显示它接收什么、产出什么，以及需要绑定哪个 Agent 或工具。
+          选中一个节点后，这里会显示它接收什么、产出什么，以及需要绑定哪个智能体或工具。
         </div>
       </aside>
     )
@@ -2741,10 +2824,11 @@ function NodeConfigPanel({
 
       <div className="space-y-3">
         <NodeConfigurationSummary node={node} />
+        <NodeFlowSnapshot node={node} nodes={nodes} edges={edges} />
 
         <section data-testid="node-primary-configuration" className="space-y-3">
           {node.data.kind === 'agent' && (
-            <PanelBlock title="选择员工 Agent">
+            <PanelBlock title="选择员工智能体">
               <select
                 className="h-9 w-full rounded-md border bg-background px-2 text-sm"
                 value={node.data.agentId ?? ''}
@@ -2762,7 +2846,7 @@ function NodeConfigPanel({
                 <option value="">未指定，运行时自动选择</option>
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
-                    {agent.name} / {agent.role}
+                    {localizeGeneratedAgentProfileName(agent.name)} / {localizeAgentHubDisplayText(agent.role)}
                   </option>
                 ))}
               </select>
@@ -2889,6 +2973,64 @@ function NodeConfigPanel({
         </details>
       </div>
     </aside>
+  )
+}
+
+function NodeFlowSnapshot({
+  node,
+  nodes,
+  edges,
+}: {
+  node: AgentFlowNode
+  nodes: AgentFlowNode[]
+  edges: AgentFlowEdge[]
+}) {
+  const { incomingHandoffs, outgoingHandoffs } = getNodeHandoffSummary(node, nodes, edges)
+  const incomingLabel = incomingHandoffs.length > 0
+    ? `${incomingHandoffs.length} 条交付线`
+    : node.data.inputs.length > 0
+      ? '等待交付线'
+      : '流程起点'
+  const outgoingLabel = outgoingHandoffs.length > 0
+    ? `${outgoingHandoffs.length} 条交付线`
+    : node.data.outputs.length > 0
+      ? '等待下游'
+      : '终点节点'
+  const customerVisibleLabel = node.data.customerVisible ? '客户可见' : '内部步骤'
+
+  return (
+    <section
+      className="grid grid-cols-3 gap-2"
+      data-testid="node-flow-snapshot"
+      aria-label="节点流转总览"
+    >
+      <div
+        className="min-w-0 rounded-lg border bg-muted/20 px-2 py-2"
+        data-testid="node-flow-snapshot-incoming"
+      >
+        <div className="text-[10px] font-medium text-muted-foreground">收到</div>
+        <div className="mt-1 truncate text-xs font-semibold">{incomingLabel}</div>
+      </div>
+      <div
+        className="min-w-0 rounded-lg border bg-primary/5 px-2 py-2"
+        data-testid="node-flow-snapshot-outgoing"
+      >
+        <div className="text-[10px] font-medium text-muted-foreground">交出</div>
+        <div className="mt-1 truncate text-xs font-semibold">{outgoingLabel}</div>
+      </div>
+      <div
+        className={cn(
+          'min-w-0 rounded-lg border px-2 py-2',
+          node.data.customerVisible
+            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            : 'bg-muted/20',
+        )}
+        data-testid="node-flow-snapshot-customer-visible"
+      >
+        <div className="text-[10px] font-medium text-muted-foreground">客户可见</div>
+        <div className="mt-1 truncate text-xs font-semibold">{customerVisibleLabel}</div>
+      </div>
+    </section>
   )
 }
 
@@ -3118,7 +3260,7 @@ function describeNodeExecutor(node: AgentFlowNode) {
   if (node.data.kind === 'agent') {
     return node.data.agentId
       ? `由 ${node.data.subtitle} 执行，按它配置好的模型、技能、MCP 和 CLI 去完成任务。`
-      : '还没有指定员工，运行前可以自动匹配，也可以在上方选择一个具体 Agent。'
+      : '还没有指定员工，运行前可以自动匹配，也可以在上方选择一个具体智能体。'
   }
   if (node.data.kind === 'tool') {
     return node.data.softwareCommandId
@@ -3262,7 +3404,7 @@ function NodeSetupGuide({ node }: { node: AgentFlowNode }) {
 function getNodeSetupGuide(node: AgentFlowNode) {
   if (node.data.kind === 'agent') {
     return {
-      primaryAction: '选择这个节点由哪个员工 Agent 执行；不选时运行前会自动匹配合适员工。',
+      primaryAction: '选择这个节点由哪个员工智能体执行；不选时运行前会自动匹配合适员工。',
       handoffHint: '从右侧某个输出产物端口拉线，例如视频、代码或报告，下游只会收到这一类产物。',
       steps: [
         '先确认这个员工负责的任务目标。',
@@ -3287,7 +3429,7 @@ function getNodeSetupGuide(node: AgentFlowNode) {
   if (node.data.kind === 'tool') {
     return {
       primaryAction: '选择已经接入的软件、CLI 或 MCP 命令。',
-      handoffHint: '工具节点会把运行结果、数据或文件包交给下游 Agent 或交付物节点。',
+      handoffHint: '工具节点会把运行结果、数据或文件包交给下游智能体或交付物节点。',
       steps: [
         '先在工具连接里接入软件能力。',
         '再回到这里绑定具体命令。',
@@ -3303,7 +3445,7 @@ function getNodeSetupGuide(node: AgentFlowNode) {
       steps: [
         '用于登录、发送消息、删除文件、付款等敏感动作前。',
         '描述清楚用户需要确认什么。',
-        '确认后再让下游 Agent 执行。',
+        '确认后再让下游智能体执行。',
       ],
     }
   }
@@ -3515,6 +3657,28 @@ function RunTimelinePanel({
                   ))}
                 </span>
               )}
+              {((step.incomingHandoffs ?? []).length > 0 || (step.outgoingHandoffs ?? []).length > 0) && (
+                <span className="mt-1 grid gap-1" data-testid="run-timeline-step-handoffs">
+                  {(step.incomingHandoffs ?? []).slice(0, 2).map((handoff) => (
+                    <span
+                      key={`incoming-handoff-${handoff.edgeId}`}
+                      className="block truncate rounded border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      data-run-handoff-artifact={handoff.artifactType}
+                    >
+                      收到 {handoff.artifactLabel}：{handoff.sourcePortLabel} → {handoff.targetPortLabel}
+                    </span>
+                  ))}
+                  {(step.outgoingHandoffs ?? []).slice(0, 2).map((handoff) => (
+                    <span
+                      key={`outgoing-handoff-${handoff.edgeId}`}
+                      className="block truncate rounded border border-emerald-500/20 bg-emerald-500/5 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      data-run-handoff-artifact={handoff.artifactType}
+                    >
+                      交出 {handoff.artifactLabel}：{handoff.sourcePortLabel} → {handoff.targetPortLabel}
+                    </span>
+                  ))}
+                </span>
+              )}
             </span>
           </button>
         ))}
@@ -3699,6 +3863,7 @@ function ActiveConnectionBanner({
       <span className="shrink-0 text-muted-foreground">正在连接</span>
       <ArtifactPill type={activeConnectionType} />
       <span className="min-w-0 truncate font-medium">{sourceLabel}</span>
+      <span className="hidden shrink-0 text-muted-foreground sm:inline">请选择可接收的输入口</span>
       <Button
         type="button"
         size="sm"
@@ -3820,7 +3985,7 @@ function getNodeConfigurationState(node: { data: AgentFlowNodeData }): NodeConfi
     return {
       status: 'missing',
       label: '待选择员工',
-      detail: '运行前需要绑定一个员工 Agent。',
+      detail: '运行前需要绑定一个员工智能体。',
     }
   }
 
@@ -4074,7 +4239,7 @@ function createCanvasWorkflowPresetDraft(
       description: '客户目标、素材、约束和上一轮消息都会从这里进入流程。',
     }, inputId),
     createNodeFromTemplate('employee-agent', { x: 420, y: 140 }, {
-      title: `${preset.badge} Agent`,
+      title: `${preset.badge}智能体`,
       description: `根据客户目标完成任务，并产出${artifactLabels[preset.artifactType]}。`,
       outputs: [{ id: preset.artifactType, label: artifactLabels[preset.artifactType], type: preset.artifactType }],
     }, agentId),

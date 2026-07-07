@@ -9,6 +9,8 @@ describe('agent brain loop panel', () => {
 
     expect(source).toContain('<BrainLoopPanel items={detail.brainLoop} />')
     expect(source).toContain('function BrainLoopPanel')
+    expect(source).toContain('title="员工大脑"')
+    expect(source).toContain('任务记忆、长期经验、工具经验、失败教训和工作手册')
     expect(source).toContain('脑内工作流')
     expect(source).not.toContain('PSM')
   })

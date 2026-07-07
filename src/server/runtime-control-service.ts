@@ -1790,7 +1790,7 @@ export function resolveAdbCommand(): ResolvedAdbCommand {
       candidatePaths,
     }
   }
-  const discoveredCommand = candidatePaths.find((candidate) => existsSync(candidate))
+  const discoveredCommand = candidatePaths.find((candidate) => runtimePathExists(candidate))
   if (discoveredCommand) {
     return {
       command: discoveredCommand,
@@ -1814,6 +1814,24 @@ export function resolveAdbCommand(): ResolvedAdbCommand {
     argsPrefixEnvVar: ADB_ARGS_PREFIX_ENV,
     searchRootsEnvVar: ADB_SEARCH_ROOTS_ENV,
     candidatePaths,
+  }
+}
+
+type RuntimeFsModule = {
+  existsSync?: (candidatePath: string) => boolean
+}
+
+type ProcessWithBuiltinModule = NodeJS.Process & {
+  getBuiltinModule?: (id: string) => unknown
+}
+
+function runtimePathExists(candidatePath: string): boolean {
+  try {
+    const runtimeFs = (process as ProcessWithBuiltinModule).getBuiltinModule?.('node:fs') as RuntimeFsModule | undefined
+
+    return runtimeFs?.existsSync?.(candidatePath) === true
+  } catch {
+    return false
   }
 }
 
@@ -1898,16 +1916,25 @@ function adbCandidatesForRoot(root: string): string[] {
   ]
   const candidates: string[] = []
   for (const subdir of subdirs) {
-    const base = subdir ? path.join(root, subdir) : root
     for (const name of directNames) {
-      candidates.push(path.join(base, name))
+      candidates.push(appendAdbPathSegments(root, subdir, name))
     }
   }
   if (process.platform === 'win32') {
-    candidates.push(path.join(root, 'HD-Adb.exe'))
-    candidates.push(path.join(root, 'adb_server.exe'))
+    candidates.push(appendAdbPathSegments(root, 'HD-Adb.exe'))
+    candidates.push(appendAdbPathSegments(root, 'adb_server.exe'))
   }
   return candidates
+}
+
+function appendAdbPathSegments(root: string, ...segments: string[]): string {
+  let result = root
+  for (const segment of segments) {
+    if (!segment) continue
+    const needsSeparator = !/[\\/]$/.test(result)
+    result = `${result}${needsSeparator ? path.sep : ''}${segment}`
+  }
+  return result
 }
 
 function parsePathList(value: string | undefined): string[] {

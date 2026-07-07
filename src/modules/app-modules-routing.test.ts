@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { getDefaultModuleLayout } from '@/lib/agenthub-module-catalog'
 import { buildAgentHubModuleManagerView } from '@/lib/agenthub-module-manager'
+import { assertFreeProductCopy } from '@/lib/free-product-policy'
 
 import {
   advancedAppModules,
@@ -75,6 +76,12 @@ describe('app module routing', () => {
     ])
   })
 
+  it('keeps visible module copy aligned with the free-only product policy', () => {
+    for (const appModule of [...primaryAppModules, ...advancedAppModules]) {
+      expect(() => assertFreeProductCopy(`${appModule.label}\n${appModule.description}`)).not.toThrow()
+    }
+  })
+
   it('keeps primary navigation aligned with the default module block layout', () => {
     expect(primaryAppModules.map((module) => module.id)).toEqual(getDefaultModuleLayout().map((module) => module.id))
   })
@@ -89,7 +96,28 @@ describe('app module routing', () => {
     expect(advancedAppModules.map((module) => module.id)).toEqual([])
   })
 
-  it('can compose optional modules with their required dependencies', () => {
-    expect(getEnabledAppModules(['memory']).map((module) => module.id)).toEqual(['models', 'agents', 'memory'])
+  it('keeps the default workspace modules visible when a workbench block is added', () => {
+    expect(getEnabledAppModules(['analytics']).map((module) => module.id)).toEqual([
+      ...getDefaultModuleLayout().map((module) => module.id),
+      'analytics',
+    ])
+  })
+
+  it('routes the retired memory module back into the agent settings module', () => {
+    expect(getEnabledAppModules(['memory']).map((module) => module.id)).toEqual(
+      getDefaultModuleLayout().map((module) => module.id),
+    )
+    expect(normalizeAppModuleId('memory')).toBe('agents')
+  })
+
+  it('routes retired config and delivery-check modules back to the workbench without loading their old pages', () => {
+    const source = readFileSync(join(process.cwd(), 'src/modules/app-modules.tsx'), 'utf8')
+
+    expect(normalizeAppModuleId('configops')).toBe('workbench')
+    expect(normalizeAppModuleId('production')).toBe('workbench')
+    expect(getAppModule('configops').id).toBe('workbench')
+    expect(getAppModule('production').id).toBe('workbench')
+    expect(source).not.toContain('ConfigOpsCenter')
+    expect(source).not.toContain('ProductionIntegrationsCenter')
   })
 })

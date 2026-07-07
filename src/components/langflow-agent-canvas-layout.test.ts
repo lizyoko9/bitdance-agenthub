@@ -79,6 +79,29 @@ describe('Langflow agent canvas layout', () => {
     expect(timelineSource).toContain('data-run-contract-direction="outgoing"')
   })
 
+  it('stores and displays exact artifact handoffs inside each run timeline step', () => {
+    const source = readCanvasSource()
+    const runPreflightSource = source.slice(
+      source.indexOf('const runPreflight = useCallback'),
+      source.indexOf('const saveCanvasDraftToLibrary'),
+    )
+    const timelineSource = source.slice(
+      source.indexOf('function RunTimelinePanel'),
+      source.indexOf('function RunResultSummary'),
+    )
+
+    expect(source).toContain('incomingHandoffs:')
+    expect(source).toContain('outgoingHandoffs:')
+    expect(runPreflightSource).toContain('incomingHandoffs: step.incomingHandoffs')
+    expect(runPreflightSource).toContain('outgoingHandoffs: step.outgoingHandoffs')
+    expect(timelineSource).toContain('(step.incomingHandoffs ?? []).slice(0, 2)')
+    expect(timelineSource).toContain('(step.outgoingHandoffs ?? []).slice(0, 2)')
+    expect(timelineSource).toContain('data-run-handoff-artifact')
+    expect(timelineSource).toContain('handoff.artifactLabel')
+    expect(timelineSource).toContain('handoff.sourcePortLabel')
+    expect(timelineSource).toContain('handoff.targetPortLabel')
+  })
+
   it('shows local run evidence directly on completed canvas nodes', () => {
     const source = readCanvasSource()
     const nodesForCanvasSource = source.slice(
@@ -113,7 +136,7 @@ describe('Langflow agent canvas layout', () => {
     const source = readCanvasSource()
 
     expect(source).toContain('<span>编排工作流</span>')
-    expect(source).toContain('把员工 Agent、工具和交付物连成一条工作流。')
+    expect(source).toContain('把员工智能体、工具和交付物连成一条工作流。')
     expect(source).toContain('新建流程')
     expect(source).toContain('检查并试运行')
     expect(source).not.toContain('<Badge variant="secondary">节点编排</Badge>')
@@ -437,7 +460,7 @@ describe('Langflow agent canvas layout', () => {
 
     expect(source).toContain('templateSearchQuery')
     expect(source).toContain('data-testid="component-palette-search"')
-    expect(source).toContain('placeholder="搜索节点、Agent、产物"')
+    expect(source).toContain('placeholder="搜索节点、智能体、产物"')
     expect(source).toContain('matchesTemplateSearch')
   })
 
@@ -505,6 +528,33 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('activeConnectionType')
     expect(source).toContain('data-testid="active-connection-filter"')
     expect(source).toContain('正在连接')
+  })
+
+  it('shows an empty compatible-node state with a cancel action while connecting from an output', () => {
+    const source = readCanvasSource()
+    const paletteSource = source.slice(
+      source.indexOf('data-testid="active-connection-filter"'),
+      source.indexOf('data-testid="component-category-filter"'),
+    )
+
+    expect(paletteSource).toContain('data-testid="active-connection-compatible-empty"')
+    expect(paletteSource).toContain('filteredTemplateGroups.length === 0')
+    expect(paletteSource).toContain('没有能接收')
+    expect(paletteSource).toContain('data-testid="active-connection-filter-cancel"')
+    expect(paletteSource).toContain('onClick={clearActiveConnection}')
+  })
+
+  it('lets users restore all compatible palette nodes when search or category filters hide them', () => {
+    const source = readCanvasSource()
+    const paletteSource = source.slice(
+      source.indexOf('data-testid="active-connection-filter"'),
+      source.indexOf('data-testid="component-category-filter"'),
+    )
+
+    expect(paletteSource).toContain('data-testid="active-connection-show-compatible"')
+    expect(paletteSource).toContain('显示全部可接收节点')
+    expect(paletteSource).toContain("setActiveTemplateCategory('全部')")
+    expect(paletteSource).toContain("setTemplateSearchQuery('')")
   })
 
   it('lets users click a node output port to choose the exact artifact type for the next node', () => {
@@ -605,6 +655,27 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="node-input-port-action-hint"')
   })
 
+  it('shows clear artifact routing guidance on the banner and each input port', () => {
+    const source = readCanvasSource()
+    const nodeCardSource = source.slice(
+      source.indexOf('function AgentFlowNodeCard'),
+      source.indexOf('function NodeCompactHandleStrip'),
+    )
+    const bannerSource = source.slice(
+      source.indexOf('function ActiveConnectionBanner'),
+      source.indexOf('function PreflightIssuePanel'),
+    )
+
+    expect(bannerSource).toContain('请选择可接收的输入口')
+    expect(bannerSource).toContain('sourceNodeTitle')
+    expect(bannerSource).toContain('sourceOutputLabel')
+    expect(bannerSource).toContain('artifactLabels[activeConnectionType]')
+    expect(nodeCardSource).toContain('data-testid="node-input-port-compatibility-label"')
+    expect(nodeCardSource).toContain("isInputCompatible ? '可接收' : '类型不匹配'")
+    expect(nodeCardSource).toContain('data-input-port-expected-type={input.type}')
+    expect(nodeCardSource).toContain("data-active-connection-type={data.connectionType ?? ''}")
+  })
+
   it('leaves artifact connection mode when users click the empty canvas', () => {
     const source = readCanvasSource()
 
@@ -688,6 +759,19 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('data-testid="node-compact-handle-strip"')
   })
 
+  it('keeps collapsed node handles understandable with port labels', () => {
+    const source = readCanvasSource()
+    const compactHandleSource = source.slice(
+      source.indexOf('function NodeCompactHandleStrip'),
+      source.indexOf('function NodeCardPortContracts'),
+    )
+
+    expect(compactHandleSource).toContain('title={`接收：${input.label} / ${artifactLabels[input.type]}`}')
+    expect(compactHandleSource).toContain('aria-label={`接收端口：${input.label}`}')
+    expect(compactHandleSource).toContain('title={`输出：${output.label} / ${artifactLabels[output.type]}`}')
+    expect(compactHandleSource).toContain('aria-label={`输出端口：${output.label}`}')
+  })
+
   it('lets users select the matching edge from node handoff summaries', () => {
     const source = readCanvasSource()
 
@@ -735,6 +819,27 @@ describe('Langflow agent canvas layout', () => {
     expect(source).toContain('testId="node-business-outputs"')
     expect(source).toContain('data-testid={testId}')
     expect(source).toContain('describeNodeExecutor')
+  })
+
+  it('shows a compact node flow snapshot before detailed node settings', () => {
+    const source = readCanvasSource()
+    const nodePanelSource = source.slice(
+      source.indexOf('function NodeConfigPanel'),
+      source.indexOf('function NodePrimaryOutputSelector'),
+    )
+
+    expect(source).toContain('function NodeFlowSnapshot')
+    expect(nodePanelSource).toContain('NodeFlowSnapshot node={node} nodes={nodes} edges={edges}')
+    expect(nodePanelSource.indexOf('NodeFlowSnapshot node={node} nodes={nodes} edges={edges}')).toBeLessThan(
+      nodePanelSource.indexOf('data-testid="node-primary-configuration"'),
+    )
+    expect(source).toContain('data-testid="node-flow-snapshot"')
+    expect(source).toContain('data-testid="node-flow-snapshot-incoming"')
+    expect(source).toContain('data-testid="node-flow-snapshot-outgoing"')
+    expect(source).toContain('data-testid="node-flow-snapshot-customer-visible"')
+    expect(source).toContain('收到')
+    expect(source).toContain('交出')
+    expect(source).toContain('客户可见')
   })
 
   it('keeps node inspector focused on executor and handoff before optional text fields', () => {
@@ -960,6 +1065,33 @@ describe('Langflow agent canvas layout', () => {
     expect(edgeSource).toContain('data-edge-handoff-status={handoffStatus}')
     expect(edgeSource).toContain("handoffStatus === 'delivered' ? '已交付'")
     expect(edgeSource).toContain("handoffStatus === 'blocked' ? '已阻塞'")
+  })
+
+  it('shows the exact source and target port labels directly on each handoff edge', () => {
+    const source = readCanvasSource()
+    const edgeSource = source.slice(
+      source.indexOf('function AgentArtifactEdge'),
+      source.indexOf('function EdgeConfigPanel'),
+    )
+
+    expect(edgeSource).toContain('const edgeRouteLabel')
+    expect(edgeSource).toContain("data?.sourcePortLabel ?? artifactLabels[type]")
+    expect(edgeSource).toContain("data?.targetPortLabel ?? artifactLabels[type]")
+    expect(edgeSource).toContain('data-testid="edge-route-label"')
+    expect(edgeSource).toContain('{edgeRouteLabel}')
+  })
+
+  it('shows handoff route and delivery status together on selected and idle edges', () => {
+    const source = readCanvasSource()
+    const edgeSource = source.slice(
+      source.indexOf('function AgentArtifactEdge'),
+      source.indexOf('function EdgeConfigPanel'),
+    )
+
+    expect(edgeSource).toContain('data-testid="edge-route-label"')
+    expect(edgeSource).toContain('data-testid="edge-status-label"')
+    expect(edgeSource).toContain('data-testid="edge-idle-status-label"')
+    expect(edgeSource).toContain('{handoffStatusLabel}')
   })
 
   it('lets users click a handoff preview card to inspect the actual canvas edge', () => {

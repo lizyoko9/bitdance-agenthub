@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -23,6 +26,13 @@ describe('agenthub module catalog', () => {
     expect(AGENTHUB_MODULE_BLOCKS.every((module) => module.access === 'free')).toBe(true)
   })
 
+  it('models module access as free-only instead of a free-or-paid product tier', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/lib/agenthub-module-catalog.ts'), 'utf8')
+
+    expect(source).toContain("export type AgentHubModuleAccess = 'free'")
+    expect(source).not.toContain("'free' | 'paid'")
+  })
+
   it('normalizes retired orchestration entries into the canonical canvas module', () => {
     expect(normalizeModuleBlockId('workflows')).toBe('agent-canvas')
     expect(normalizeModuleBlockId('agent-orchestration')).toBe('agent-canvas')
@@ -30,13 +40,45 @@ describe('agenthub module catalog', () => {
     expect(normalizeModuleBlockId('infinite-canvas')).toBe('agent-canvas')
   })
 
-  it('activates requested modules with dependencies in dependency-first order', () => {
-    const activation = resolveModuleActivation(['memory'])
+  it('keeps agent memory inside the agent module instead of exposing a standalone memory block', () => {
+    expect(normalizeModuleBlockId('memory')).toBe('agents')
+    expect(AGENTHUB_MODULE_BLOCKS.map((module) => module.id)).not.toContain('memory')
+  })
+
+  it('documents memory and learning as an agent-internal employee brain, not a standalone module', () => {
+    const moduleDoc = readFileSync(resolve(process.cwd(), 'docs/app-module-system.md'), 'utf8')
+    const reportDoc = readFileSync(resolve(process.cwd(), 'docs/reference/agent-memory-learning-report.md'), 'utf8')
+
+    expect(moduleDoc).toContain('记忆和学习不注册成独立主模块')
+    expect(moduleDoc).toContain('旧的 `memory` 入口统一归一到 `agents`')
+    expect(moduleDoc).toContain('自我校准')
+    expect(moduleDoc).toContain('反思学习')
+    expect(moduleDoc).not.toContain('`交付物`、`记忆管理`、`数据分析`')
+
+    expect(reportDoc).toContain('用户看到的是“员工大脑”')
+    expect(reportDoc).toContain('自我校准')
+    expect(reportDoc).toContain('反思学习')
+    expect(reportDoc).not.toContain('Memory Center')
+    expect(reportDoc).not.toContain('Agent Factory')
+    expect(reportDoc).not.toContain('PSM')
+  })
+
+  it('keeps the default layout visible when optional modules are added', () => {
+    const activation = resolveModuleActivation(['analytics'])
 
     expect(activation.valid).toBe(true)
-    expect(activation.enabledIds).toEqual(['models', 'agents', 'memory'])
+    expect(activation.enabledIds).toEqual(['analytics'])
     expect(activation.disabledIds).toContain('agent-canvas')
-    expect(getEnabledModuleLayout(['memory']).map((module) => module.id)).toEqual(['models', 'agents', 'memory'])
+    expect(getEnabledModuleLayout(['analytics']).map((module) => module.id)).toEqual([
+      'workbench',
+      'conversations',
+      'agents',
+      'agent-canvas',
+      'skills',
+      'models',
+      'tools',
+      'analytics',
+    ])
   })
 
   it('normalizes legacy module ids before activation', () => {
@@ -62,7 +104,7 @@ describe('agenthub module catalog', () => {
         id: 'custom-paid',
         label: '付费模块',
         layer: 'extension',
-        access: 'paid',
+        access: 'paid' as 'free',
         defaultEnabled: true,
         dependencyIds: ['missing-module'],
       },

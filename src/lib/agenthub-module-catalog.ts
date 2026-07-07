@@ -7,7 +7,7 @@ export type AgentHubModuleLayer =
   | 'insight'
   | 'extension'
 
-export type AgentHubModuleAccess = 'free' | 'paid'
+export type AgentHubModuleAccess = 'free'
 
 export type AgentHubModuleBlock = {
   id: string
@@ -98,14 +98,6 @@ export const AGENTHUB_MODULE_BLOCKS: AgentHubModuleBlock[] = [
     dependencyIds: ['agent-canvas'],
   },
   {
-    id: 'memory',
-    label: '记忆管理',
-    layer: 'employee',
-    access: 'free',
-    defaultEnabled: false,
-    dependencyIds: ['agents'],
-  },
-  {
     id: 'analytics',
     label: '数据分析',
     layer: 'insight',
@@ -117,7 +109,9 @@ export const AGENTHUB_MODULE_BLOCKS: AgentHubModuleBlock[] = [
 
 export function normalizeModuleBlockId(id: string): string {
   if (orchestrationAliases.has(id)) return 'agent-canvas'
-  if (['employee-factory', 'context', 'capabilities', 'collaboration', 'governance'].includes(id)) return 'agents'
+  if (['employee-factory', 'context', 'capabilities', 'collaboration', 'governance', 'memory'].includes(id)) {
+    return 'agents'
+  }
   return id
 }
 
@@ -128,11 +122,11 @@ export function getDefaultModuleLayout(): AgentHubModuleBlock[] {
 export function getEnabledModuleLayout(requestedModuleIds?: string[]): AgentHubModuleBlock[] {
   if (!requestedModuleIds) return getDefaultModuleLayout()
 
-  const activation = resolveModuleActivation(requestedModuleIds)
+  const defaultModuleIds = getDefaultModuleLayout().map((moduleBlock) => moduleBlock.id)
+  const activation = resolveModuleActivation([...defaultModuleIds, ...requestedModuleIds])
+  const enabledIdSet = new Set(activation.enabledIds)
 
-  return activation.enabledIds
-    .map((moduleId) => AGENTHUB_MODULE_BLOCKS.find((moduleBlock) => moduleBlock.id === moduleId))
-    .filter((moduleBlock): moduleBlock is AgentHubModuleBlock => Boolean(moduleBlock))
+  return AGENTHUB_MODULE_BLOCKS.filter((moduleBlock) => enabledIdSet.has(moduleBlock.id))
 }
 
 export function resolveModuleActivation(requestedModuleIds: string[]): AgentHubModuleActivationReport {
@@ -149,7 +143,7 @@ export function resolveModuleActivation(requestedModuleIds: string[]): AgentHubM
       return false
     }
 
-    if (moduleBlock.access !== 'free') {
+    if (!hasFreeModuleAccess(moduleBlock)) {
       blockers.push(`${normalizedModuleId} cannot be paid gated`)
       return false
     }
@@ -201,7 +195,7 @@ export function validateModuleComposition(modules: AgentHubModuleBlock[]): Agent
   const blockers: string[] = []
 
   for (const moduleBlock of modules) {
-    if (moduleBlock.access !== 'free') {
+    if (!hasFreeModuleAccess(moduleBlock)) {
       blockers.push(`${moduleBlock.id} cannot be paid gated`)
     }
 
@@ -217,4 +211,8 @@ export function validateModuleComposition(modules: AgentHubModuleBlock[]): Agent
     valid: blockers.length === 0,
     blockers,
   }
+}
+
+function hasFreeModuleAccess(moduleBlock: Pick<AgentHubModuleBlock, 'access'>): boolean {
+  return String(moduleBlock.access) === 'free'
 }

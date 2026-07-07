@@ -6169,6 +6169,15 @@ describe('control plane service', () => {
         'task_scheduler',
       ]),
     )
+    const seededHelpCopy = seeded.surfaces
+      .flatMap((row) => [row.title, row.description, row.route, row.docHref])
+      .join('\n')
+    expect(seededHelpCopy).toContain('智能体')
+    expect(seededHelpCopy).toContain('员工大脑')
+    expect(seededHelpCopy).toContain('工作台')
+    expect(seededHelpCopy).not.toContain('Agent Factory')
+    expect(seededHelpCopy).not.toContain('Memory Center')
+    expect(seededHelpCopy).not.toContain('ConfigOps Center')
     expect(seeded.surfaces.every((row) => row.questionButtonLabel === '?')).toBe(true)
 
     const agentFactorySurface = await helpCenterService.listHelpCenterSurfaces({
@@ -6176,7 +6185,7 @@ describe('control plane service', () => {
     })
     expect(agentFactorySurface).toHaveLength(1)
     expect(agentFactorySurface[0]).toMatchObject({
-      route: '/factory',
+      route: '/agents',
       docHref: '/docs/user-guide/agent-factory.md',
     })
 
@@ -6186,9 +6195,10 @@ describe('control plane service', () => {
     })
     expect(agentQuestion).toHaveLength(1)
     expect(agentQuestion[0]).toMatchObject({
-      label: 'Open Agent Factory help',
+      label: '打开智能体帮助',
       docHref: '/docs/user-guide/agent-factory.md',
     })
+    expect(agentQuestion[0].body).toContain('员工大脑')
 
     const tooltips = await helpCenterService.listHelpCenterItems({ itemType: 'tooltip' })
     expect(tooltips).toHaveLength(helpCenterService.getDefaultHelpSurfaceCount())
@@ -12518,6 +12528,129 @@ describe('control plane service', () => {
       where: inArray(schema.workflowNodeRuns.nodeId, [nodeA, nodeB]),
     })
     expect(nodeRuns.filter((row) => row.workflowRunId === run.id)).toHaveLength(2)
+  })
+
+  it('includes precise artifact handoffs in workflow run snapshots', async () => {
+    const suffix = Date.now()
+    const producerNodeId = `node_video_producer_${suffix}`
+    const deliveryNodeId = `node_video_delivery_${suffix}`
+    const workflow = await service.createWorkflow({
+      name: 'Video artifact routing workflow',
+      status: 'active',
+      nodes: [
+        {
+          id: producerNodeId,
+          type: 'artifact_transform',
+          position: { x: 0, y: 0 },
+          config: { label: '产物生产节点' },
+          outputContract: {
+            outputs: [
+              { key: 'final_video', type: 'video', label: '成片视频' },
+              { key: 'source_code', type: 'code', label: '工程源码' },
+            ],
+          },
+        },
+        {
+          id: deliveryNodeId,
+          type: 'agent_employee',
+          position: { x: 240, y: 0 },
+          config: { label: '交付节点' },
+          inputMapping: {
+            inputs: [{ key: 'video', type: 'video', label: '视频文件' }],
+            acceptedArtifactTypes: ['video'],
+          },
+        },
+      ],
+      edges: [
+        {
+          id: `edge_video_only_${suffix}`,
+          sourceNodeId: producerNodeId,
+          targetNodeId: deliveryNodeId,
+          sourceHandle: 'artifact:final_video',
+          targetHandle: 'in:video',
+          mapping: {
+            outputKey: 'final_video',
+            targetInputKey: 'video',
+            artifactType: 'video',
+            artifactOnly: true,
+          },
+        },
+      ],
+    })
+    created.workflows.push(workflow.id)
+
+    const { db, schema } = dbClient
+    const startedAt = Date.now()
+    const workflowRunId = `wr_video_handoff_${suffix}`
+    await db.insert(schema.workflowRuns).values({
+      id: workflowRunId,
+      workflowId: workflow.id,
+      status: 'running',
+      input: { goal: '只把视频交给下游' },
+      output: null,
+      error: null,
+      startedAt,
+      finishedAt: null,
+    })
+    await db.insert(schema.workflowNodeRuns).values([
+      {
+        id: `wnr_video_producer_${suffix}`,
+        workflowRunId,
+        nodeId: producerNodeId,
+        status: 'complete',
+        progressStatus: 'complete',
+        currentStep: '产出了视频和源码。',
+        output: {
+          outputArtifacts: {
+            final_video: 'artifact_video',
+            source_code: 'artifact_code',
+          },
+          final_video: { fileName: 'final.mp4' },
+          source_code: { fileName: 'project.zip' },
+        },
+        error: null,
+        startedAt,
+        finishedAt: startedAt + 1,
+      },
+      {
+        id: `wnr_video_delivery_${suffix}`,
+        workflowRunId,
+        nodeId: deliveryNodeId,
+        status: 'queued',
+        progressStatus: 'queued',
+        currentStep: null,
+        output: null,
+        error: null,
+        startedAt,
+        finishedAt: null,
+      },
+    ])
+
+    const snapshot = await service.getWorkflowRunSnapshot(workflowRunId)
+
+    expect(snapshot.artifactHandoffs).toEqual([
+      expect.objectContaining({
+        edgeId: `edge_video_only_${suffix}`,
+        sourceNodeId: producerNodeId,
+        targetNodeId: deliveryNodeId,
+        outputKey: 'final_video',
+        targetInputKey: 'video',
+        artifactType: 'video',
+        artifactLabel: '视频',
+        sourcePortLabel: '成片视频',
+        targetPortLabel: '视频文件',
+        contract: '视频: 成片视频 -> 视频文件',
+        artifactId: 'artifact_video',
+      }),
+    ])
+    expect(snapshot.artifactHandoffs[0].selectedArtifact).toEqual({
+      outputKey: 'final_video',
+      artifactType: 'video',
+      artifactId: 'artifact_video',
+      value: { fileName: 'final.mp4' },
+    })
+    expect(JSON.stringify(snapshot.artifactHandoffs)).not.toContain('source_code')
+    expect(JSON.stringify(snapshot.artifactHandoffs)).not.toContain('artifact_code')
   })
 
   it('enforces resource locks and resolves approvals', async () => {
@@ -19218,7 +19351,7 @@ describe('control plane service', () => {
         'verify_output_contract',
         'checkpoint_ready_state',
         'context_snapshot',
-        'cli_dry_run',
+        'cli_profiles',
         'complete',
         'artifact_validation',
         'reflect_and_learn',

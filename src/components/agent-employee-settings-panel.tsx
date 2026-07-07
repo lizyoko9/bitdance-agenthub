@@ -437,8 +437,8 @@ export function AgentEmployeeSettingsPanel({
 
             <SettingsBlock
               icon={<BrainCircuit className="size-4 text-primary" />}
-              title="记忆学习"
-              description="默认记录项目经验和客户偏好；新流程沉淀为长期经验前需要用户确认。"
+              title="员工大脑"
+              description="管理这个员工的任务记忆、长期经验、工具经验、失败教训和工作手册，也包含自我校准和反思学习；先私有，确认后再共享。"
             >
               {memoryLoading ? (
                 <LoadingLine label="正在读取员工大脑" />

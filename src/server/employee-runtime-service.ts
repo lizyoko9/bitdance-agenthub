@@ -82,6 +82,12 @@ import {
   newEmployeeRunId,
   newRuntimeCheckpointId,
 } from '@/server/ids'
+import {
+  buildEmployeeRuntimeBrainOutput,
+  type EmployeeRuntimeBrainReflection,
+} from '@/lib/employee-runtime-brain-output'
+import { buildEmployeeRunCliExecutionSummary } from '@/lib/employee-run-cli-execution-summary'
+import type { AgentMemoryContextPack } from '@/lib/agent-psm-memory-core'
 
 export interface StartEmployeeRunArgs {
   agentProfileId: string
@@ -143,6 +149,7 @@ export interface RuntimeNextAction {
 
 interface RuntimeContext {
   retrievedMemories: RetrievedMemory[]
+  memoryContextPack: AgentMemoryContextPack | null
   computerSession: ComputerSessionRow | null
   loopTrace: RuntimeLoopStepTrace[]
   runtimeControlActionIds: string[]
@@ -232,6 +239,7 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
   const activeRun = await getRequiredEmployeeRun(runId)
   const context: RuntimeContext = {
     retrievedMemories: [],
+    memoryContextPack: null,
     computerSession: await startComputerSessionForEmployeeRun({ run: activeRun, agent }),
     loopTrace: [],
     runtimeControlActionIds: [],
@@ -280,11 +288,29 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
     employeeRun: await getRequiredEmployeeRun(runId),
     agent,
   })
+  const cliExecutionSummary = buildEmployeeRunCliExecutionSummary(cliRuns)
   if (cliRuns.length > 0) {
-    await recordEmployeeEvent(runId, 'phase', 'cli_dry_run', 'Configured CLI profiles were rendered as safe dry-runs.', {
-      cliRunIds: cliRuns.map((row) => row.id),
-      blockedCliRunIds: cliRuns.filter((row) => row.status === 'blocked').map((row) => row.id),
-    })
+    await recordEmployeeEvent(
+      runId,
+      'phase',
+      'cli_profiles',
+      'Configured CLI profiles were evaluated; low-risk authorized profiles can execute through AgentHub runner.',
+      {
+        cliRunIds: cliRuns.map((row) => row.id),
+        executedCliRunIds: cliRuns
+          .filter((row) => row.mode === 'execute' && ['complete', 'failed'].includes(row.status))
+          .map((row) => row.id),
+        plannedCliRunIds: cliRuns.filter((row) => row.status === 'planned').map((row) => row.id),
+        blockedCliRunIds: cliRuns.filter((row) => row.status === 'blocked').map((row) => row.id),
+      },
+    )
+    await recordEmployeeEvent(
+      runId,
+      'phase',
+      'cli_execution_summary',
+      'CLI execution evidence was summarized for artifact review.',
+      cliExecutionSummary as unknown as JsonObject,
+    )
   }
 
   const output: JsonObject = {
@@ -292,10 +318,19 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
     agentProfileId: agent.id,
     requiredArtifact: agent.outputContract,
     retrievedMemoryIds: context.retrievedMemories.map(({ item }) => item.id),
+    employeeBrain: buildEmployeeRuntimeBrainOutput({
+      owner: {
+        agentId: agent.id,
+        agentName: agent.name,
+        role: agent.role,
+      },
+      contextPack: context.memoryContextPack,
+    }) as unknown as JsonObject,
     contextSnapshotId: contextSnapshot.id,
     promptTemplateVersionId: contextSnapshot.promptTemplateVersionId,
     runtimeEnvironment: runtimeEnvironmentSummary,
     cliRunIds: cliRuns.map((row) => row.id),
+    cliExecutionSummary: cliExecutionSummary as unknown as JsonObject,
     runtimeControlActionIds: context.runtimeControlActionIds,
     loopTrace: context.loopTrace,
     nextRuntimeAction: decideNextRuntimeAction(agent, cliRuns),
@@ -393,6 +428,23 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
     agent,
     memoryEvolution: learning.memoryEvolution,
   })
+  const employeeBrain = buildEmployeeRuntimeBrainOutput({
+    owner: {
+      agentId: agent.id,
+      agentName: agent.name,
+      role: agent.role,
+    },
+    contextPack: context.memoryContextPack,
+    reflection: learning.reflection ? runReflectionToBrainReflection(learning.reflection) : null,
+    memoryEvolution: learning.memoryEvolution,
+    memoryUpdateCount: learning.memoryUpdateResults.length,
+    learningEventCount: learningProposal.learningEvents.length,
+  })
+  const finalOutput: JsonObject = {
+    ...output,
+    employeeBrain: employeeBrain as unknown as JsonObject,
+  }
+  await updateRun(runId, { output: finalOutput })
   await recordEmployeeEvent(runId, 'phase', 'reflect_and_learn', 'Runtime reflection and memory write completed.', {
     reflectionId: learning.reflection?.id ?? null,
     memoryItemId: learning.memoryItem?.id ?? null,
@@ -408,6 +460,9 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
           approvalRequests: learning.memoryEvolution.approvalRequests,
         }
       : null,
+  })
+  await recordEmployeeEvent(runId, 'phase', 'employee_brain', 'Employee brain briefing was refreshed for the next run.', {
+    employeeBrain: employeeBrain as unknown as JsonObject,
   })
   const continuity = await recordRunContinuity({
     run: completedRun,
@@ -454,15 +509,16 @@ async function runPhase(
       goal: run.goal,
       input: run.input,
     })
-    payload.retrievedMemoryIds = context.retrievedMemories.map(({ item }) => item.id)
-    payload.retrievedMemoryTitles = context.retrievedMemories.map(({ item }) => item.title)
-    payload.retrievedMemoryScores = context.retrievedMemories.map(({ score }) => score)
-    payload.memoryContextPack = compileRuntimeMemoryContextPack({
+    context.memoryContextPack = compileRuntimeMemoryContextPack({
       agent,
       goal: run.goal,
       input: run.input,
       retrievedMemories: context.retrievedMemories,
-    }) as unknown as JsonObject
+    })
+    payload.retrievedMemoryIds = context.retrievedMemories.map(({ item }) => item.id)
+    payload.retrievedMemoryTitles = context.retrievedMemories.map(({ item }) => item.title)
+    payload.retrievedMemoryScores = context.retrievedMemories.map(({ score }) => score)
+    payload.memoryContextPack = context.memoryContextPack as unknown as JsonObject
   }
 
   if (phase === 'verify_output_contract' && Object.keys(agent.outputContract).length === 0) {
@@ -604,6 +660,15 @@ async function primeRuntimeControlAdapters(
   )
 }
 
+function runReflectionToBrainReflection(reflection: RunReflectionRow): EmployeeRuntimeBrainReflection {
+  return {
+    whatWorked: reflection.whatWorked,
+    whatFailed: reflection.whatFailed,
+    reusableProcedure: reflection.reusableProcedure,
+    futureWarnings: reflection.futureWarnings,
+  }
+}
+
 function buildRuntimeLoopStepTrace(args: {
   agent: AgentProfileRow
   run: EmployeeRunRow
@@ -705,7 +770,7 @@ function decideNextRuntimeAction(agent: AgentProfileRow, cliRuns: CliRunRow[]): 
     return {
       action: 'review_artifact',
       target: cliRuns.map((row) => row.id).join(','),
-      reason: 'CLI dry-runs are rendered and ready for review or approved execution.',
+      reason: 'CLI profile results are ready for review; authorized low-risk runs may already be executed.',
       requiresUser: false,
     }
   }

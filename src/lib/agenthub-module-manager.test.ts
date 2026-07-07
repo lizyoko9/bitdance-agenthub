@@ -15,49 +15,69 @@ describe('agenthub module manager', () => {
       'models',
       'tools',
     ])
-    expect(view.availableModules.map((module) => module.id)).toEqual(['artifacts', 'memory', 'analytics'])
+    expect(view.availableModules.map((module) => module.id)).toEqual(['artifacts', 'analytics'])
     expect(view.activeModules.every((module) => module.access === 'free')).toBe(true)
     expect(view.availableModules.every((module) => module.access === 'free')).toBe(true)
   })
 
   it('moves requested optional modules into the active module set with dependencies', () => {
-    const view = buildAgentHubModuleManagerView({ enabledModuleIds: ['memory'] })
+    const view = buildAgentHubModuleManagerView({ enabledModuleIds: ['artifacts'] })
 
-    expect(view.activeModules.map((module) => module.id)).toEqual(['models', 'agents', 'memory'])
-    expect(view.availableModules.map((module) => module.id)).toEqual([
+    expect(view.activeModules.map((module) => module.id)).toEqual([
       'workbench',
       'conversations',
+      'agents',
       'agent-canvas',
       'skills',
+      'models',
       'tools',
       'artifacts',
+    ])
+    expect(view.availableModules.map((module) => module.id)).toEqual([
       'analytics',
     ])
-    expect(view.activeModules.find((module) => module.id === 'memory')?.dependencyLabels).toEqual([
-      '模型管理',
-      '智能体',
+    expect(view.activeModules.find((module) => module.id === 'artifacts')?.dependencyIds).toEqual([
+      'models',
+      'agents',
+      'agent-canvas',
     ])
   })
 
   it('normalizes legacy module requests before building the view', () => {
     const view = buildAgentHubModuleManagerView({ enabledModuleIds: ['langflow-native', 'employee-factory'] })
 
-    expect(view.activeModules.map((module) => module.id)).toEqual(['models', 'agents', 'agent-canvas'])
+    expect(view.activeModules.map((module) => module.id)).toEqual([
+      'workbench',
+      'conversations',
+      'agents',
+      'agent-canvas',
+      'skills',
+      'models',
+      'tools',
+    ])
     expect(view.blockers).toEqual([])
   })
 
-  it('surfaces invalid module ids without enabling them', () => {
+  it('surfaces invalid module ids without dropping the default workspace modules', () => {
     const view = buildAgentHubModuleManagerView({ enabledModuleIds: ['unknown-module'] })
 
-    expect(view.activeModules).toEqual([])
+    expect(view.activeModules.map((module) => module.id)).toEqual([
+      'workbench',
+      'conversations',
+      'agents',
+      'agent-canvas',
+      'skills',
+      'models',
+      'tools',
+    ])
     expect(view.blockers).toEqual(['unknown-module is not a known AgentHub module'])
   })
 
   it('adds user-facing module status and dependency guidance for the module store UI', () => {
-    const view = buildAgentHubModuleManagerView()
+    const view = buildAgentHubModuleManagerView({ enabledModuleIds: ['analytics'] })
     const activeCanvas = view.activeModules.find((module) => module.id === 'agent-canvas')
-    const memory = view.availableModules.find((module) => module.id === 'memory')
-    const analytics = view.availableModules.find((module) => module.id === 'analytics')
+    const artifacts = view.availableModules.find((module) => module.id === 'artifacts')
+    const analytics = view.activeModules.find((module) => module.id === 'analytics')
 
     expect(activeCanvas).toMatchObject({
       statusLabel: '已启用',
@@ -65,17 +85,13 @@ describe('agenthub module manager', () => {
       actionLabel: '打开',
       dependencyHint: '依赖已就绪：模型管理、智能体',
     })
-    expect(memory).toMatchObject({
-      statusLabel: '可加入',
+    expect(artifacts).toMatchObject({
       statusTone: 'muted',
-      actionLabel: '加入模块',
-      dependencyHint: '加入时会自动带上：模型管理、智能体',
+      dependencyIds: ['models', 'agents', 'agent-canvas'],
     })
     expect(analytics).toMatchObject({
-      statusLabel: '可直接加入',
-      statusTone: 'ready',
-      actionLabel: '加入模块',
-      dependencyHint: '无需额外依赖',
+      defaultEnabled: false,
+      active: true,
     })
   })
 })
