@@ -2,6 +2,7 @@ import { and, desc, eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import { newAgentId } from '@/server/ids'
+import { filterSdkOptInTools } from '@/shared/agent-builder-config'
 import {
   validateOpenAICompatibleApiKey,
   validateOpenAICompatibleBaseUrl,
@@ -29,6 +30,8 @@ export interface CreateAgentArgs {
   modelId?: string
   /** SDK adapter 忽略此字段（SDK 内置工具集，不走 toolRegistry）*/
   toolNames: string[]
+  /** 选用的 Skill（方法论模块）id；对所有 adapter 生效（注入 system prompt）。默认空数组。 */
+  skillIds?: string[]
   supportsVision?: boolean
   apiKey?: string | null
   /** 自定义 API base URL。Claude/Codex 对 endpoint 协议兼容性要求不同；NULL 走默认 */
@@ -62,8 +65,10 @@ export async function createCustomAgent(args: CreateAgentArgs) {
     modelId: args.modelId ?? null,
     apiKey: args.apiKey?.trim() || null,
     apiBaseUrl: args.apiBaseUrl?.trim() || null,
-    // SDK adapter 走各自内置工具集，不消费 toolNames；强制空数组避免 UI 残留
-    toolNames: adapterName === 'custom' ? args.toolNames : [],
+    // SDK adapter 走各自内置工具集，不消费普通 toolNames；但保留 opt-in 额外能力（install_skill）。
+    toolNames: adapterName === 'custom' ? args.toolNames : filterSdkOptInTools(args.toolNames),
+    // Skill 是方法论，对所有 adapter 生效；解析期对缺失 id 容错（见 skill-service）。
+    skillIds: args.skillIds ?? [],
     isBuiltin: false,
     isOrchestrator: false,
     supportsVision: args.supportsVision ?? false,
@@ -101,6 +106,8 @@ export interface UpdateAgentPatch {
   modelProvider?: ModelProvider
   modelId?: string | null
   toolNames?: string[]
+  /** 选用的 Skill id；对所有 adapter 生效。传数组覆盖，undefined 不动。 */
+  skillIds?: string[]
   supportsVision?: boolean
   /** 传 null 显式清除自定义 key（fallback 回 env）；undefined 表示不动 */
   apiKey?: string | null
@@ -140,6 +147,7 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
   if (patch.adapterName !== undefined) updates.adapterName = patch.adapterName
   if (patch.modelId !== undefined) updates.modelId = patch.modelId?.trim() || null
   if (patch.supportsVision !== undefined) updates.supportsVision = patch.supportsVision
+  if (patch.skillIds !== undefined) updates.skillIds = patch.skillIds
   if (patch.apiKey !== undefined) updates.apiKey = patch.apiKey?.trim() || null
   if (patch.apiBaseUrl !== undefined) updates.apiBaseUrl = patch.apiBaseUrl?.trim() || null
 
@@ -157,7 +165,8 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
       patch.toolNames !== undefined
     ) {
       updates.modelProvider = null
-      updates.toolNames = []
+      // SDK 不消费普通 toolNames，但保留 opt-in 额外能力（install_skill）。
+      updates.toolNames = filterSdkOptInTools(patch.toolNames ?? agent.toolNames)
     }
   }
 
