@@ -1,8 +1,8 @@
 # Spec 08 — 数据库 Schema
 
-> Drizzle ORM + SQLite。本 spec 描述 9 张表的字段、索引、外键级联策略，是 Spec 01 实体的物理映射。**修改字段需先讨论。**
+> Drizzle ORM + SQLite。本 spec 描述各表的字段、索引、外键级联策略，是 Spec 01 实体的物理映射。**修改字段需先讨论。**
 >
-> 7 张「业务表」（agents / conversations / messages / artifacts / workspaces / attachments / agent_runs）映射 Spec 01 的 7 个实体；`conversation_context_summaries` 是上下文压缩基础设施表；`app_settings` 是单行配置表，不对应实体。
+> 7 张「业务表」（agents / conversations / messages / artifacts / workspaces / attachments / agent_runs）映射 Spec 01 的 7 个实体；`conversation_context_summaries` 是上下文压缩基础设施表；`app_settings` 是单行配置表；`skills` 是 Phase 2 的可复用方法论模块表（不对应 Spec 01 实体）。
 
 源文件：`src/db/schema.ts`
 
@@ -35,6 +35,7 @@ agents {
   api_key         text              // 该 agent 单独的 key；NULL 走 env
   api_base_url    text              // 该 agent 单独的 endpoint；NULL 走 SDK 默认
   tool_names      text JSON         // string[]，引用 Spec 07
+  skill_ids       text JSON         // string[]，引用 skills 表；默认 '[]'（Phase 2）
   is_builtin      int  bool default 0
   is_orchestrator int  bool default 0
   supports_vision int  bool default 0
@@ -45,6 +46,7 @@ agents {
 **约束**：
 - `adapter_name='custom'` 时 `model_provider` + `model_id` 必填；`adapter_name='claude-code' | 'codex'` 时 `model_provider=NULL`，`model_id` 可选
 - `is_builtin=1` 的 agent 可修改、不可删除（service 层 enforce）
+- `skill_ids` 对所有 adapter 生效（Skill 是方法论，注入 system prompt，见 Spec 13）；运行时对缺失/禁用 id 静默跳过，不影响 run
 - `api_key` 优先级高于 env var；按 provider / adapter 路由：`deepseek→DEEPSEEK_API_KEY` / `openai→OPENAI_API_KEY` / `volcano-ark→ARK_API_KEY` / `anthropic→ANTHROPIC_API_KEY` / `codex→CODEX_API_KEY 或 OPENAI_API_KEY` / `openai-compatible→per-agent only`
 - `api_base_url` 非空时（Claude Code adapter），`api_key` 作为 `ANTHROPIC_AUTH_TOKEN` 传 SDK；`ANTHROPIC_BASE_URL` 设为 `api_base_url`；同时清空 `ANTHROPIC_API_KEY` 防覆盖（详见 Spec 05 ClaudeCodeAdapter）
 - `api_base_url` 非空时（Codex adapter），作为 `@openai/codex-sdk` 的 `baseUrl` 传入；`api_key` 作为 SDK `apiKey`（内部 `CODEX_API_KEY`）传入；endpoint 必须支持 Codex/Responses，DeepSeek 等 Chat Completions-only endpoint 走 Custom adapter
@@ -271,6 +273,42 @@ app_settings {
 
 ---
 
+## 10. skills（Phase 2 · 可复用方法论模块）
+
+```ts
+skills {
+  id                 text PK           // skill_<nanoid>（内置为固定 slug，如 skill_impl_plan）
+  name               text NOT NULL
+  description        text NOT NULL
+  category           text NOT NULL     // 自由分类标签（coding/review/product/...）
+  instruction        text NOT NULL     // 注入 system prompt 的方法论正文
+  required_tool_names text JSON        // string[]，仅 UI 依赖提示，不扩权；默认 '[]'
+  source             text NOT NULL     // 'builtin'|'user'|'imported'；默认 'user'
+  source_uri         text              // 导入来源 URL（install_skill 会话安装记录；手动/自建为 null）
+  is_global_default  int  bool default 0 // 公共 Skill：为 1 时自动挂给所有 Agent（Phase 2E）
+  is_builtin         int  bool default 0
+  enabled            int  bool default 1
+  created_at         int  NOT NULL
+  updated_at         int  NOT NULL default 0
+}
+```
+
+**定位**：Skill = 可复用的「工作方法 / 工作流」指令包。Agent 通过 `agents.skill_ids` 选用；运行时由 AgentRunner 解析为指令注入 system prompt（Spec 13）。**公共池（Phase 2E）**：`is_global_default=1` 的 Skill 自动挂给所有 Agent——运行时**有效 Skill = 公共池 ∪ `agent.skill_ids`**（单一出口 `resolveEffectiveSkills`，见 Spec 13）。
+
+**约束**：
+- Skill **不授予可执行工具权限**：`required_tool_names` 只用于 Agent Studio 的依赖提示（「此 Skill 配合 X 工具更好」），绝不影响实际 `agents.tool_names`（见 openspec tools spec）。
+- 内置 Skill（`is_builtin=1` / `source='builtin'`）在 bootstrap 阶段幂等 seed（`src/db/builtin-skills.ts`）：**可启停（改 `enabled`）、可切公共（改 `is_global_default`），不可删除 / 改内容**（service 层 enforce）。`user` / `imported` 全 CRUD。
+- 解析 `agents.skill_ids` 时对缺失 / `enabled=0` 的 id 静默跳过，不报错、不崩 run。
+- 管理入口：**Skills 市场全页**（`src/app/skills` → `skill-marketplace.tsx`）卡片网格：分类栏 + 搜索 + 排序 + 来源/公共徽章 + 「被 N 个 Agent 使用」；侧栏「Skills 库」Tab（`skill-library.tsx`）保留窄条快速管理 + 「打开市场」入口。两处都支持新建/编辑/删除/启停/**切公共** + **导入**（`skill-import-dialog.tsx`：SKILL.md / 纯文本 / .md 上传 / AgentHub JSON 批量，经纯函数 `shared/skill-import.ts` 解析，**只取 name/description/instruction、丢 allowed-tools**，落 `source='imported'`）；Agent Studio 配置屏可内联新建、公共 skill 标注「已默认挂载」不占选择位。`GET /api/skills` 默认只返回 `enabled=1`（供 agent 选用），`?all=1` 返回全部 + 使用计数（供市场/库管理）；`POST /api/skills/import` 批量导入；`POST /api/skills/install-from-catalog` 从精选目录安装。
+- **精选目录（Phase 2E）**：`src/shared/skill-catalog.ts` 静态 manifest（`{slug,name,description,category,sourceUri}`）。市场「安装」经 `skill-fetch`（GitHub 主机白名单 + SSRF）拉取 `sourceUri` 的 SKILL.md → 落 `source='imported'` + `source_uri`。**用户点击即授权**，不走 `install_skill` 的 LLM 审批门（见 CLAUDE.md §5.5）。
+- **在线注册表（Phase 2E+）**：市场页「在线市场」tab 经 `GET /api/skills/registry`（服务端 `skill-registry.ts` 代理 SkillsMP 搜索 API，zod 校验）搜 200 万+ 社区 skill；安装复用同一条 `skill-fetch` 拉取路径（注册表返回的 `githubUrl` 仍过白名单，防 SSRF）。不落新表——装上的仍是 `skills` 表 `source='imported'` 行。
+- 迁移：`source` / `updated_at` / `source_uri` / `is_global_default` 经 bootstrap `safeAlter` 加列；对早期已 seed 的内置行回填 `source='builtin'`，新列默认 0（见 spec「迁移规范」）。
+- 会话安装（`install_skill`）：经 SSRF 安全 fetch + 审批门后落 `source='imported'` + `source_uri`，并把 skillId 绑进 `agents.skill_ids`；不落 `.skills` 文件夹（见 CLAUDE.md §5.5 / spec 16）。
+
+**索引**：无（数量小）。
+
+---
+
 ## Cascade 关系图
 
 ```
@@ -313,6 +351,8 @@ app_settings ──(独立，无外键)── 单行表，与任何业务表都�
 ## 迁移规范
 
 **开发期**：直接 `pnpm db:push` 让 drizzle-kit 推 schema 到 SQLite。**注意**：drizzle-kit 对带 FK 的列类型变更有时会失败（SQLite 限制），此时写一次性 ALTER TABLE 脚本，命名格式 `src/db/migrate-<topic>.ts`（如 `migrate-add-read-attachment.ts`），用 `tsx src/db/migrate-xxx.ts` 跑。这些脚本跑完不删除（留作历史 + 用 `IF NOT EXISTS` 可重入）。
+
+**启动期自举（首选）**：`src/db/bootstrap.ts` 在每次进程首次初始化 DB 时跑 `CREATE TABLE IF NOT EXISTS` + 幂等 `safeAlter`（ALTER TABLE ADD COLUMN，吞 duplicate-column）+ 内置数据 seed。新增表 / 加列优先走这里（如 `skills` 表 + `agents.skill_ids` 列），免用户手动迁移；打包桌面版首启空 DB 也靠它补齐。**注意**：dev 模式下 bootstrap 在 client 模块首次 init 时跑一次，改完需**重启 `pnpm dev`** 才会应用（HMR 不重跑模块顶层 + globalThis 单例）。
 
 **生产期**：暂无（项目为本地运行）。如未来要 ship 给用户，应改用 drizzle-kit 的 generate + journal 模式。
 

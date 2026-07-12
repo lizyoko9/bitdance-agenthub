@@ -1,6 +1,6 @@
 'use client'
 
-import { Cpu, MessageSquareText, SlidersHorizontal, Sparkles, User, Wrench } from 'lucide-react'
+import { Cpu, Globe, MessageSquareText, SlidersHorizontal, Sparkles, User, Wrench } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { AgentCreateWizard } from '@/components/agent-create-wizard'
@@ -16,9 +16,10 @@ import {
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import type { AgentRow } from '@/db/schema'
+import type { AgentRow, SkillRow } from '@/db/schema'
 import {
   createAgent,
+  fetchSkills,
   updateAgent,
   type CreateAgentBody,
   type UpdateAgentBody,
@@ -32,6 +33,7 @@ import {
   CLAUDE_CODE_DEFAULT_MODEL,
   CODEX_DEFAULT_MODEL,
   DEFAULT_CUSTOM_AGENT_TOOLS,
+  DEFAULT_CUSTOM_SYSTEM_PROMPT,
   type AgentBuilderAdapter as AdapterKind,
   type AgentBuilderProvider as Provider,
   type AgentConfigDraft,
@@ -46,16 +48,6 @@ import { useAppStore } from '@/stores/app-store'
 
 type AgentTab = 'basic' | 'model' | 'toolsPrompt'
 type CreateStep = 'choose' | 'wizard' | 'detail'
-
-const DEFAULT_CUSTOM_SYSTEM_PROMPT = `你是一个 AgentHub custom agent。你的任务是理解用户目标，使用已启用的工具完成工作，并把结果清晰交付给用户。
-
-工作原则：
-1. 先判断需要什么上下文；只有在用户提到附件、已有产物或工作区文件时，才调用对应读取工具。
-2. 多步骤任务先给自己形成简短计划，但不要把固定流程强加给简单问题。
-3. 工具调用要少而准确；每次调用都应服务于当前目标。
-4. 产出代码、网页、文档或设计稿时，优先用 write_artifact 创建结构化产物；网页产物完成后再调用 deploy_artifact。
-5. 探索项目目录时优先用 fs_list，再用 fs_read 读取具体文件；使用 fs_write 或 bash 前确认确有必要，并只在当前 workspace 范围内操作。
-6. 最终回复保持简洁，说明完成了什么、产物在哪里、还剩什么需要用户决策。`
 
 /**
  * 创建 / 编辑 Agent 的对话框。
@@ -83,6 +75,8 @@ export function CreateAgentDialog({
   const [provider, setProvider] = useState<Provider>('deepseek')
   const [modelId, setModelId] = useState(PROVIDER_DEFAULTS.deepseek.defaultModel)
   const [toolNames, setToolNames] = useState<Set<string>>(new Set(DEFAULT_CUSTOM_AGENT_TOOLS))
+  const [skillIds, setSkillIds] = useState<Set<string>>(new Set())
+  const [availableSkills, setAvailableSkills] = useState<SkillRow[]>([])
   const [supportsVision, setSupportsVision] = useState(true)
   const [apiKey, setApiKey] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState('')
@@ -118,6 +112,7 @@ export function CreateAgentDialog({
               : PROVIDER_DEFAULTS[p].defaultModel),
       )
       setToolNames(new Set(agent.toolNames))
+      setSkillIds(new Set(agent.skillIds))
       setSupportsVision(agent.supportsVision)
       setApiKey(agent.apiKey ?? '')
       setApiBaseUrl(agent.apiBaseUrl ?? '')
@@ -130,6 +125,7 @@ export function CreateAgentDialog({
       setProvider('deepseek')
       setModelId(PROVIDER_DEFAULTS.deepseek.defaultModel)
       setToolNames(new Set(DEFAULT_CUSTOM_AGENT_TOOLS))
+      setSkillIds(new Set())
       setSupportsVision(true)
       setApiKey('')
       setApiBaseUrl('')
@@ -140,6 +136,22 @@ export function CreateAgentDialog({
     setError(null)
     setActiveTab('basic')
   }, [open, agent])
+
+  // 拉取可选 Skill（编辑入口同步：与 Agent Studio 创建一致，可增删 Skill）。
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    fetchSkills()
+      .then((rows) => {
+        if (active) setAvailableSkills(rows)
+      })
+      .catch(() => {
+        // Skill 拉取失败时静默退化为「无可选」，不阻断编辑。
+      })
+    return () => {
+      active = false
+    }
+  }, [open])
 
   const handleAdapterKindChange = (kind: AdapterKind) => {
     setAdapterKind(kind)
@@ -173,6 +185,15 @@ export function CreateAgentDialog({
     setToolNames(new Set(tools))
   }
 
+  const toggleSkill = (skillId: string) => {
+    setSkillIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(skillId)) next.delete(skillId)
+      else next.add(skillId)
+      return next
+    })
+  }
+
   const isPresetActive = (tools: readonly ToolName[]) =>
     toolNames.size === tools.length && tools.every((toolName) => toolNames.has(toolName))
 
@@ -194,6 +215,7 @@ export function CreateAgentDialog({
             : PROVIDER_DEFAULTS[p].defaultModel),
     )
     setToolNames(new Set(draft.toolNames))
+    setSkillIds(new Set(draft.skillIds))
     setSupportsVision(draft.supportsVision)
     setApiKey('')
     setApiBaseUrl('')
@@ -222,8 +244,9 @@ export function CreateAgentDialog({
         adapterName: draft.adapterName,
         modelProvider: isSdkAgent ? undefined : draft.modelProvider,
         modelId: draft.modelId?.trim() || undefined,
-        toolNames: isSdkAgent ? [] : draft.toolNames,
+        toolNames: draft.toolNames,
         supportsVision: draft.supportsVision,
+        skillIds: draft.skillIds,
       }
       const created = await createAgent(body)
       upsertAgent(created)
@@ -282,8 +305,9 @@ export function CreateAgentDialog({
           adapterName: adapterKind,
           modelProvider: isSdkAgent ? undefined : provider,
           modelId: isSdkAgent ? modelId.trim() || null : modelId.trim(),
-          toolNames: isSdkAgent ? [] : Array.from(toolNames),
+          toolNames: Array.from(toolNames),
           supportsVision,
+          skillIds: Array.from(skillIds),
           apiKey: trimmedApiKey || null,
           apiBaseUrl: trimmedApiBaseUrl || null,
         }
@@ -299,8 +323,9 @@ export function CreateAgentDialog({
           adapterName: adapterKind,
           modelProvider: isSdkAgent ? undefined : provider,
           modelId: modelId.trim() || undefined,
-          toolNames: isSdkAgent ? [] : Array.from(toolNames),
+          toolNames: Array.from(toolNames),
           supportsVision,
+          skillIds: Array.from(skillIds),
           apiKey: trimmedApiKey || undefined,
           apiBaseUrl: trimmedApiBaseUrl || undefined,
         }
@@ -722,6 +747,86 @@ export function CreateAgentDialog({
                     </div>
                   </div>
                 )}
+
+                {adapterKind !== 'custom' && (
+                  <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+                    <Label>额外能力</Label>
+                    <label
+                      className={cn(
+                        'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
+                        toolNames.has('install_skill') && 'border-primary bg-primary/5',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={toolNames.has('install_skill')}
+                        onChange={() => toggleTool('install_skill')}
+                        className="mt-0.5 accent-primary"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium">{TOOL_META.install_skill.label}</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">
+                          {TOOL_META.install_skill.desc}
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+                  <Label>Skills</Label>
+                  <div className="space-y-1.5">
+                    {availableSkills.length === 0 ? (
+                      <div className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                        暂无可选 Skill。Skill 是注入的工作方法，不授予额外工具权限。
+                      </div>
+                    ) : (
+                      availableSkills.map((skill) =>
+                        skill.isGlobalDefault ? (
+                          // 公共 skill 自动挂给所有 Agent，不占选择位（去 Skills 市场取消公共）。
+                          <div
+                            key={skill.id}
+                            className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2"
+                          >
+                            <Globe className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-medium">{skill.name}</span>
+                                <span className="rounded bg-emerald-500/12 px-1 py-0.5 text-[9px] font-medium text-emerald-700 dark:text-emerald-300">
+                                  公共 · 已默认挂载
+                                </span>
+                              </div>
+                              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                                {skill.description}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <label
+                            key={skill.id}
+                            className={cn(
+                              'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
+                              skillIds.has(skill.id) && 'border-primary bg-primary/5',
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={skillIds.has(skill.id)}
+                              onChange={() => toggleSkill(skill.id)}
+                              className="mt-0.5 accent-primary"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-xs font-medium">{skill.name}</div>
+                              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                                {skill.description}
+                              </div>
+                            </div>
+                          </label>
+                        ),
+                      )
+                    )}
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-[80px_1fr] items-start gap-3">
                   <Label required>System Prompt</Label>

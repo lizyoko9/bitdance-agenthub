@@ -12,6 +12,7 @@ import type {
   PendingBashCommand,
   PendingDispatchPlan,
   PendingQuestion,
+  PendingSkillInstall,
   PendingWrite,
   StreamEvent,
 } from '@/shared/types'
@@ -77,6 +78,9 @@ interface AppState {
   // ─── Agent fs_write 审批等待队列（按 conversationId 分桶）─
   pendingWritesByConv: Record<string, PendingWrite[]>
 
+  // ─── install_skill 会话安装审批等待队列（按 conversationId 分桶）─
+  pendingSkillInstallsByConv: Record<string, PendingSkillInstall[]>
+
   // ─── Agent bash 关键命令审批等待队列（按 conversationId 分桶）─
   pendingBashCommandsByConv: Record<string, PendingBashCommand[]>
 
@@ -138,6 +142,7 @@ interface AppState {
   clearPendingAttachments(conversationId: string): void
 
   setPendingWritesForConversation(conversationId: string, list: PendingWrite[]): void
+  setPendingSkillInstallsForConversation(conversationId: string, list: PendingSkillInstall[]): void
 
   setPendingBashCommandsForConversation(
     conversationId: string,
@@ -185,6 +190,7 @@ export const useAppStore = create<AppState>()(
     replyTargetByConv: {},
     pendingAttachmentsByConv: {},
     pendingWritesByConv: {},
+    pendingSkillInstallsByConv: {},
     pendingBashCommandsByConv: {},
     pendingQuestionsByConv: {},
     unreadByConv: {},
@@ -217,6 +223,7 @@ export const useAppStore = create<AppState>()(
         delete s.messageIdsByConv[id]
         delete s.runsByConv[id]
         delete s.pendingWritesByConv[id]
+        delete s.pendingSkillInstallsByConv[id]
         delete s.pendingBashCommandsByConv[id]
         delete s.pendingQuestionsByConv[id]
         if (s.activeConversationId === id) s.activeConversationId = null
@@ -379,6 +386,7 @@ export const useAppStore = create<AppState>()(
         delete s.runsByConv[conversationId]
         delete s.replyTargetByConv[conversationId]
         delete s.pendingWritesByConv[conversationId]
+        delete s.pendingSkillInstallsByConv[conversationId]
         delete s.pendingBashCommandsByConv[conversationId]
         delete s.pendingQuestionsByConv[conversationId]
         delete s.unreadByConv[conversationId]
@@ -431,6 +439,12 @@ export const useAppStore = create<AppState>()(
       set((s) => {
         if (list.length === 0) delete s.pendingWritesByConv[conversationId]
         else s.pendingWritesByConv[conversationId] = list
+      }),
+
+    setPendingSkillInstallsForConversation: (conversationId, list) =>
+      set((s) => {
+        if (list.length === 0) delete s.pendingSkillInstallsByConv[conversationId]
+        else s.pendingSkillInstallsByConv[conversationId] = list
       }),
 
     setPendingBashCommandsForConversation: (conversationId, list) =>
@@ -820,6 +834,22 @@ export const useAppStore = create<AppState>()(
             return
           }
 
+          case 'skill_install.pending': {
+            const list = s.pendingSkillInstallsByConv[event.conversationId] ?? []
+            if (list.some((p) => p.id === event.pendingInstall.id)) return
+            s.pendingSkillInstallsByConv[event.conversationId] = [...list, event.pendingInstall]
+            return
+          }
+
+          case 'skill_install.resolved': {
+            const list = s.pendingSkillInstallsByConv[event.conversationId]
+            if (!list) return
+            const next = list.filter((p) => p.id !== event.pendingId)
+            if (next.length === 0) delete s.pendingSkillInstallsByConv[event.conversationId]
+            else s.pendingSkillInstallsByConv[event.conversationId] = next
+            return
+          }
+
           case 'bash_command.pending': {
             const list = s.pendingBashCommandsByConv[event.conversationId] ?? []
             if (list.some((p) => p.id === event.pendingCommand.id)) return
@@ -1148,6 +1178,14 @@ export const useActiveTab = (conversationId: string): string =>
 /** 该会话当前所有待审批的 fs_write（review 模式下 agent 想改文件，等用户决定）。 */
 export const usePendingWrites = (conversationId: string | null): PendingWrite[] =>
   useAppStore(useShallow((s) => (conversationId ? s.pendingWritesByConv[conversationId] ?? [] : [])))
+
+/** 该会话当前所有待审批的 install_skill 会话安装。 */
+export const usePendingSkillInstalls = (conversationId: string | null): PendingSkillInstall[] =>
+  useAppStore(
+    useShallow((s) =>
+      conversationId ? s.pendingSkillInstallsByConv[conversationId] ?? [] : [],
+    ),
+  )
 
 /** 该会话当前所有待审批的关键 bash 命令。 */
 export const usePendingBashCommands = (conversationId: string | null): PendingBashCommand[] =>

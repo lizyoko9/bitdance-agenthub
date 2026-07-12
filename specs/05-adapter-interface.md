@@ -386,6 +386,16 @@ SDK 提供 `canUseTool(toolName, toolInput, options) => PermissionResult` 钩子
 4. **NotebookEdit**：MVP 不做 diff 审批，Review 模式直接 deny；Auto 模式 allow
 5. **其它工具**（Read / Grep / Glob / WebFetch / WebSearch / Task / TodoWrite / ...）：默认 allow
 
+### Skills（渐进披露，2C）
+
+ClaudeCodeAdapter **复用 SDK 原生 Agent Skills**（`@anthropic-ai/claude-agent-sdk` 自带渐进披露：磁盘发现 `SKILL.md` → 仅 name+description 进上下文 → 模型调原生 `Skill` 工具加载正文），而非 AgentHub 自建 catalog/load_skill（custom/codex 才用后者）。
+
+- AgentRunner 把 agent 选用的 Skill 解析后经 `AdapterInput.skills`（`{name,description,instruction}[]`）传入，**不**注入 systemPrompt 文本。
+- adapter run 前把每个 skill 物化成 `<cwd>/.claude/skills/agenthub-<i>-<slug>/SKILL.md`（`buildSkillMarkdown` 序列化；`agenthub-` 前缀目录隔离用户自有 skill），并设 `options.skills = [skill 名]` 精确启用（不连带 workspace 里用户其它 skill）。
+- `settingSources: ['project']` 使物化目录被当作项目 skill 发现。
+- run 结束 / 中止在 `finally` 清理本次物化目录（只删 `agenthub-` 前缀）；plan 阶段不挂 skill。
+- local 模式注意：物化写进用户真实 workspace（前缀隔离 + 用完即删）；进程被强杀时可能残留前缀目录，可被下次同名覆盖。
+
 ### 工具集
 
 完全用 SDK preset `'claude_code'`（即 Claude Code CLI 自带的全套），不消费 `AdapterInput.toolNames`。AgentHub 通过 SDK in-process MCP server 额外暴露 `write_artifact` / `read_artifact` / `deploy_artifact` / `deploy_workspace` / `ask_user` / `report_task_result`。`fs_write` 审批流通过 `pendingWrites` store 共享，关键 Bash 命令审批通过 `pendingBashCommands` store 共享，UI 层（`PendingWritesPanel` / `PendingWriteDiffTab` / `PendingBashCommandsPanel`）、`bash.ts` 和 `claude-code-adapter.ts` 共享命令安全策略（`src/server/security.ts`、`src/server/bash-command-approval.ts`）。

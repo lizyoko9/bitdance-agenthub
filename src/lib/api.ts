@@ -6,6 +6,7 @@ import type {
   ConversationWithMeta,
   ContextSummaryRow,
   MessageRow,
+  SkillRow,
 } from '@/db/schema'
 import type {
   AskUserAnswer,
@@ -14,6 +15,7 @@ import type {
   PendingBashCommand,
   PendingDispatchPlan,
   PendingQuestion,
+  PendingSkillInstall,
   PendingWrite,
 } from '@/shared/types'
 import type { AgentConfigDraft, AgentDraftRequest } from '@/shared/agent-builder-config'
@@ -58,6 +60,8 @@ export interface CreateAgentBody {
   /** custom: required；SDK adapter: 可选，默认 SDK 默认模型 */
   modelId?: string
   toolNames: string[]
+  /** 选用的 Skill id；对所有 adapter 生效 */
+  skillIds?: string[]
   supportsVision?: boolean
   apiKey?: string
   /** 自定义 API base URL。Claude/Codex 对 endpoint 协议兼容性要求不同；空走默认 */
@@ -73,6 +77,131 @@ export async function createAgent(body: CreateAgentBody): Promise<AgentRow> {
     }),
   )
   return agent
+}
+
+export async function fetchSkills(opts?: { all?: boolean }): Promise<SkillRow[]> {
+  const url = opts?.all ? '/api/skills?all=1' : '/api/skills'
+  const { skills } = await json<{ skills: SkillRow[] }>(fetch(url))
+  return skills
+}
+
+/** 市场/库管理视图：全部 Skill + 每条被多少 agent 使用（公共 = 全部 agent）。 */
+export async function fetchSkillsWithUsage(): Promise<{
+  skills: SkillRow[]
+  usage: Record<string, number>
+}> {
+  return json<{ skills: SkillRow[]; usage: Record<string, number> }>(fetch('/api/skills?all=1'))
+}
+
+export interface CreateSkillBody {
+  name: string
+  description: string
+  category: string
+  instruction: string
+  requiredToolNames?: string[]
+  isGlobalDefault?: boolean
+}
+
+export async function createSkill(body: CreateSkillBody): Promise<SkillRow> {
+  const { skill } = await json<{ skill: SkillRow }>(
+    fetch('/api/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+  return skill
+}
+
+export type UpdateSkillBody = Partial<CreateSkillBody> & {
+  enabled?: boolean
+  isGlobalDefault?: boolean
+}
+
+export async function updateSkill(skillId: string, body: UpdateSkillBody): Promise<SkillRow> {
+  const { skill } = await json<{ skill: SkillRow }>(
+    fetch(`/api/skills/${skillId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+  return skill
+}
+
+export async function deleteSkill(skillId: string): Promise<void> {
+  await json<{ ok: true }>(fetch(`/api/skills/${skillId}`, { method: 'DELETE' }))
+}
+
+/** 从精选目录安装一个 Skill：服务端经 skill-fetch 拉取 SKILL.md（SSRF 白名单）后建为 imported。 */
+export async function installCatalogSkill(body: {
+  sourceUri: string
+  category: string
+  name?: string
+  description?: string
+}): Promise<SkillRow> {
+  const { skill } = await json<{ skill: SkillRow }>(
+    fetch('/api/skills/install-from-catalog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+  return skill
+}
+
+export interface RegistrySkill {
+  id: string
+  name: string
+  author: string
+  description: string
+  githubUrl: string
+  stars: number
+  updatedAt: number | null
+}
+
+export interface RegistrySearchResult {
+  skills: RegistrySkill[]
+  page: number
+  hasNext: boolean
+  total: number
+}
+
+/** 搜索 SkillsMP 在线注册表（经本项目服务端代理 + zod 校验）。 */
+export async function searchSkillRegistry(params: {
+  q: string
+  page?: number
+  sort?: 'stars' | 'recent'
+}): Promise<RegistrySearchResult> {
+  const sp = new URLSearchParams({ q: params.q })
+  if (params.page) sp.set('page', String(params.page))
+  if (params.sort) sp.set('sort', params.sort)
+  return json<RegistrySearchResult>(fetch(`/api/skills/registry?${sp.toString()}`))
+}
+
+/** 预览一个 GitHub SKILL.md 的解析结果（不落库），供在线市场详情弹窗展示正文。 */
+export async function previewSkillMarkdown(url: string): Promise<{
+  name: string
+  description: string
+  instruction: string
+  finalUrl: string
+}> {
+  return json(fetch(`/api/skills/preview?url=${encodeURIComponent(url)}`))
+}
+
+export interface ImportSkillsResult {
+  created: SkillRow[]
+  failed: { index: number; name: string; error: string }[]
+}
+
+export async function importSkills(skills: CreateSkillBody[]): Promise<ImportSkillsResult> {
+  return json<ImportSkillsResult>(
+    fetch('/api/skills/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skills }),
+    }),
+  )
 }
 
 export async function createAgentDraft(body: AgentDraftRequest): Promise<AgentConfigDraft> {
@@ -237,6 +366,42 @@ export async function rejectPendingWrite(
 ): Promise<void> {
   await json<{ ok: true }>(
     fetch(`/api/conversations/${conversationId}/pending-writes/${pendingId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reject' }),
+    }),
+  )
+}
+
+// ─── Pending skill installs (install_skill 审批) ─────
+export async function fetchPendingSkillInstalls(
+  conversationId: string,
+): Promise<PendingSkillInstall[]> {
+  const { pendingSkillInstalls } = await json<{ pendingSkillInstalls: PendingSkillInstall[] }>(
+    fetch(`/api/conversations/${conversationId}/pending-skill-installs`),
+  )
+  return pendingSkillInstalls
+}
+
+export async function approvePendingSkillInstall(
+  conversationId: string,
+  pendingId: string,
+): Promise<void> {
+  await json<{ ok: true }>(
+    fetch(`/api/conversations/${conversationId}/pending-skill-installs/${pendingId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'approve' }),
+    }),
+  )
+}
+
+export async function rejectPendingSkillInstall(
+  conversationId: string,
+  pendingId: string,
+): Promise<void> {
+  await json<{ ok: true }>(
+    fetch(`/api/conversations/${conversationId}/pending-skill-installs/${pendingId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'reject' }),

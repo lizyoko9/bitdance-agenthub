@@ -18,6 +18,7 @@ import type {
   TaskResultReport,
 } from '@/shared/types'
 import { estimateTokens, getModelLimits } from '@/shared/model-registry'
+import { buildSkillContext, skillInlineBudget } from '@/shared/skill-context'
 
 import { agentRegistry } from './adapters/registry'
 import type { AdapterAttachment, AdapterInput } from './adapters/types'
@@ -59,6 +60,8 @@ import { newArtifactId, newRunId } from './ids'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
 import { buildProjectFiles } from './project-artifact'
 import { getAppSettings } from './settings-service'
+import { resolveEffectiveSkills } from './skill-service'
+import { LOAD_SKILL_TOOL_NAME } from './tools/load-skill'
 import {
   evaluateTaskResultReport,
   isTaskResultReportToolName,
@@ -1973,6 +1976,53 @@ async function buildAdapterInput(
   const toolGuidance = buildAgentHubToolGuidance(agent, toolNames, workspace)
   if (toolGuidance) systemPromptWithWorkspace += '\n\n' + toolGuidance
 
+  // Skill 注入按 adapter 分策略（见 specs/13 + design「2C per-adapter 策略」+「2E 公共池」）：
+  // 有效 Skill = agent 自选（优先）∪ 公共池（isGlobalDefault），去重——单一出口 resolveEffectiveSkills。
+  // - claude-code：解析后交给 SDK 原生渐进披露（adapter 物化 .claude/skills + options.skills），不注入文本。
+  // - custom / codex / mock：catalog + 短 skill 内联 文本注入；custom/codex 提供 load_skill 按需取长 skill。
+  // 接在工具指导之后、历史预算计算之前（计入 promptEstimate，让历史相应压缩）。缺失/禁用 id 静默跳过。
+  const effectiveSkills = await resolveEffectiveSkills({ skillIds: agent.skillIds }).catch((err) => {
+    console.warn('[agent-runner] skill resolve failed; continuing without skills', err)
+    return [] as Awaited<ReturnType<typeof resolveEffectiveSkills>>
+  })
+  let resolvedSkillsForSdk: AdapterInput['skills']
+  if (agent.adapterName === 'claude-code') {
+    if (effectiveSkills.length > 0) {
+      resolvedSkillsForSdk = effectiveSkills.map((row) => ({
+        name: row.name,
+        description: row.description,
+        instruction: row.instruction,
+      }))
+    }
+  } else if (effectiveSkills.length > 0) {
+    const skillsLoadable = agent.adapterName === 'custom' || agent.adapterName === 'codex'
+    const skillContextWindow =
+      agent.adapterName === 'custom'
+        ? getModelLimits(agent.modelProvider, agent.modelId).contextWindow
+        : undefined
+    const skillBlock = buildSkillContext(
+      effectiveSkills.map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        instruction: row.instruction,
+      })),
+      { totalInlineBudget: skillInlineBudget(skillContextWindow), loadable: skillsLoadable },
+    )
+    if (skillBlock) systemPromptWithWorkspace += '\n\n' + skillBlock
+  }
+
+  // custom adapter：有有效 Skill 时自动暴露 load_skill（按需取未内联的长 skill 正文），不占用户工具勾选。
+  // codex 经 agenthub MCP bridge 暴露 load_skill（见 scripts/agenthub-codex-mcp.mjs），不走 toolNames。
+  let effectiveToolNames = toolNames
+  if (
+    agent.adapterName === 'custom' &&
+    effectiveSkills.length > 0 &&
+    !effectiveToolNames.includes(LOAD_SKILL_TOOL_NAME)
+  ) {
+    effectiveToolNames = [...toolNames, LOAD_SKILL_TOOL_NAME]
+  }
+
   // Key 优先级：agent.apiKey (per-agent) > app_settings.* (用户全局自填) > adapter 内部 fallback env var
   // 只在 per-agent 字段为空时才注入全局 settings，避免覆盖用户的精细配置
   let effectiveApiKey = agent.apiKey
@@ -2037,7 +2087,7 @@ async function buildAdapterInput(
     apiKey: effectiveApiKey,
     apiBaseUrl: effectiveApiBaseUrl,
     modelId: agent.modelId,
-    toolNames,
+    toolNames: effectiveToolNames,
     attachments: attachments.length > 0 ? attachments : undefined,
     history: history.length > 0 ? history : undefined,
     customConfig:
@@ -2047,6 +2097,7 @@ async function buildAdapterInput(
             supportsVision: agent.supportsVision,
           }
         : undefined,
+    skills: resolvedSkillsForSdk,
   }
 }
 

@@ -13,6 +13,7 @@ import { FileTab } from '@/components/file-tab'
 import { PendingWriteDiffTab } from '@/components/pending-write-diff-tab'
 import { PendingBashCommandsPanel } from '@/components/pending-bash-commands-panel'
 import { PendingWritesPanel } from '@/components/pending-writes-panel'
+import { PendingSkillInstallsPanel } from '@/components/pending-skill-installs-panel'
 import { diffTabPendingId, isDiffTabId } from '@/components/pending-writes-panel'
 import { PinnedMessagesBar } from '@/components/pinned-messages-bar'
 import { Badge } from '@/components/ui/badge'
@@ -232,6 +233,7 @@ export function ChatPanel() {
           <MessageList conversationId={conv.id} />
           <PendingBashCommandsPanel conversationId={conv.id} />
           <PendingWritesPanel conversationId={conv.id} />
+          <PendingSkillInstallsPanel conversationId={conv.id} />
           <MessageInput conversationId={conv.id} />
         </>
       ) : isDiffTabId(activeTab) ? (

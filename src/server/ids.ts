@@ -17,3 +17,5 @@ export const newPendingQuestionId = () => `pq_${nano()}`
 export const newPendingDispatchPlanId = () => `pdp_${nano()}`
 export const newContextSummaryId = () => `ctx_${nano()}`
 export const newDeploymentId = () => `dep_${nano()}`
+export const newSkillId = () => `skill_${nano()}`
+export const newPendingSkillInstallId = () => `psi_${nano()}`

@@ -144,6 +144,35 @@ const history = await buildHistoryFor(agent.id, args.conversationId, {
 
 ---
 
+## System prompt 装配顺序（含 Skills · Phase 2）
+
+`buildAdapterInput` 按**固定顺序**拼 system prompt，保证可解释、可测、安全约束优先（对应 openspec conversation-context delta「deterministic order」）：
+
+```
+1. workspace context block（buildWorkspaceContextBlock）
+2. base system prompt（agent.systemPrompt 或 override）
+3. AgentHub 工具 / 安全指导（buildAgentHubToolGuidance）
+4. Skill 指令块（resolveEffectiveSkills → buildSkillContext）  ← Phase 2 新增 · 2E 公共池
+5. 群聊说明（GROUP_CHAT_SYSTEM_NOTE，仅群聊 custom）
+   —— 以上累加后再算 token 预算，promptEstimate 包含全部 ——
+6. 跨 run 历史 / pinned / 摘要（按预算注入）
+7. 当前用户轮次（prompt）
+```
+
+**Skill 注入规则**（纯函数 `src/shared/skill-context.ts`，渐进披露 2C + 公共池 2E）：
+- 对**所有 adapter** 生效（Skill 是方法论，与 adapter 无关），注入到 system prompt 第 4 段。
+- **有效 Skill（Phase 2E）**：单一出口 `resolveEffectiveSkills(agent)` = `agent.skillIds` 自选（顺序优先）**∪** 公共池（`enabled && is_global_default`），按 id 去重；**自选排前**（优先拿内联额度）、公共排后。缺失 / `enabled=0` / 公共禁用的 id 静默剔除。三条 adapter 装配路径 + `load_skill` 作用域都走它。
+- **渐进披露**：始终给 catalog（每条 `name`+`description`）；**短 skill（≤ `INLINE_SKILL_TOKENS`=350 tok）内联全文**保证总是生效，长 skill 仅进 catalog。整条要么内联要么进 catalog，不截断单条、**不做 summarize**。
+- **内联预算**随模型上下文浮动 `skillInlineBudget = min(3000, ctx*8%)`、下限 1500；超预算的短 skill 降级为「仅 catalog」（不整条消失）。
+- **按 adapter 分策略**（loadable）：
+  - `custom`：catalog + 短 skill 内联，提供 `load_skill` 工具按需取长 skill；有有效 Skill 时自动把 `load_skill` 加入 `toolNames`（不占用户勾选）。
+  - `codex`：同 custom 的文本注入（catalog + 内联，loadable=true）；`load_skill` 经 agenthub MCP bridge 暴露（`scripts/agenthub-codex-mcp.mjs` 注册 + 内部端点 `EXPOSED_TOOLS`），不走 `toolNames`。
+  - `claude-code`：**不注入文本**，改由 adapter 把有效 skill 物化成 workspace `.claude/skills/agenthub-<i>-<slug>/SKILL.md` + 设 `options.skills`，交 SDK 原生渐进披露（`Skill` 工具）；run 结束清理物化目录（见 spec 05）。AgentRunner 经 `AdapterInput.skills` 传解析结果。
+  - `load_skill` 作用域严格限定 agent 的**有效 Skill 集**（自选 ∪ 公共；集合外 id 拒绝，防越权）。
+- Skill **不扩权**：只影响行为策略，不改变用户配置的工具权限；安全/工具约束（第 3 段）优先级高于 Skill。
+
+---
+
 ## Adapter 消费
 
 ### CustomAgentAdapter
