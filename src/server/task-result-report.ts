@@ -119,6 +119,17 @@ export function isTaskResultReportToolName(toolName: string): boolean {
   )
 }
 
+// 评测对照组（AGENTHUB_EVAL_EVIDENCE_GATES=off）：只信子 agent 自己的上报，不看证据
+export function evaluateSelfReportedTaskResult(
+  task: DispatchPlanItem,
+  report: TaskResultReport | undefined,
+): TaskResultReportEvaluation {
+  if (report && report.status !== 'complete') {
+    return { ok: false, error: formatReportedNonCompletion(task.id, report) }
+  }
+  return { ok: true }
+}
+
 export function evaluateTaskResultReport(
   task: DispatchPlanItem,
   report: TaskResultReport | undefined,

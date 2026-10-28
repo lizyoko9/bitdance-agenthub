@@ -54,6 +54,7 @@ import {
   type ReplanConflictView,
   type ReplanTaskView,
 } from './dispatch-plan'
+import { evidenceGatesEnabled } from './eval-flags'
 import { eventBus } from './event-bus'
 import { newArtifactId, newRunId } from './ids'
 import { createMessagePartsFlusher, type MessagePartsFlusher } from './message-parts-flusher'
@@ -61,6 +62,7 @@ import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch
 import { buildProjectFiles } from './project-artifact'
 import { getAppSettings } from './settings-service'
 import {
+  evaluateSelfReportedTaskResult,
   evaluateTaskResultReport,
   isTaskResultReportToolName,
   readTaskResultReportFromToolResult,
@@ -917,7 +919,9 @@ async function runChildTask(
           currentEvaluation.result,
           projectArtifactId,
         )
-        const outputEvaluation = evaluateRequiredProjectOutputs(task, resultWithProject)
+        const outputEvaluation = evidenceGatesEnabled()
+          ? evaluateRequiredProjectOutputs(task, resultWithProject)
+          : { ok: true }
         currentEvaluation = {
           ...currentEvaluation,
           result: outputEvaluation.ok
@@ -1052,7 +1056,7 @@ async function runChildTaskAttempt(
 
   const raw = await promise
   const verificationResults =
-    raw.status === 'aborted'
+    raw.status === 'aborted' || !evidenceGatesEnabled()
       ? []
       : await runRequiredCommands(task, childRunId, ctx)
   const evidence = getRunToolEvidence(childRunId)
@@ -1070,11 +1074,9 @@ function evaluateChildTaskResult(
   }
 
   const outputArtifacts = bindImplicitSingleOutput(task, result)
-  const reportEvaluation = evaluateTaskResultReport(
-    task,
-    result.taskReport,
-    evidence,
-  )
+  const reportEvaluation = evidenceGatesEnabled()
+    ? evaluateTaskResultReport(task, result.taskReport, evidence)
+    : evaluateSelfReportedTaskResult(task, result.taskReport)
   if (!reportEvaluation.ok) {
     return {
       ...result,

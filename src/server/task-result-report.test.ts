@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { DispatchPlanItem, TaskResultReport } from '@/shared/types'
 
 import {
+  evaluateSelfReportedTaskResult,
   evaluateTaskResultReport,
   isTaskResultReportToolName,
   readTaskResultReportFromToolResult,
@@ -424,5 +425,22 @@ describe('evaluateTaskResultReport', () => {
         },
       ),
     ).toEqual({ ok: true })
+  })
+})
+
+describe('evaluateSelfReportedTaskResult', () => {
+  it('accepts a missing report or a complete report without evidence', () => {
+    const codeTask = task({ requiredCommands: [{ command: 'pnpm test' }], targetPaths: ['src/a.ts'] })
+    expect(evaluateSelfReportedTaskResult(codeTask, undefined)).toEqual({ ok: true })
+    expect(evaluateSelfReportedTaskResult(codeTask, completeReport)).toEqual({ ok: true })
+  })
+
+  it('still fails when the child reports failed or blocked', () => {
+    const result = evaluateSelfReportedTaskResult(task(), {
+      status: 'blocked',
+      summary: 'missing credentials',
+    })
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('reported blocked')
   })
 })
