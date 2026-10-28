@@ -1,0 +1,7 @@
+{
+  "id": "mm-todo-pagination",
+  "category": "multi-module",
+  "prompt": "给 todo 服务的列表接口加分页：\n- 数据层 src/store.js：`list()` 支持 `{ offset, limit }` 参数，并新增 `count()` 返回总数（可按 `done` 过滤，与 list 一致）\n- 接口层 src/handlers.js：`listTodos(query)` 读取 `page`（默认 1）和 `pageSize`（默认 20，最大 100），返回 `{ status: 200, body: { items, total, page, pageSize } }`\n- page / pageSize 不是正整数，或 pageSize 超过 100 时，返回 `{ status: 400, body: { error } }`\n- 原有的 `done` 过滤（query.done 为 'true' / 'false'）要继续可用，并且和分页组合使用\n- 补充数据层与接口层的测试，原有测试保持通过",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}

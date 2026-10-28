@@ -1,0 +1,7 @@
+{
+  "id": "sf-slugify",
+  "category": "single-file",
+  "prompt": "实现 src/slug.js 里的 `slugify(input)`，用于把文章标题转成 URL slug：\n- 转小写，去掉拉丁字母的重音（\"Crème Brûlée\" → \"creme-brulee\"）\n- 非字母数字的字符序列替换为单个 \"-\"，首尾不留 \"-\"\n- 结果最长 60 个字符，截断时不能以 \"-\" 结尾\n- 输入为空或只有符号时返回 \"untitled\"\n请补充测试。",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}

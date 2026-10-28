@@ -1,0 +1,7 @@
+{
+  "id": "mm-cart-coupons",
+  "category": "multi-module",
+  "prompt": "给购物车加优惠券功能，涉及三个模块：\n- src/coupons.js：实现 `findCoupon(code)`，大小写不敏感地从 COUPONS 中查找，找不到返回 null\n- src/cart.js：新增 `applyCoupon(code)`：券不存在抛出 Error（message 含 \"invalid coupon\"）；一次只能有一张券，再次调用会替换旧券；新增 `removeCoupon()`\n- src/pricing.js：`computeTotals(cart)` 返回 `{ subtotal, discount, total }`，金额以「分」为整数计算\n  - `percent` 券：discount = round(subtotal * value / 100)\n  - `fixed` 券：discount = value（单位分），但不超过 subtotal\n  - 券有 `minSubtotal` 时，subtotal 未达到则 discount 为 0\n- 补充测试，原有测试保持通过",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}

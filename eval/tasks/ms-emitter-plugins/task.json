@@ -1,0 +1,7 @@
+{
+  "id": "ms-emitter-plugins",
+  "category": "multi-step",
+  "prompt": "按顺序完成三步（后一步依赖前一步）：\n1. 实现 src/emitter.js 的 `createEmitter()`，返回 `{ on, off, once, emit }`：\n   - `on(event, fn)` 返回取消订阅函数；`once` 只触发一次；`emit(event, ...args)` 按注册顺序同步调用并返回调用的监听器数量\n   - 某个监听器抛错不能影响其他监听器；错误收集后以 `emit('error', err, event)` 转发（没有 error 监听器时忽略），且 'error' 事件自身的监听器抛错不能再次转发\n2. 基于 emitter 实现两个插件，签名都是 `(emitter) => api`：\n   - src/plugins/logger.js：`createLogger(emitter)` 记录每次 `request` 事件（参数为 `{ method, path }`），`api.lines()` 返回 `[\"GET /a\", ...]`\n   - src/plugins/metrics.js：`createMetrics(emitter)` 统计 `request` 与 `response`（参数 `{ status }`）事件，`api.snapshot()` 返回 `{ requests, byStatus: { \"200\": n, ... } }`\n3. src/app.js 导出 `createApp()`：创建 emitter、挂载两个插件，返回 `{ handle(method, path, status), logs(), metrics(), dispose() }`；`handle` 依次 emit request 与 response；`dispose()` 后插件不再记录\n为每一步补充测试。",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}

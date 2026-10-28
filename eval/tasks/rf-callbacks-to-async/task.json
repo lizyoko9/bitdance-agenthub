@@ -1,0 +1,7 @@
+{
+  "id": "rf-callbacks-to-async",
+  "category": "refactor",
+  "prompt": "src/json-file.js 里的 `readJson(path, cb)` / `writeJson(path, data, cb)` 是回调风格，src/config.js 基于它们实现了 `loadConfig` / `saveConfig`（也是回调风格）。请整体迁移到 async/await：\n- json-file.js 的 `readJson(path)` / `writeJson(path, data)` 改为返回 Promise（用 node:fs/promises），不再接受回调\n  - readJson 遇到文件不存在时 reject 的错误 `code` 仍为 'ENOENT'；JSON 解析失败时 reject 的错误 message 包含文件路径\n  - writeJson 以 2 空格缩进写入并以换行结尾，写入时先写临时文件再 rename（原子写）\n- config.js 的 `loadConfig(path)` / `saveConfig(path, patch)` 改为 async，语义保持：文件不存在时返回 DEFAULTS 的副本；saveConfig 合并 patch 后写回并返回合并结果\n- 更新 test/ 下的测试以适配新 API（断言的行为不变）",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}

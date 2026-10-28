@@ -1,0 +1,7 @@
+{
+  "id": "mm-csv-groupby",
+  "category": "multi-module",
+  "prompt": "给 CSV 报表工具加分组汇总：\n- src/parse.js：现有 `parseCsv(text)` 不支持带引号的字段。请支持双引号包裹（字段内可含逗号，`\"\"` 表示一个双引号），并忽略结尾空行\n- src/aggregate.js：新增 `groupBy(rows, key, valueColumn)`，返回按 key 字典序排序的数组 `[{ key, count, sum, avg }]`；valueColumn 按数字解析，avg 保留两位小数（number 类型）\n- src/cli.js：支持 `node src/cli.js <file> --group-by <column> --value <column>`，向 stdout 输出 JSON（groupBy 的结果）；不带 --group-by 时保持现有行为（输出总行数）\n- 列不存在时 CLI 以退出码 1 结束并在 stderr 输出包含列名的错误\n- 补充测试，原有测试保持通过",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}

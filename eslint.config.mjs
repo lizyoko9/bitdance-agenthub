@@ -22,6 +22,8 @@ const eslintConfig = defineConfig([
     "apps/mobile/dist/**",
     "apps/mobile/ios/App/App/public/**",
     "next-env.d.ts",
+    // 评测题目是给 agent 改的样本项目（含故意留空的 stub），不按本项目规范检查
+    "eval/tasks/**",
   ]),
   {
     rules: {

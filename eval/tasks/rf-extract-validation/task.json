@@ -1,0 +1,7 @@
+{
+  "id": "rf-extract-validation",
+  "category": "refactor",
+  "prompt": "src/users.js 和 src/orders.js 里各自内联了一份几乎相同的校验逻辑（必填字段检查、邮箱格式、正整数检查）。请重构：\n- 新建 src/validate.js，导出 `requireFields(obj, fields)`、`isEmail(value)`、`isPositiveInt(value)`\n  - requireFields 返回缺失字段名数组（值为 undefined / null / 空白字符串都算缺失）\n- users.js 和 orders.js 改为从 ./validate.js 导入并使用这些函数，删除各自的重复实现\n- 对外行为保持完全不变：现有 test/ 下的测试必须全部通过，不要修改它们\n- 为 validate.js 补充测试",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}

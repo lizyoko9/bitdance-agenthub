@@ -1,0 +1,7 @@
+{
+  "id": "sf-date-range",
+  "category": "single-file",
+  "prompt": "在 src/range.js 里，`daysInRange(start, end)` 应该返回从 start 到 end（两端都包含）的所有日期字符串（YYYY-MM-DD）。\n现在它少返回了最后一天，而且跨夏令时 / 跨月时有时会重复或跳过日期。请修复，保持函数签名不变，并补充测试。",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}

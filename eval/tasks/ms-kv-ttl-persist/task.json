@@ -1,0 +1,7 @@
+{
+  "id": "ms-kv-ttl-persist",
+  "category": "multi-step",
+  "prompt": "按顺序完成三步（后一步依赖前一步）：\n1. src/kv.js：给 `createKv({ now })` 加过期时间。`now` 是可注入的时钟函数（默认 Date.now）\n   - `set(key, value, { ttlMs })`：ttlMs 可选，必须是正整数，否则抛 RangeError\n   - 过期的 key 对 `get` / `has` / `keys()` 都不可见（`get` 返回 undefined）\n   - 新增 `entries()` 返回未过期的 `[{ key, value, expiresAt }]`（无 TTL 时 expiresAt 为 null）\n2. 新建 src/persist.js：`save(kv, file)` 把 `kv.entries()` 写成 JSON；`load(file, { now })` 返回新的 kv，按绝对 `expiresAt` 恢复（加载时已过期的条目丢弃）；文件不存在时返回空 kv\n3. 新建 src/cli.js：`node src/cli.js <file> set <key> <value> [--ttl <ms>]` / `get <key>` / `dump`\n   - set 后持久化到 file；get 命中时向 stdout 输出 value，未命中退出码 2；dump 输出 entries 的 JSON\n为每一步补充测试，原有测试保持通过。",
+  "acceptCommand": "node --test __eval__/*.test.js",
+  "timeoutMs": 900000
+}
