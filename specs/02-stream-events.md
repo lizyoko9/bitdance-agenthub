@@ -232,7 +232,7 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 | `message.added` | ❌ 透传 | user 消息已由 `sendMessage` 落库；此事件仅广播给其它客户端，前端按 id 幂等 upsert（详见下方「用户消息广播」） |
 | `message.removed` | ❌ 透传 | 撤回/编辑/重新生成已在服务端删库；此事件仅广播 messageIds/artifactIds 让其它客户端幂等移除 |
 | `part.start` | ✅ 写入 `messages.parts[i]` | parts 整体作为 JSON 更新 |
-| `part.delta` | ✅ 追加到 `messages.parts[i].content` | 高频写，可批量合并（每 100ms flush） |
+| `part.delta` | ✅ 追加到 `messages.parts[i].content` | 高频写，按 100ms 窗口合并落库（见下方「写入策略」） |
 | `part.end` | ❌ 透传 | parts 状态由 part.start/delta 已足够 |
 | `tool.call` | ✅ 写为 message.parts 里的 tool_use part | |
 | `tool.result` | ✅ 写为 message.parts 里的 tool_result part | run 失败 / 中止时，AgentRunner 会为未配对 `tool_result` 的 `tool_use` 补发 `isError=true` 结果 |
@@ -245,17 +245,12 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 | `run.usage` | ✅ 落到 `agent_runs.usage` JSON 列 | adapter 在 run 结束前 emit；前端 store 同步更新该 run 行 |
 | `heartbeat` | ❌ 透传 | |
 
-**写入策略**：流式 `part.delta` 高频，使用「内存缓冲 + 定时 flush」避免每个 delta 都打 DB：
+**写入策略**：流式 `part.delta` 高频，且每次写入都是整个 `parts` JSON（O(n²) 写放大），因此只改内存、按窗口合并落库。实现见 `src/server/message-parts-flusher.ts`：
 
-```typescript
-// 服务端伪代码
-const buffer = new Map<string, Message>()  // messageId → in-memory state
-const flushInterval = setInterval(() => {
-  for (const msg of buffer.values()) {
-    db.update(messages).set({ parts: msg.parts }).where(eq(messages.id, msg.id))
-  }
-}, 100)
-```
+- `part.delta` 只改 `consumeStream` 内的 `partsBuffer` 并标脏；`PART_DELTA_FLUSH_INTERVAL_MS`（100ms）窗口结束写一次
+- `message.end` 把 `parts` 与 `status='complete'` 一起写入；`consumeStream` 退出（含抛错 / 中止）时 `dispose()` 强制刷盘
+- 读消息快照（`listMessagesSnapshot`）前调用 `flushAllMessageParts()`，保证快照不比已推送的事件旧
+- 写入使用同步 API（better-sqlite3），使快照读可以在一个同步块内完成
 
 ---
 
@@ -267,7 +262,28 @@ data: {"type":"part.delta","conversationId":"conv_abc","timestamp":1715000000000
 
 **不使用 SSE 的 `event:` 字段**（每个事件类型不同 event 名，前端切分支麻烦）。统一 `data:` 一个字段，前端 `JSON.parse` 后 switch type。
 
-**心跳间隔 15s**，防止中间代理 / 浏览器空闲断连。
+**心跳间隔 15s**，防止中间代理 / 浏览器空闲断连。心跳与 `connected` / `resync` 控制消息不带 `id:`。
+
+---
+
+## 断线恢复
+
+EventBus 给每个事件分配单调 seq，SSE 帧带 `id: <bootId>-<seq>`（`bootId` 为进程启动时生成，区分重启后 seq 归零），并保留最近 `REPLAY_BUFFER_SIZE`（5000）条事件。
+
+```
+id: mvr44n2u-34
+data: {"type":"run.end",...}\n\n
+```
+
+重连流程：
+
+1. 浏览器自动重连时带 `Last-Event-ID` 头；客户端手动重建 EventSource（readyState=CLOSED 时退避重试）时改带 `?lastEventId=` query，头优先
+2. 服务端在同一同步块内「补发缺口 + 订阅新事件」，不漏不重
+3. 补不上（bootId 不同 = 进程重启、seq 早于缓冲最旧一条、id 非法）时推控制消息 `{"type":"resync"}`
+4. 客户端收到 `resync`：`resetForStreamResync()` 丢弃非当前会话的消息缓存与「运行中」run；重拉会话列表、当前会话消息快照与各类 pending；期间到达的事件排队
+5. `GET /api/conversations/[id]/messages` 返回 `{ messages, eventId }`，`eventId` 为快照对应的事件游标；快照落地后，排队事件中 seq ≤ 游标的**消息模型事件**（`message.*` / `part.*` / `tool.*`）丢弃，其余按序应用（`src/lib/stream-resync.ts`）
+
+已知边界：`consumeStream` 先 `await persistEvent` 再 `publish`，两者之间隔一个微任务；若快照读恰好落在这个间隙，该事件会被重复应用一次（仅影响前端显示，DB 正确，刷新即恢复）。
 
 ---
 

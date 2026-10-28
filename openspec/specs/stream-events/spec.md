@@ -15,6 +15,22 @@ All agent output, tool activity, artifact creation, pending approvals, dispatch 
 - **THEN** AgentRunner persists the part
 - **AND** EventBus publishes the same event to SSE subscribers.
 
+### Requirement: SSE transport SHALL support gap recovery
+The SSE endpoint SHALL tag every StreamEvent with a monotonic `id` (`<bootId>-<seq>`) and keep a bounded replay buffer. Details live in `specs/02-stream-events.md` §断线恢复.
+
+#### Scenario: Short disconnect
+- **WHEN** a client reconnects with a `Last-Event-ID` still inside the replay buffer
+- **THEN** the server replays every event after that id before streaming new ones.
+
+#### Scenario: Unrecoverable gap
+- **WHEN** the id is from a previous process, older than the buffer, or malformed
+- **THEN** the server sends a `resync` control message
+- **AND** the client refetches snapshots and applies only queued message events newer than the snapshot's `eventId`.
+
+#### Scenario: Delta persistence
+- **WHEN** an adapter emits `part.delta`
+- **THEN** AgentRunner coalesces DB writes per 100ms window and flushes before any message snapshot read and when the stream ends.
+
 ### Requirement: Message streaming SHALL be bracketed
 
 Each agent message MUST begin with `message.start` and finish with `message.end`, with part and tool events associated to the message id between those boundaries.
