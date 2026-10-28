@@ -264,6 +264,8 @@ data: {"type":"part.delta","conversationId":"conv_abc","timestamp":1715000000000
 
 **心跳间隔 15s**，防止中间代理 / 浏览器空闲断连。心跳与 `connected` / `resync` 控制消息不带 `id:`。
 
+**进程退出**：Next 生产模式收到 SIGTERM/SIGINT 时先 `server.close()` 等进行中的请求结束才退出，SSE 请求永不结束会让进程挂死。每条 SSE 流在 `src/server/sse-connections.ts` 登记，信号到达时统一关闭，Next 的优雅退出随之完成（客户端随后按「断线恢复」重连）。Electron 桌面版服务端跑在主进程内，随 `app.quit()` 一起退出，不受影响。
+
 ---
 
 ## 断线恢复
