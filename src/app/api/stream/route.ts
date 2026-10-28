@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 
 import { eventBus, type SequencedEvent } from '@/server/event-bus'
+import { registerSseStream } from '@/server/sse-connections'
 
 /**
  * GET /api/stream
@@ -51,6 +52,7 @@ export async function GET(req: NextRequest) {
         closed = true
         clearInterval(heartbeat)
         unsubscribe()
+        unregisterStream()
         try {
           controller.close()
         } catch {
@@ -58,6 +60,8 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // 进程收到 SIGTERM/SIGINT 时由登记表统一关闭，否则 Next 优雅退出会一直等这个请求
+      const unregisterStream = registerSseStream(close)
       req.signal.addEventListener('abort', close)
     },
   })
