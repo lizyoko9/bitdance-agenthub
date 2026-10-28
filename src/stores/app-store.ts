@@ -94,6 +94,8 @@ interface AppState {
 
   // ─── actions ───────────────────────────────────────
   setStreamConnected(connected: boolean): void
+  /** SSE 补发失败（服务端重启 / 缺口超出缓冲）后丢弃可能过期的派生状态，由 StreamProvider 重拉快照 */
+  resetForStreamResync(): void
 
   setConversations(list: ConversationWithMeta[]): void
   upsertConversation(conv: ConversationWithMeta): void
@@ -196,6 +198,25 @@ export const useAppStore = create<AppState>()(
     setStreamConnected: (connected) =>
       set((s) => {
         s.streamConnected = connected
+      }),
+
+    resetForStreamResync: () =>
+      set((s) => {
+        // 非当前会话直接丢缓存，打开时按快照重新加载；当前会话由 StreamProvider 立即重拉
+        for (const convId of Object.keys(s.messageIdsByConv)) {
+          if (convId === s.activeConversationId) continue
+          for (const mid of s.messageIdsByConv[convId]) delete s.messages[mid]
+          delete s.messageIdsByConv[convId]
+          delete s.pendingWritesByConv[convId]
+          delete s.pendingBashCommandsByConv[convId]
+          delete s.pendingQuestionsByConv[convId]
+        }
+        // run.end 可能丢在缺口里；快照不含 run 状态，宁可去掉「运行中」也不让它永远转圈
+        for (const runs of Object.values(s.runsByConv)) {
+          for (const runId of Object.keys(runs)) {
+            if (runs[runId].status === 'running') delete runs[runId]
+          }
+        }
       }),
 
     setConversations: (list) =>

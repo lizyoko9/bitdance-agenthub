@@ -354,10 +354,17 @@ export async function rejectPendingDispatchPlan(
 }
 
 export async function fetchMessages(conversationId: string): Promise<MessageRow[]> {
-  const { messages } = await json<{ messages: MessageRow[] }>(
+  const { messages } = await fetchMessagesSnapshot(conversationId)
+  return messages
+}
+
+/** eventId 是快照对应的 SSE 事件游标，断线 resync 时用来丢弃快照已包含的事件。 */
+export async function fetchMessagesSnapshot(
+  conversationId: string,
+): Promise<{ messages: MessageRow[]; eventId: string }> {
+  return json<{ messages: MessageRow[]; eventId: string }>(
     fetch(`/api/conversations/${conversationId}/messages`),
   )
-  return messages
 }
 
 // ─── Search ──────────────────────────────────────

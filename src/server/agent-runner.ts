@@ -56,6 +56,7 @@ import {
 } from './dispatch-plan'
 import { eventBus } from './event-bus'
 import { newArtifactId, newRunId } from './ids'
+import { createMessagePartsFlusher, type MessagePartsFlusher } from './message-parts-flusher'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
 import { buildProjectFiles } from './project-artifact'
 import { getAppSettings } from './settings-service'
@@ -1534,98 +1535,107 @@ async function consumeStream(
   let taskReport: TaskResultReport | undefined
   let currentMessageId: string | null = null
 
-  for await (const event of stream) {
-    if (event.type === 'message.start') currentMessageId = event.messageId
-    if (event.type === 'tool.call') toolNameByCallId.set(event.callId, event.toolName)
+  const flusher = createMessagePartsFlusher(partsBuffer, (messageId, parts) => {
+    db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, messageId)).run()
+  })
 
-    await persistEvent(event, partsBuffer, runId, agentId, outputMessageIds, artifactIds)
-    publish(event)
+  try {
+    for await (const event of stream) {
+      if (event.type === 'message.start') currentMessageId = event.messageId
+      if (event.type === 'tool.call') toolNameByCallId.set(event.callId, event.toolName)
 
-    if (event.type === 'artifact.create') {
-      const outputKey = outputKeyByArtifactId.get(event.artifact.id)
-      if (outputKey) outputArtifacts[outputKey] = event.artifact.id
-    }
+      await persistEvent(event, partsBuffer, flusher, runId, agentId, outputMessageIds, artifactIds)
+      publish(event)
 
-    // 工具产出的 artifact 自动作为 artifact_ref part 挂到当前 message 末尾，
-    // 让用户在聊天流里看到产物卡片而不仅是 tool_result。
-    if (event.type === 'artifact.create' && currentMessageId) {
-      const parts = partsBuffer.get(currentMessageId) ?? []
-      const partIndex = parts.length
-      const refPart: MessagePart = { type: 'artifact_ref', artifactId: event.artifact.id }
-      parts.push(refPart)
-      partsBuffer.set(currentMessageId, parts)
-      await db
-        .update(schema.messages)
-        .set({ parts })
-        .where(eq(schema.messages.id, currentMessageId))
-
-      publish({
-        type: 'part.start',
-        conversationId: event.conversationId,
-        timestamp: Date.now(),
-        messageId: currentMessageId,
-        partIndex,
-        part: refPart,
-      })
-    }
-
-    if (event.type === 'deploy.status') {
-      const parts = partsBuffer.get(event.messageId) ?? []
-      const partIndex = parts.length
-      const deployPart: MessagePart = { type: 'deploy_status', deployment: event.deployment }
-      parts.push(deployPart)
-      partsBuffer.set(event.messageId, parts)
-      await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
-
-      publish({
-        type: 'part.start',
-        conversationId: event.conversationId,
-        timestamp: Date.now(),
-        messageId: event.messageId,
-        partIndex,
-        part: deployPart,
-      })
-    }
-
-    if (event.type === 'message.end') currentMessageId = null
-    if (event.type === 'tool.result') {
-      const toolName = toolNameByCallId.get(event.callId)
-      if (toolName && !event.isError && isTaskResultReportToolName(toolName)) {
-        const report = readTaskResultReportFromToolResult(event.result)
-        if (report) taskReport = report
+      if (event.type === 'artifact.create') {
+        const outputKey = outputKeyByArtifactId.get(event.artifact.id)
+        if (outputKey) outputArtifacts[outputKey] = event.artifact.id
       }
-      const handoff = readArtifactHandoffResult(event.result)
-      if (handoff) outputKeyByArtifactId.set(handoff.artifactId, handoff.outputKey)
-    }
-    if (event.type === 'tool.call') {
-      const control = onToolCall?.(event)
-      if (control?.stop) {
-        if ('result' in control) {
-          const resultEvent: StreamEvent = {
-            type: 'tool.result',
-            conversationId: event.conversationId,
-            timestamp: Date.now(),
-            messageId: event.messageId,
-            callId: event.callId,
-            result: control.result,
-            isError: control.isError ?? false,
-          }
-          await persistEvent(resultEvent, partsBuffer, runId, agentId, outputMessageIds, artifactIds)
-          publish(resultEvent)
-        }
 
-        const endEvent: StreamEvent = {
-          type: 'message.end',
+      // 工具产出的 artifact 自动作为 artifact_ref part 挂到当前 message 末尾，
+      // 让用户在聊天流里看到产物卡片而不仅是 tool_result。
+      if (event.type === 'artifact.create' && currentMessageId) {
+        const parts = partsBuffer.get(currentMessageId) ?? []
+        const partIndex = parts.length
+        const refPart: MessagePart = { type: 'artifact_ref', artifactId: event.artifact.id }
+        parts.push(refPart)
+        partsBuffer.set(currentMessageId, parts)
+        await db
+          .update(schema.messages)
+          .set({ parts })
+          .where(eq(schema.messages.id, currentMessageId))
+
+        publish({
+          type: 'part.start',
+          conversationId: event.conversationId,
+          timestamp: Date.now(),
+          messageId: currentMessageId,
+          partIndex,
+          part: refPart,
+        })
+      }
+
+      if (event.type === 'deploy.status') {
+        const parts = partsBuffer.get(event.messageId) ?? []
+        const partIndex = parts.length
+        const deployPart: MessagePart = { type: 'deploy_status', deployment: event.deployment }
+        parts.push(deployPart)
+        partsBuffer.set(event.messageId, parts)
+        await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
+
+        publish({
+          type: 'part.start',
           conversationId: event.conversationId,
           timestamp: Date.now(),
           messageId: event.messageId,
+          partIndex,
+          part: deployPart,
+        })
+      }
+
+      if (event.type === 'message.end') currentMessageId = null
+      if (event.type === 'tool.result') {
+        const toolName = toolNameByCallId.get(event.callId)
+        if (toolName && !event.isError && isTaskResultReportToolName(toolName)) {
+          const report = readTaskResultReportFromToolResult(event.result)
+          if (report) taskReport = report
         }
-        await persistEvent(endEvent, partsBuffer, runId, agentId, outputMessageIds, artifactIds)
-        publish(endEvent)
-        currentMessageId = null
-        break
+        const handoff = readArtifactHandoffResult(event.result)
+        if (handoff) outputKeyByArtifactId.set(handoff.artifactId, handoff.outputKey)
+      }
+      if (event.type === 'tool.call') {
+        const control = onToolCall?.(event)
+        if (control?.stop) {
+          if ('result' in control) {
+            const resultEvent: StreamEvent = {
+              type: 'tool.result',
+              conversationId: event.conversationId,
+              timestamp: Date.now(),
+              messageId: event.messageId,
+              callId: event.callId,
+              result: control.result,
+              isError: control.isError ?? false,
+            }
+            await persistEvent(resultEvent, partsBuffer, flusher, runId, agentId, outputMessageIds, artifactIds)
+            publish(resultEvent)
+          }
+
+          const endEvent: StreamEvent = {
+            type: 'message.end',
+            conversationId: event.conversationId,
+            timestamp: Date.now(),
+            messageId: event.messageId,
+          }
+          await persistEvent(endEvent, partsBuffer, flusher, runId, agentId, outputMessageIds, artifactIds)
+          publish(endEvent)
+          currentMessageId = null
+          break
+        }
       }
     }
+  } finally {
+    // 中途抛错 / 中止时也要把窗口内的 delta 落库，否则刷新后丢尾巴
+    flusher.dispose()
   }
 
   return { artifactIds, outputMessageIds, outputArtifacts, ...(taskReport ? { taskReport } : {}) }
@@ -1642,6 +1652,7 @@ function readArtifactHandoffResult(result: unknown): { artifactId: string; outpu
 async function persistEvent(
   event: StreamEvent,
   partsBuffer: Map<string, MessagePart[]>,
+  flusher: MessagePartsFlusher,
   runId: string,
   agentId: string,
   outputMessageIds: string[],
@@ -1697,7 +1708,8 @@ async function persistEvent(
       else if (event.delta.type === 'thinking.append' && part.type === 'thinking')
         part.content += event.delta.text
       else if (event.delta.type === 'code.append' && part.type === 'code') part.content += event.delta.text
-      await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
+      // 高频事件：只改内存，按合并窗口落库（specs/02「持久化 vs 透传」）
+      flusher.markDirty(event.messageId)
       return
     }
     case 'tool.call': {
@@ -1725,9 +1737,11 @@ async function persistEvent(
       return
     }
     case 'message.end': {
+      const parts = partsBuffer.get(event.messageId)
+      flusher.clear(event.messageId)
       await db
         .update(schema.messages)
-        .set({ status: 'complete' })
+        .set(parts ? { parts, status: 'complete' } : { status: 'complete' })
         .where(eq(schema.messages.id, event.messageId))
       partsBuffer.delete(event.messageId)
       return

@@ -16,6 +16,7 @@ import {
   type DeployCommandResult,
 } from './deploy-command-service'
 import { eventBus } from './event-bus'
+import { flushAllMessageParts } from './message-parts-flusher'
 import {
   newConversationId,
   newMessageId,
@@ -258,10 +259,23 @@ export async function toggleArchiveConversation(
 
 // ─── 列出会话消息 ────────────────────────────────────────
 export async function listMessages(conversationId: string) {
-  return db.query.messages.findMany({
-    where: eq(schema.messages.conversationId, conversationId),
-    orderBy: [schema.messages.createdAt],
-  })
+  return listMessagesSnapshot(conversationId).messages
+}
+
+/**
+ * 消息快照 + 对应的 SSE 事件游标。整段同步执行：游标之前的事件都已反映在快照里，
+ * 客户端只需应用游标之后的事件（specs/02「断线恢复」）。
+ */
+export function listMessagesSnapshot(conversationId: string): { messages: MessageRow[]; eventId: string } {
+  const eventId = eventBus.lastEventId()
+  flushAllMessageParts()
+  const messages = db.query.messages
+    .findMany({
+      where: eq(schema.messages.conversationId, conversationId),
+      orderBy: [schema.messages.createdAt],
+    })
+    .sync()
+  return { messages, eventId }
 }
 
 // ─── 删除会话 ────────────────────────────────────────────

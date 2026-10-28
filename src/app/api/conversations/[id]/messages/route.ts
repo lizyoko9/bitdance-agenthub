@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { clearConversationHistory, listMessages, sendMessage } from '@/server/conversation-service'
+import { clearConversationHistory, listMessagesSnapshot, sendMessage } from '@/server/conversation-service'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -21,8 +21,8 @@ const SendBody = z
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params
-  const messages = await listMessages(id)
-  return NextResponse.json({ messages })
+  const { messages, eventId } = listMessagesSnapshot(id)
+  return NextResponse.json({ messages, eventId })
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
