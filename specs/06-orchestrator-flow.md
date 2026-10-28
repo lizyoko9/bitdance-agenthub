@@ -236,6 +236,8 @@ const planTasksTool: ToolDef = {
 
 **结果上报**：子 Agent 收尾时必须调用 `report_task_result`。AgentRunner 不再把“child run 成功结束”或“artifact 已产出”直接等同于“任务完成”；只有 report 的 `status='complete'` 且 `acceptanceCriteria` 全部通过时，任务才可能进入 `complete`。代码实现任务还必须有至少一条非 prepare 的成功验证命令 evidence（如 build/test/typecheck/compile exitCode=0），并且 required project output 已由 workspace 写入产物化并绑定。未调用该工具、report 为 `failed/blocked`、任一 acceptance result 失败 / 缺失、代码任务无成功验证命令、或代码任务缺少 required project output，都会把该任务判为 `failed`。
 
+**评测开关**：服务端以 `AGENTHUB_EVAL_EVIDENCE_GATES=off` 启动时关闭证据门，仅供评测对照组（见 `eval/README.md`）使用：不自动执行 `requiredCommands`，不做 report / 命令 / 目标路径 / required project output 的证据判定。子任务结果只看它自己的上报——未调用 `report_task_result` 或 report 为 `complete` 都算 `complete`，report 为 `failed/blocked` 仍判 `failed`。plan 阶段的校验不受影响。默认（未设置或其他值）证据门开启。
+
 **artifact 注入**：
 - `upstream_artifacts`：来自当前任务 `dependsOn` 的传递闭包上游结果，按 artifact id 去重后全部列出。例：`t4 -> t3 -> t2 -> t1` 时，t4 能看到 t1/t2/t3 的产物摘要。
 - `existing_artifacts`：来自当前会话其它产物，排除 `upstream_artifacts` 中已经列过的 id，只保留最近 N 个（默认 5，按 `createdAt desc`），避免长会话把所有产物重复塞给每个子 agent。

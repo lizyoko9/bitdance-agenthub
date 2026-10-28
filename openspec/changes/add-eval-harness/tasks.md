@@ -1,0 +1,7 @@
+- [ ] 1. 新增 eval-harness 能力规格，更新 orchestrator 规格与 `specs/06-orchestrator-flow.md` 说明证据门开关。
+- [ ] 2. `agent-runner.ts` 读取 `AGENTHUB_EVAL_EVIDENCE_GATES`，关闭时跳过 requiredCommands 与证据评估；补单测。
+- [ ] 3. 编写 fixture 格式与 `--check-fixtures` 模式。
+- [ ] 4. 编写 8–10 个任务（4 个类别），全部通过 `--check-fixtures`。
+- [ ] 5. 编写跑分主流程（建会话、事件驱动审批、验收、JSONL）与 `summary.md` 聚合。
+- [ ] 6. 用 Mock agent 跑通全流程（不耗 token，预期全部不通过但指标完整）。
+- [ ] 7. 在 `eval/README.md` 写明运行方式与成本估算。
