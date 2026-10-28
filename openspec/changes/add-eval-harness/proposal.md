@@ -16,6 +16,6 @@ Orchestrator 的拆任务、DAG 并行、证据门、重试 / replan 都是「�
 ## Impact
 
 - 新增：`eval/**`、`openspec/specs/eval-harness/`。
-- 修改：`src/server/agent-runner.ts`（证据门开关，约 10 行）、`src/app/api/platform/route.ts`（返回 `evidenceGates`）、`specs/06-orchestrator-flow.md`、`.gitignore`（忽略 `eval/results/`）。
+- 修改：`src/server/agent-runner.ts`（证据门开关，约 10 行）、`src/app/api/platform/route.ts`（返回 `evidenceGates`）、`specs/06-orchestrator-flow.md`；配置：`tsconfig.json`（`allowImportingTsExtensions`，脚本用 Node 原生类型剥离直接运行）、`eslint.config.mjs`（忽略 `eval/tasks/**` 样本项目）、`vitest.config.ts`（纳入 `eval/lib` 单测）。
 - 不新增依赖：fixture 是零依赖 Node 项目，验收用 `node --test`；脚本用 Node ≥ 20 自带的 `fetch`。
 - 真实评测会消耗 LLM token，由使用者显式运行，不进 CI。

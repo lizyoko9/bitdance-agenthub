@@ -28,9 +28,15 @@ eval/tasks/<task-id>/
 
 三组的 Orchestrator 与执行 agent 使用同一 provider / 模型，由命令行参数指定 agent id。证据门开关是进程级环境变量，因此 `orch-nogate` 需要单独启动一次服务端；`GET /api/platform` 额外返回 `evidenceGates: boolean`，脚本启动时校验它与 `--groups` 一致，防止开关和组别对不上导致数据作废。
 
+## 输出目录
+
+`--out` 默认 `~/.agenthub-eval/<时间戳>/`，含 `results.jsonl`、`summary.md` 与每个用例的 `workspaces/<caseId>/`。不放在仓库内：local 模式拒绝 `/private`、`/var` 等系统目录，而放在 AgentHub 仓库里会让 agent 看到整个仓库（包括 `eval/tasks/*/hidden`）。
+
+复用同一个 `--out` 时，已在 `results.jsonl` 里的用例会跳过，`summary.md` 按全部结果重新生成——`orch-nogate` 与 `orch-gate` 需要两次不同开关的服务端运行，就靠这一点合并到同一份报告。
+
 ## 跑一个用例
 
-1. 把 `repo/` 复制到 `<results>/<run-id>/workspace/`。
+1. 把 `repo/` 复制到 `<out>/workspaces/<caseId>/`。
 2. `POST /api/conversations`（`boundPath` 指向该目录，local 模式），再 `PATCH` 设 `fsWriteApprovalMode: 'auto'`。
 3. 订阅 `/api/stream`，按 `conversationId` 过滤事件。
 4. `POST /api/conversations/:id/messages` 发送 `task.prompt`（群聊时 @Orchestrator）。
@@ -51,6 +57,11 @@ eval/tasks/<task-id>/
 - `questions`、`bashApprovals`
 
 `summary.md` 按组聚合：通过率（含按 category 拆分）、平均 / 中位耗时与 token、平均派发数。每组每任务跑 `--repeat N` 次（默认 3）以降低随机性。
+
+## 已知局限
+
+- 隐藏测试只防「运行期间可见」。Claude Code / Codex 等自带文件工具的 adapter 理论上能按绝对路径读到 `eval/tasks/*/hidden`；Prompt 不提及该路径，结果中如发现异常高的通过率需人工抽查 transcript。
+- Mock adapter 不会调用 `plan_tasks` 和写文件，只能验证流程管道（建会话 / 事件 / 验收 / 报告），不能验证审批与派发分支。
 
 ## 不做
 
