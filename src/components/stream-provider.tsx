@@ -8,6 +8,7 @@ import {
   fetchPendingBashCommands,
   fetchPendingDispatchPlans,
   fetchPendingQuestions,
+  fetchPendingSkillInstalls,
   fetchPendingWrites,
 } from '@/lib/api'
 import { selectEventsAfterSnapshot, type QueuedStreamEvent } from '@/lib/stream-resync'
@@ -36,7 +37,7 @@ let reconnectAttempt = 0
 let resyncQueue: QueuedStreamEvent[] | null = null
 let resyncGeneration = 0
 
-async function resyncFromSnapshot(): Promise<void> {
+export async function resyncFromSnapshot(): Promise<void> {
   const generation = ++resyncGeneration
   resyncQueue = []
   const store = useAppStore.getState()
@@ -48,7 +49,7 @@ async function resyncFromSnapshot(): Promise<void> {
     const [conversations, snapshot] = await Promise.all([
       fetchConversations(),
       convId ? fetchMessagesSnapshot(convId) : Promise.resolve(null),
-      convId ? refreshPendingFor(convId) : Promise.resolve(),
+      convId ? refreshPendingFor(convId, generation) : Promise.resolve(),
     ])
     if (generation !== resyncGeneration) return
     const s = useAppStore.getState()
@@ -71,18 +72,21 @@ async function resyncFromSnapshot(): Promise<void> {
   for (const event of events) applyEvent(event)
 }
 
-async function refreshPendingFor(conversationId: string): Promise<void> {
-  const [writes, bashCommands, questions, plans] = await Promise.all([
+async function refreshPendingFor(conversationId: string, generation: number): Promise<void> {
+  const [writes, bashCommands, questions, plans, skillInstalls] = await Promise.all([
     fetchPendingWrites(conversationId),
     fetchPendingBashCommands(conversationId),
     fetchPendingQuestions(conversationId),
     fetchPendingDispatchPlans(conversationId),
+    fetchPendingSkillInstalls(conversationId),
   ])
+  if (generation !== resyncGeneration) return
   const s = useAppStore.getState()
   s.setPendingWritesForConversation(conversationId, writes)
   s.setPendingBashCommandsForConversation(conversationId, bashCommands)
   s.setPendingQuestionsForConversation(conversationId, questions)
   s.setPendingDispatchPlansForConversation(conversationId, plans)
+  s.setPendingSkillInstallsForConversation(conversationId, skillInstalls)
 }
 
 function connect(): void {

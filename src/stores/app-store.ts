@@ -217,6 +217,9 @@ export const useAppStore = create<AppState>()(
           delete s.pendingBashCommandsByConv[convId]
           delete s.pendingQuestionsByConv[convId]
         }
+        for (const convId of Object.keys(s.pendingSkillInstallsByConv)) {
+          if (convId !== s.activeConversationId) delete s.pendingSkillInstallsByConv[convId]
+        }
         // run.end 可能丢在缺口里；快照不含 run 状态，宁可去掉「运行中」也不让它永远转圈
         for (const runs of Object.values(s.runsByConv)) {
           for (const runId of Object.keys(runs)) {
@@ -596,6 +599,12 @@ export const useAppStore = create<AppState>()(
           }
 
           case 'run.end': {
+            const installs = s.pendingSkillInstallsByConv[event.conversationId]
+            if (installs) {
+              const remaining = installs.filter((p) => p.runId !== event.runId)
+              if (remaining.length === 0) delete s.pendingSkillInstallsByConv[event.conversationId]
+              else s.pendingSkillInstallsByConv[event.conversationId] = remaining
+            }
             const run = s.runsByConv[event.conversationId]?.[event.runId]
             if (run) {
               run.status = event.status
