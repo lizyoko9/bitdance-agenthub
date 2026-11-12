@@ -167,6 +167,16 @@ interface AdapterInput {
        继续下一轮
 ```
 
+### 可选运行时评测策略
+
+`CustomAgentAdapter` 构造函数可接收 `CustomAgentAdapterOptions`（`src/server/adapters/custom-request-policy.ts`）：`requestSettings` 限定可覆盖 `reasoning_effort` / `max_completion_tokens`，`maxRetries` 控制 SDK 重试，`requestPolicy` 提供发送前检查和逐请求观察。普通应用不传选项时，仍使用现有请求参数、SDK 两次重试和最多八轮 tool loop；调用保留 `AbortSignal`，不改变 `AdapterInput` 或 `StreamEvent`。
+
+Terminal-Bench 入口使用 `eval/terminalbench/request-policy.ts` 的 `createEvalRequestPolicy()`：同一 trial 的根、子 run 共享外部 policy 闭包，在实际 HTTP 请求发送前检查 UTF-8 JSON body 大小和累计请求数。默认最多八个请求、单 body 64 KiB、累计 256 KiB，设置 `reasoning_effort='none'`、`max_completion_tokens=2048`、SDK 重试为零。额度耗尽后，后续请求保持拒绝；byte 约束不代表精确 token 或美元上限。评测配置不写入普通 Agent 或 DB schema。
+
+`requestPolicy.observe()` 接收白名单请求记录，包括 run/message/模型标识、实际尝试序号、请求 bytes、响应 request ID/model/fingerprint、耗时、HTTP 状态、结束状态和可用 usage。记录在 yield 工具事件之前保留，因此 Orchestrator 在 `plan_tasks` 处提前停止消费也不会覆盖该请求的用量。输入/输出、缓存读写和 reasoning tokens 的缺失值为 `null`；`usageComplete` 表示输入、输出总量均已取得。OpenAI 缓存读量读取 `prompt_tokens_details.cached_tokens`。观察记录不包含认证头、请求 body 或凭据。
+
+逐请求账本用于评测计量，独立于应用现有 `run.usage` 持久化。运行方式与官方 verifier 的职责见 [`eval/terminalbench/README.md`](../eval/terminalbench/README.md)；正式能力契约见 `openspec/specs/terminal-bench-evaluation/spec.md`。
+
 ### Reasoning 内容（DeepSeek thinking mode）
 
 DeepSeek 等支持思考链的模型在 stream 中会单独输出 `delta.reasoning_content`。Adapter 处理：

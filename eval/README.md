@@ -2,6 +2,8 @@
 
 用一组固定代码任务 + 隐藏验收测试，对比不同编排方式的通过率与代价。设计见 `openspec/changes/add-eval-harness/design.md`。
 
+公开 Terminal-Bench 任务的容器内 headless 接入、独立 Harbor 依赖、请求限额和复现命令见 [`terminalbench/README.md`](./terminalbench/README.md)。该入口使用官方 verifier，并将首次一题一次的短预算运行标为集成 smoke；各次运行结果单独留档。
+
 ## 题目
 
 `tasks/<id>/` 下每道题包含 `task.json`（需求、验收命令、超时）、`repo/`（初始项目）、`hidden/`（验收测试，run 结束后才复制进 workspace 的 `__eval__/`）、`solution/`（参考解）。全部是零依赖 Node 项目，验收用 `node --test`。

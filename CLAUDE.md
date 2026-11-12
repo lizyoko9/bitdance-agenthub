@@ -286,6 +286,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `specs/message-parts/spec.md` — MessagePart 结构
 - `specs/artifacts/spec.md` — Artifact 生命周期
 - `specs/adapters/spec.md` — Adapter 契约与 Claude/Codex/Custom 边界
+- `specs/terminal-bench-evaluation/spec.md` — 容器内公开任务评测、请求限额、运行记录与官方 verifier 边界
 - `specs/orchestrator/spec.md` — Orchestrator 调度
 - `specs/tools/spec.md` — 工具系统与审批
 - `specs/persistence/spec.md` — SQLite/Drizzle 持久化
@@ -314,6 +315,14 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `14-mobile-remote.md` — 移动端伴随 App（Capacitor / Tailscale / 远程审批）
 - `15-external-mcp.md` — 外部 MCP 工具接入（设计提案,未实现;统一三 adapter 接入用户配置的 MCP server）
 - `16-skill-install.md` — 会话内安装 Skill `install_skill`（设计提案,未实现;LLM 选 URL 的出站 fetch SSRF 信任模型 + 审批门,Phase 2 完善 2D）
+
+### `eval/`（离线诊断与公开任务评测）
+
+- `README.md` — 自建代码诊断集、编排对照组和报告入口
+- `terminalbench/README.md` — 固定 Terminal-Bench 任务的独立环境验证与有界模型 smoke 运行方式；headless CLI 复用 Application Services、AgentRunner 和工具
+- `terminalbench/requirements.txt` — `Harbor==0.25.0`，安装在独立 Python 评测环境，不加入应用 pnpm dependencies；Linux 运行包复用现有 lockfile，不复制宿主 node_modules、DB 或凭据文件
+
+公开任务通过与否由官方 verifier reward 判定；AgentHub complete、预算耗尽、基础设施失败与官方 reward 分开记录。验证与真实试跑结果以各次保存的报告为准，运行说明不构成已跑通的证据。
 
 ### `skills/`（可复用开发任务模板）
 
