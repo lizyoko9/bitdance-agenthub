@@ -188,7 +188,7 @@ Orchestrator 计划阶段可能在收到 `plan_tasks` 后主动停止消费 gene
 
 ### 可选运行时评测策略
 
-`CustomAgentAdapter` 构造函数可接收 `CustomAgentAdapterOptions`（`src/server/adapters/custom-request-policy.ts`）：`maxTurns` 指定上述单 run 轮数上限，`requestSettings` 限定可覆盖 `reasoning_effort` / `max_completion_tokens`，`maxRetries` 控制 SDK 重试，`requestPolicy` 提供发送前检查和逐请求观察。普通应用不传评测策略时，仍使用通常请求参数和 SDK 两次重试；轮数按上述环境变量/默认值解析。调用保留 `AbortSignal`，不改变 `AdapterInput` 或 `StreamEvent`。
+`CustomAgentAdapter` 构造函数可接收 `CustomAgentAdapterOptions`（`src/server/adapters/custom-request-policy.ts`）：`maxTurns` 指定上述单 run 轮数上限，`requestSettings` 限定可覆盖 `reasoning_effort` / `max_completion_tokens`，`maxRetries` 控制 SDK 重试，`requestPolicy` 提供发送前检查和逐请求观察，`toolPolicy` 提供可选的工具调用前检查。普通应用不传评测策略时，仍使用通常请求参数和 SDK 两次重试；轮数按上述环境变量/默认值解析。调用保留 `AbortSignal`，不改变 `AdapterInput` 或 `StreamEvent`。
 
 Terminal-Bench 入口使用 `eval/terminalbench/request-policy.ts` 的 `createEvalRequestPolicy()`：同一 trial 的根、子 run 共享外部 policy 闭包，在实际 HTTP 请求发送前检查 UTF-8 JSON body 大小和累计请求数。该 trial 的请求预算独立于每个 run 的 `maxTurns`。历史首轮 smoke 的默认额度继续为最多八个请求、单 body 64 KiB、累计 256 KiB、`max_completion_tokens=2048`，设置 `reasoning_effort='none'`、SDK 重试为零。trial 输入可显式设置 `maxTurns` 与 `requestLimits`，其中 `maxRequests` 可配置至 1000，累计 body 字节可配置至 64 MiB；单 body 和输出 token 的既有上限保持不变。Python wrapper 对应选项为 `max_turns`、`max_requests`、`max_total_request_bytes`，有效值写入 manifest。额度耗尽后，后续请求保持拒绝；byte 约束不代表精确 token 或美元上限。评测配置不写入普通 Agent 或 DB schema。
 
@@ -197,6 +197,10 @@ Terminal-Bench 入口使用 `eval/terminalbench/request-policy.ts` 的 `createEv
 `requestPolicy.observe()` 接收白名单请求记录，包括 run/message/模型标识、实际尝试序号、请求 bytes、响应 request ID/model/fingerprint、耗时、HTTP 状态、结束状态和可用 usage。记录在 yield 工具事件之前保留，因此 Orchestrator 在 `plan_tasks` 处提前停止消费也不会覆盖该请求的用量。输入/输出、缓存读写和 reasoning tokens 的缺失值为 `null`；`usageComplete` 表示输入、输出总量均已取得。OpenAI 缓存读量读取 `prompt_tokens_details.cached_tokens`。观察记录不包含认证头、请求 body 或凭据。
 
 逐请求账本用于评测计量，独立于应用现有 `run.usage` 持久化。运行方式与官方 verifier 的职责见 [`eval/terminalbench/README.md`](../eval/terminalbench/README.md)；正式能力契约见 `openspec/specs/terminal-bench-evaluation/spec.md`。
+
+TraceTrial 入口复用同一 headless 生命周期与请求策略，显式配置独立于 HTTP 请求数和 `maxTurns` 的 `maxToolCalls`。该可选字段为 `1..10000` 的整数；省略时不安装工具额度策略。`createEvalToolPolicy()` 的同一闭包由整个 trial 的 adapter 共用，`beforeTool(context, signal)` 在发布 `tool.call` 之前同步预留额度，因为事件消费者也可能触发执行。超额时不发布该工具事件、不执行工具，保留已有的 message/run usage 后抛出 `budget_exhausted:`；原有 Workspace、审批和命令安全检查仍由正常工具路径执行。
+
+TraceTrial 首轮只测 E8 单 Agent：任务预算为一个用户输入轮次、六次工具调用和 120 秒；内部模型轮数与实际 HTTP 请求预算另行显式配置。转换证据必须保留原生 `exitCode` 和 `isError`，不能在评测适配层修复非零退出码与 false 错误标志的组合。详细范围及官方 Harness/Agent 两层评分见 [`eval/tracetrial/README.md`](../eval/tracetrial/README.md) 和 `openspec/specs/tracetrial-evaluation/spec.md`。
 
 ### Reasoning 内容（DeepSeek thinking mode）
 

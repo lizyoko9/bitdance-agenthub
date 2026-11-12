@@ -287,6 +287,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `specs/artifacts/spec.md` — Artifact 生命周期
 - `specs/adapters/spec.md` — Adapter 契约与 Claude/Codex/Custom 边界；Custom 可配置轮数与结束原因
 - `specs/terminal-bench-evaluation/spec.md` — 容器内公开任务评测、请求限额、运行记录与官方 verifier 边界
+- `specs/tracetrial-evaluation/spec.md` — 固定机制题的真实 AgentHub 执行、原生证据转换、独立 actor/judge 预算与官方双层评分
 - `specs/orchestrator/spec.md` — Orchestrator 调度
 - `specs/tools/spec.md` — 工具系统与审批
 - `specs/persistence/spec.md` — SQLite/Drizzle 持久化
@@ -321,8 +322,11 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `README.md` — 自建代码诊断集、编排对照组和报告入口
 - `terminalbench/README.md` — 固定 Terminal-Bench 任务的独立环境验证与有界模型 smoke 运行方式；headless CLI 复用 Application Services、AgentRunner 和工具
 - `terminalbench/requirements.txt` — `Harbor==0.25.0`，安装在独立 Python 评测环境，不加入应用 pnpm dependencies；Linux 运行包复用现有 lockfile，不复制宿主 node_modules、DB 或凭据文件
+- `tracetrial/README.md` — 固定 TraceTrial-Bench E8 单题的自定义 AgentHub 接入、工具预算、原生失败语义与 Harness/Agent 分层评分；复用 headless Application Services，Python 依赖安装在独立环境
 
 Custom tool loop 的轮数优先使用构造参数 `maxTurns`，其次读取 `AGENTHUB_CUSTOM_MAX_TURNS`，默认 32；有效值为 `1..10000` 的整数。模型主动停止与达到上限分别沿完成和 `iteration_limit` 失败路径记录，详见 Spec 05。评测的 trial 共享请求预算与单 run 轮数分别配置，首轮 smoke 的八请求默认额度不构成全局上限。
+
+Custom adapter 的可选 `toolPolicy.beforeTool` 在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。TraceTrial profile 显式设置 `maxToolCalls=6`，所有 run 共用该 trial 的闭包计数；不传该策略时普通应用和 Terminal-Bench 既有工具行为不变。达到工具额度沿 `budget_exhausted` 失败路径保留已有 usage，不修饰被测工具的 `exitCode` / `isError`。
 
 公开任务通过与否由官方 verifier reward 判定；AgentHub complete、轮数/请求预算耗尽、基础设施失败与官方 reward 分开记录。验证与真实试跑结果以各次保存的报告为准，运行说明不构成已跑通的证据。
 

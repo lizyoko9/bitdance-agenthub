@@ -15,6 +15,8 @@ OpenSpec capability specs under `openspec/specs/` are the concise, testable cont
 | `message-parts` | `specs/03-message-parts.md` |
 | `artifacts` | `specs/04-artifacts.md` |
 | `adapters` | `specs/05-adapter-interface.md` |
+| `terminal-bench-evaluation` | `eval/terminalbench/README.md` |
+| `tracetrial-evaluation` | `eval/tracetrial/README.md` |
 | `orchestrator` | `specs/06-orchestrator-flow.md` |
 | `tools` | `specs/07-tools.md` |
 | `persistence` | `specs/08-db-schema.md` |
