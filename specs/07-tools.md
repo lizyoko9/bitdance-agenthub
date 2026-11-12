@@ -34,9 +34,11 @@ interface ToolContext {
 }
 
 type ToolResult =
-  | { ok: true; value: unknown }
+  | { ok: true; value: unknown; isError?: boolean }
   | { ok: false; error: string }
 ```
+
+`ToolResult.ok=true` 表示成功取得工具结果；可选 `isError=true` 表示取得的结果记录了执行失败。省略该字段保持现有工具行为。Adapter/MCP 必须保留 value，并使用 `!ok || isError === true` 生成错误标志。
 
 **约束**：
 - `name` 必须是 LLM 可调用的标识符（`^[a-zA-Z0-9_]+$`，不含点号 / 横线）
@@ -379,7 +381,7 @@ curl -s http://127.0.0.1:3000/health
 
 **工具 description 按平台变体**（详见 Spec 11 「工具描述按平台变体」节）：description 字段在模块加载时根据 `currentPlatform()` 拼接，POSIX 展示用户 login shell 回退策略、POSIX 命令示例与 POSIX 黑名单文案，Windows 展示 PowerShell 示例与 Windows 黑名单文案。这是 LLM 选择命令语法的关键提示。
 
-**返回**：`{ cwd, command, exitCode, output, truncated, timedOut }`
+**返回**：`{ cwd, command, exitCode, output, truncated, timedOut, aborted, signal, status, isError }`。`status` 为 `completed` 或 `failed`；非零或未知退出码、信号终止、超时或中止均为失败。完整结果放在 `{ ok: true, value, isError }` 中，`ok` 表示成功取得结果；wrapper、value 和命令证据中的错误分类必须一致。模型继续获得输出与退出码，命令失败不直接终止整个 AgentRun。已中止的调用不再创建进程；error/close 竞争只能产生一条命令证据与一个结果。进程无法启动时保留 `{ ok: false, error }`。
 
 ---
 

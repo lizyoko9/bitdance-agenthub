@@ -236,6 +236,8 @@ const planTasksTool: ToolDef = {
 
 **结果上报**：子 Agent 收尾时必须调用 `report_task_result`。AgentRunner 不再把“child run 成功结束”或“artifact 已产出”直接等同于“任务完成”；只有 report 的 `status='complete'` 且 `acceptanceCriteria` 全部通过时，任务才可能进入 `complete`。代码实现任务还必须有至少一条非 prepare 的成功验证命令 evidence（如 build/test/typecheck/compile exitCode=0），并且 required project output 已由 workspace 写入产物化并绑定。未调用该工具、report 为 `failed/blocked`、任一 acceptance result 失败 / 缺失、代码任务无成功验证命令、或代码任务缺少 required project output，都会把该任务判为 `failed`。
 
+**验收命令执行状态**：命令验证同时检查 ToolResult 的执行错误 metadata、payload 中的超时/中止/信号/失败分类及退出码；中止或超时后即使最终 exitCode=0 也不得通过。诊断保留已取得的退出码与输出，命令执行失败不等于工具未取得结果。
+
 **评测开关**：服务端以 `AGENTHUB_EVAL_EVIDENCE_GATES=off` 启动时关闭证据门，仅供评测对照组（见 `eval/README.md`）使用：不自动执行 `requiredCommands`，不做 report / 命令 / 目标路径 / required project output 的证据判定。子任务结果只看它自己的上报——未调用 `report_task_result` 或 report 为 `complete` 都算 `complete`，report 为 `failed/blocked` 仍判 `failed`。plan 阶段的校验不受影响。默认（未设置或其他值）证据门开启。
 
 **artifact 注入**：

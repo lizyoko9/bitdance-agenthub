@@ -565,3 +565,8 @@ class AgentRegistry {
 - Spec 06：Orchestrator 给子 agent 拼 prompt 时也走 CustomAgentAdapter（Orchestrator 本身也是一个 custom agent）
 - Spec 07：toolNames 引用的工具定义
 - Spec 08：agents.api_key / api_base_url 字段；app_settings 表（全局 key 兜底）
+
+
+### 已取得结果的执行失败
+
+AgentHub 工具的 `ToolResult` 成功分支支持 `isError?: boolean`。Custom 与 AgentHub MCP bridge 使用 `!result.ok || result.isError === true` 翻译错误标志，保留完整 value；模型通过工具 JSON 内容中的明确 status/isError 观察执行状态。省略 metadata 的已有工具保持行为；Adapter 不根据工具名称、输出文本或退出码猜测业务结果。命令失败不直接中止工具循环。SDK 自管 Bash 的协议继续由对应 SDK 负责。
