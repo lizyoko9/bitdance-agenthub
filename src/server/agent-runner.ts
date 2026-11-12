@@ -72,6 +72,7 @@ import {
   REPORT_TASK_RESULT_TOOL_NAME,
 } from './task-result-report'
 import { executeBashCommand } from './tools/bash'
+import { toVerificationCommandResult, type VerificationCommandResult } from './supervisor-command-result'
 import { assertPathWithinWorkspace, getEffectiveCwd } from './workspace-utils'
 
 /**
@@ -134,17 +135,6 @@ interface ChildAttemptEvaluation {
   result: DispatchTaskResult
   evidence: RunToolEvidence
   verificationResults: VerificationCommandResult[]
-}
-
-interface VerificationCommandResult {
-  command: string
-  cwd?: string
-  exitCode: number | null
-  timedOut: boolean
-  ok: boolean
-  output?: string
-  error?: string
-  prepare?: boolean
 }
 
 interface BlockedDependency {
@@ -1241,36 +1231,7 @@ async function runSupervisorCommand(
     },
   )
 
-  if (!result.ok) {
-    return {
-      command: command.command,
-      cwd: command.cwd,
-      exitCode: null,
-      timedOut: false,
-      ok: false,
-      error: result.error,
-      ...(prepare ? { prepare: true } : {}),
-    }
-  }
-
-  const value = result.value as {
-    command?: unknown
-    cwd?: unknown
-    exitCode?: unknown
-    timedOut?: unknown
-    output?: unknown
-  }
-  const exitCode = typeof value.exitCode === 'number' ? value.exitCode : null
-  const timedOut = value.timedOut === true
-  return {
-    command: typeof value.command === 'string' ? value.command : command.command,
-    cwd: typeof value.cwd === 'string' ? value.cwd : command.cwd,
-    exitCode,
-    timedOut,
-    ok: exitCode === 0 && !timedOut,
-    output: typeof value.output === 'string' ? value.output : undefined,
-    ...(prepare ? { prepare: true } : {}),
-  }
+  return toVerificationCommandResult(result, command, prepare)
 }
 
 function expandRequiredCommand(required: NonNullable<DispatchPlanItem['requiredCommands']>[number]): {

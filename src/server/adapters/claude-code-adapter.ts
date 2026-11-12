@@ -177,6 +177,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
           },
@@ -202,6 +203,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
             // 不在这里 publish artifact.create —— 由 adapter 主循环检测到对应 tool_result 时
             // 从 generator yield 出去，让 AgentRunner.consumeStream 触发 artifact_ref 注入。
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
           },
@@ -219,6 +221,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [
                 {
                   type: 'text' as const,
@@ -244,6 +247,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [
                 {
                   type: 'text' as const,
@@ -269,6 +273,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
           },
@@ -286,6 +291,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
           },
@@ -307,6 +313,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
           },
@@ -365,6 +372,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
           },
@@ -403,6 +411,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
           },
@@ -422,6 +431,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               }
             }
             return {
+              ...(result.isError === undefined ? {} : { isError: result.isError }),
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
           },

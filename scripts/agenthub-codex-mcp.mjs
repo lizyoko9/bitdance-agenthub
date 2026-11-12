@@ -295,6 +295,7 @@ async function callAgentHubTool(toolName, args) {
   }
 
   return {
+    ...(result.isError === undefined ? {} : { isError: result.isError }),
     content: [{ type: 'text', text: JSON.stringify(result.value) }],
     structuredContent:
       result.value && typeof result.value === 'object' && !Array.isArray(result.value)

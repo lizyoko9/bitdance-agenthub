@@ -189,6 +189,8 @@ export async function executeBashCommand(
     }
   }
 
+  if (ctx.abortSignal.aborted) return runShellCommand(args, cwd, ctx)
+
   const approval = classifyBashApproval(args.command, PLATFORM)
   if (approval.required) {
     const approved = await waitForBashApproval({
@@ -200,7 +202,7 @@ export async function executeBashCommand(
       reason: approval.reason,
       signal: ctx.abortSignal,
     })
-    if (!approved) {
+    if (!approved && !ctx.abortSignal.aborted) {
       return { ok: false, error: `User rejected command execution: ${approval.reason}` }
     }
   }
@@ -223,14 +225,7 @@ function runShellCommand(
     let orphanedStdio = false
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null
     let orphanedStdioTimer: ReturnType<typeof setTimeout> | null = null
-
-    const child = spawn(shell.cmd, shell.args, {
-      cwd,
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      detached: PLATFORM !== 'windows',
-    })
+    let child: ChildProcess
 
     let buffer = ''
     let truncated = false
@@ -244,9 +239,6 @@ function runShellCommand(
         truncated = true
       }
     }
-
-    child.stdout?.on('data', append)
-    child.stderr?.on('data', append)
 
     const cleanup = () => {
       if (timeoutTimer) clearTimeout(timeoutTimer)
@@ -279,18 +271,20 @@ function runShellCommand(
         ? '\n\n[STOPPED background processes after shell exit to close inherited stdio]'
         : ''
       const truncNote = truncated ? `\n\n[TRUNCATED at ${MAX_OUTPUT_CHARS} chars]` : ''
+      const commandFailed = timedOut || aborted || closeSignal !== null || exitCode !== 0
 
       recordRunCommand(ctx.runId, {
         command: args.command,
         cwd,
         exitCode,
         timedOut,
-        isError: false,
+        isError: commandFailed,
         ...(args.evidenceKind === 'prepare' ? { prepare: true } : {}),
       })
 
       finish({
         ok: true,
+        isError: commandFailed,
         value: {
           cwd,
           command: args.command,
@@ -298,24 +292,23 @@ function runShellCommand(
           output: buffer + truncNote + note + orphanNote,
           truncated,
           timedOut,
+          aborted,
+          signal: closeSignal,
+          isError: commandFailed,
+          status: commandFailed ? 'failed' : 'completed',
         },
       })
     }
 
-    timeoutTimer = setTimeout(() => {
-      timedOut = true
-      killProcessTree(child, PLATFORM)
-      closeInheritedStdio()
-    }, timeoutMs)
-
     const onAbort = () => {
+      if (settled) return
       aborted = true
       killProcessTree(child, PLATFORM)
       closeInheritedStdio()
     }
-    ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
 
-    child.on('error', (err) => {
+    const finishSpawnError = (err: unknown) => {
+      if (settled) return
       const error = `Spawn failed: ${err instanceof Error ? err.message : String(err)}`
       recordRunCommand(ctx.runId, {
         command: args.command,
@@ -327,10 +320,33 @@ function runShellCommand(
         error,
       })
       finish({ ok: false, error })
-    })
+    }
+
+    if (ctx.abortSignal.aborted) {
+      aborted = true
+      finishClose(null, null)
+      return
+    }
+
+    try {
+      child = spawn(shell.cmd, shell.args, {
+        cwd,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        detached: PLATFORM !== 'windows',
+      })
+    } catch (error) {
+      finishSpawnError(error)
+      return
+    }
+
+    child.stdout?.on('data', append)
+    child.stderr?.on('data', append)
+    child.on('error', finishSpawnError)
 
     child.on('exit', (exitCode, closeSignal) => {
-      if (PLATFORM === 'windows') return
+      if (settled || PLATFORM === 'windows') return
       orphanedStdioTimer = setTimeout(() => {
         if (settled) return
         orphanedStdio = true
@@ -343,6 +359,15 @@ function runShellCommand(
     child.on('close', (exitCode, closeSignal) => {
       finishClose(exitCode ?? null, closeSignal)
     })
+
+    timeoutTimer = setTimeout(() => {
+      if (settled) return
+      timedOut = true
+      killProcessTree(child, PLATFORM)
+      closeInheritedStdio()
+    }, timeoutMs)
+    ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
+    if (ctx.abortSignal.aborted) onAbort()
   })
 }
 

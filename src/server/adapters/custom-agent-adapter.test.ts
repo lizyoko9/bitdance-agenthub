@@ -102,6 +102,33 @@ describe('Custom adapter optional request policy', () => {
     })
   })
 
+  it.each([true, false, undefined])('translates obtained-result error metadata %s without discarding value or stopping the tool loop', async (isError) => {
+    const value = { exitCode: 23, output: 'STATUS: OK\nRESULT: complete\n', status: 'failed', isError: true }
+    tools.execute.mockResolvedValueOnce({ ok: true, value, ...(isError === undefined ? {} : { isError }) })
+    fetchMock.mockResolvedValueOnce(toolResponse())
+
+    const events = await consume(new CustomAgentAdapter(), input({ toolNames: ['bash'] }))
+
+    expect(events.find((event) => event.type === 'tool.result')).toMatchObject({ result: value, isError: isError === true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const request = JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
+    expect(request.messages.find((message: { role: string }) => message.role === 'tool')).toMatchObject({
+      tool_call_id: 'call-tool', content: JSON.stringify(value),
+    })
+  })
+
+  it('keeps transport failures classified as errors', async () => {
+    tools.execute.mockResolvedValueOnce({ ok: false, error: 'Fixture unavailable' })
+    fetchMock.mockResolvedValueOnce(toolResponse())
+
+    const events = await consume(new CustomAgentAdapter(), input({ toolNames: ['bash'] }))
+
+    expect(events.find((event) => event.type === 'tool.result')).toMatchObject({
+      result: { error: 'Fixture unavailable' }, isError: true,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps the fallback finite and retains usage when iteration exhaustion fails', async () => {
     fetchMock.mockImplementation(async () => toolResponse())
     const events: StreamEvent[] = []

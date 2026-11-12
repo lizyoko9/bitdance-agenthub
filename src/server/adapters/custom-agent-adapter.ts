@@ -335,7 +335,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           messageId,
           callId: tc.id,
           result: value,
-          isError: !result.ok,
+          isError: !result.ok || result.isError === true,
         })
 
         // 工具结果含 artifactId 视为「创建了产物」的约定，统一由 adapter 发布

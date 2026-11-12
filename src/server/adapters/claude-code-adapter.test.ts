@@ -10,12 +10,17 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn<(args: { prompt: string; options: Options }) => AsyncIterable<never>>(),
   workspace: vi.fn(),
   conversation: vi.fn(),
+  execute: vi.fn(),
+  handlers: new Map<string, (args: unknown) => Promise<unknown>>(),
 }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   AbortError: class extends Error {},
   query: mocks.query,
-  tool: (name: string) => ({ name }),
+  tool: (name: string, _description: string, _schema: unknown, handler: (args: unknown) => Promise<unknown>) => {
+    mocks.handlers.set(name, handler)
+    return { name }
+  },
   createSdkMcpServer: () => ({}),
 }))
 
@@ -24,7 +29,7 @@ vi.mock('@/db/client', async () => ({
   db: { query: { workspaces: { findFirst: mocks.workspace }, conversations: { findFirst: mocks.conversation } } },
 }))
 
-vi.mock('@/server/tools/registry', () => ({ toolRegistry: { execute: vi.fn() } }))
+vi.mock('@/server/tools/registry', () => ({ toolRegistry: { execute: mocks.execute } }))
 
 import { ClaudeCodeAdapter } from './claude-code-adapter'
 
@@ -38,6 +43,7 @@ describe('ClaudeCodeAdapter skill isolation', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.handlers.clear()
     root = realpathSync(mkdtempSync(path.join(tmpdir(), 'agenthub-claude-adapter-')))
     cwd = path.join(root, 'workspace')
     mkdirSync(cwd)
@@ -112,5 +118,38 @@ describe('ClaudeCodeAdapter skill isolation', () => {
 
     await run(input({ skills: [{ name: 'review', description: 'Review method', instruction: 'Review carefully' }] }))
     expect(existsSync(skillPath)).toBe(false)
+  })
+
+  it.each([
+    'plan_tasks', 'write_artifact', 'read_artifact', 'read_attachment', 'fs_list',
+    'deploy_artifact', 'deploy_workspace', 'report_task_result', 'ask_user', 'install_skill',
+  ])('preserves obtained-result error metadata and output for MCP tool %s', async (name) => {
+    const value = { status: 'failed', exitCode: 23, output: 'STATUS: OK\nRESULT: complete\n' }
+    await run(input({ toolNames: ['plan_tasks'] }))
+    const handler = mocks.handlers.get(name)
+    expect(handler).toBeDefined()
+    mocks.execute.mockResolvedValue({ ok: true, value, isError: true })
+
+    await expect(handler!({})).resolves.toEqual({
+      content: [{ type: 'text', text: JSON.stringify(value) }], isError: true,
+    })
+  })
+
+  it.each([false, undefined])('keeps ordinary MCP result metadata %s and string output unchanged', async (isError) => {
+    await run(input())
+    mocks.execute.mockResolvedValue({ ok: true, value: 'fixture text', ...(isError === undefined ? {} : { isError }) })
+
+    await expect(mocks.handlers.get('read_artifact')!({})).resolves.toStrictEqual({
+      content: [{ type: 'text', text: 'fixture text' }], ...(isError === undefined ? {} : { isError }),
+    })
+  })
+
+  it('keeps MCP transport errors on their existing error path', async () => {
+    await run(input())
+    mocks.execute.mockResolvedValue({ ok: false, error: 'fixture unavailable' })
+
+    await expect(mocks.handlers.get('read_artifact')!({})).resolves.toEqual({
+      content: [{ type: 'text', text: 'Error: fixture unavailable' }], isError: true,
+    })
   })
 })

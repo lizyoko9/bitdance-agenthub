@@ -13,7 +13,7 @@ export interface ToolContext {
 }
 
 export type ToolResult =
-  | { ok: true; value: unknown }
+  | { ok: true; value: unknown; isError?: boolean }
   | { ok: false; error: string }
 
 export interface ToolDef {
