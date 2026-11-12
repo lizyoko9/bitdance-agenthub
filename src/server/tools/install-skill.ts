@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { fetchSkillFromGitHub } from '@/server/skill-fetch'
 import { pendingSkillInstalls } from '@/server/pending-skill-installs'
+import { normalizeImportedSkillDraft } from '@/server/skill-service'
 
 import type { ToolDef } from './types'
 
@@ -65,23 +66,29 @@ export const installSkillTool: ToolDef = {
 
     // 具体 SKILL.md：注册审批门，阻塞等用户决定。
     const { parsed: skill, finalUrl } = fetched
+    let draft
+    try {
+      draft = normalizeImportedSkillDraft({ ...skill, category: IMPORTED_CATEGORY })
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+    if (ctx.abortSignal.aborted) return { ok: false, error: '本次运行已中止，未安装 Skill' }
     const pending = pendingSkillInstalls.register({
       conversationId: ctx.conversationId,
       agentId: ctx.agentId,
       runId: ctx.runId,
       sourceUrl: finalUrl,
-      name: skill.name || '未命名 Skill',
-      description: skill.description || '（来自导入，无描述）',
-      category: IMPORTED_CATEGORY,
-      instruction: skill.instruction,
+      ...draft,
     })
 
     const decision = await new Promise<{ installed: boolean; skillId?: string }>((resolve) => {
-      pendingSkillInstalls.attachResolver(pending.id, resolve)
       const onAbort = () => {
         pendingSkillInstalls.cancel(pending.id)
-        resolve({ installed: false })
       }
+      pendingSkillInstalls.attachResolver(pending.id, (result) => {
+        ctx.abortSignal.removeEventListener('abort', onAbort)
+        resolve(result)
+      })
       if (ctx.abortSignal.aborted) onAbort()
       else ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
     })

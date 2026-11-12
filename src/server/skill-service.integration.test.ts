@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 // 在导入 @/db/client 之前把数据目录指向临时 DB，隔离真实 .agenthub-data。
 // 用动态 import 保证 env 先于 client.ts 模块初始化生效。
@@ -159,6 +159,103 @@ describe('skill-service integration (temp DB)', () => {
     expect(agent!.skillIds).toContain(installed!.id)
   })
 
+  it('consumes one pending decision once across concurrent approvals and rejection', async () => {
+    const { pendingSkillInstalls: pending } = await import('./pending-skill-installs')
+    const { eventBus } = await import('./event-bus')
+    const agentId = await createInstallAgent('ag_install_race')
+    const install = pending.register(installArgs(agentId, 'Concurrent approval'))
+    const resolver = vi.fn()
+    pending.attachResolver(install.id, resolver)
+    const resolvedEvents: string[] = []
+    const unsubscribe = eventBus.subscribe(({ event }) => {
+      if (event.type === 'skill_install.resolved') resolvedEvents.push(event.pendingId)
+    })
+    try {
+      const first = pending.approve(install.id)
+      const second = pending.approve(install.id)
+      expect(pending.reject(install.id)).toBe(false)
+      pending.cancel(install.id)
+      expect(await Promise.all([first, second])).toEqual([true, false])
+      expect(resolver).toHaveBeenCalledTimes(1)
+      expect(resolvedEvents.filter((id) => id === install.id)).toHaveLength(1)
+      const installed = (await svc.listAllSkills()).filter((s) => s.name === 'Concurrent approval')
+      expect(installed).toHaveLength(1)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('preserves both bindings when different pending installs are approved concurrently', async () => {
+    const { pendingSkillInstalls: pending } = await import('./pending-skill-installs')
+    const { db, schema } = await import('@/db/client')
+    const { eq } = await import('drizzle-orm')
+    const agentId = await createInstallAgent('ag_install_different')
+    const first = pending.register(installArgs(agentId, 'Concurrent first'))
+    const second = pending.register(installArgs(agentId, 'Concurrent second'))
+    expect(await Promise.all([pending.approve(first.id), pending.approve(second.id)]))
+      .toEqual([true, true])
+    const installed = (await svc.listAllSkills())
+      .filter((s) => ['Concurrent first', 'Concurrent second'].includes(s.name))
+    expect(installed).toHaveLength(2)
+    const agent = await db.query.agents.findFirst({ where: eq(schema.agents.id, agentId) })
+    expect(agent!.skillIds).toEqual(expect.arrayContaining(installed.map((skill) => skill.id)))
+  })
+
+  it('rejects approval after a rejection or cancellation without installing', async () => {
+    const { pendingSkillInstalls: pending } = await import('./pending-skill-installs')
+    const rejected = pending.register(installArgs('ag_install_race', 'Rejected before approval'))
+    expect(pending.reject(rejected.id)).toBe(true)
+    expect(pending.reject(rejected.id)).toBe(false)
+    expect(await pending.approve(rejected.id)).toBe(false)
+
+    const cancelled = pending.register(installArgs('ag_install_race', 'Cancelled before approval'))
+    pending.cancel(cancelled.id)
+    pending.cancel(cancelled.id)
+    expect(await pending.approve(cancelled.id)).toBe(false)
+    expect((await svc.listAllSkills()).some((s) =>
+      ['Rejected before approval', 'Cancelled before approval'].includes(s.name),
+    )).toBe(false)
+  })
+
+  it('fails a missing-agent approval without leaving an imported skill', async () => {
+    const { pendingSkillInstalls: pending } = await import('./pending-skill-installs')
+    const install = pending.register(installArgs('ag_missing_install', 'Missing agent install'))
+    const resolver = vi.fn()
+    pending.attachResolver(install.id, resolver)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await pending.approve(install.id)).toBe(false)
+      expect(resolver).toHaveBeenCalledWith({ installed: false, skillId: undefined })
+      expect(pending.get(install.id)).toBeUndefined()
+      expect((await svc.listAllSkills()).some((s) => s.name === 'Missing agent install')).toBe(false)
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it('rolls back the skill row when binding fails inside the transaction', async () => {
+    const { pendingSkillInstalls: pending } = await import('./pending-skill-installs')
+    const { db, schema, sqlite } = await import('@/db/client')
+    const { eq } = await import('drizzle-orm')
+    const agentId = await createInstallAgent('ag_install_failure')
+    const install = pending.register(installArgs(agentId, 'Failed binding install'))
+    sqlite.exec(`
+      CREATE TEMP TRIGGER reject_skill_binding BEFORE UPDATE OF skill_ids ON agents
+      WHEN NEW.id = 'ag_install_failure'
+      BEGIN SELECT RAISE(ABORT, 'test binding failure'); END;
+    `)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await pending.approve(install.id)).toBe(false)
+      expect((await svc.listAllSkills()).some((s) => s.name === 'Failed binding install')).toBe(false)
+      const agent = await db.query.agents.findFirst({ where: eq(schema.agents.id, agentId) })
+      expect(agent!.skillIds).toEqual([])
+    } finally {
+      sqlite.exec('DROP TRIGGER reject_skill_binding')
+      log.mockRestore()
+    }
+  })
+
   it('SDK agent keeps only opt-in install_skill in toolNames; custom keeps all', async () => {
     const { createCustomAgent } = await import('./agent-service')
 
@@ -305,3 +402,35 @@ describe('skill-service integration (temp DB)', () => {
     expect(usage2[pub.id]).toBe(totalAgents)
   })
 })
+
+async function createInstallAgent(id: string): Promise<string> {
+  const { db, schema } = await import('@/db/client')
+  await db.insert(schema.agents).values({
+    id,
+    name: id,
+    avatar: '🤖',
+    description: 'install test',
+    capabilities: [],
+    systemPrompt: 'p',
+    adapterName: 'custom',
+    modelProvider: 'deepseek',
+    modelId: 'm',
+    toolNames: [],
+    skillIds: [],
+    createdAt: Date.now(),
+  })
+  return id
+}
+
+function installArgs(agentId: string, name: string) {
+  return {
+    conversationId: 'conv_install_race',
+    agentId,
+    runId: 'run_install_race',
+    sourceUrl: 'https://raw.githubusercontent.com/o/r/main/SKILL.md',
+    name,
+    description: 'from web',
+    category: 'imported',
+    instruction: 'complete skill body',
+  }
+}

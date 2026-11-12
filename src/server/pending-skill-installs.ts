@@ -1,11 +1,8 @@
-import { eq } from 'drizzle-orm'
-
-import { db, schema } from '@/db/client'
 import type { PendingSkillInstall } from '@/shared/types'
 
 import { eventBus } from './event-bus'
 import { newPendingSkillInstallId } from './ids'
-import { createSkill, deleteSkill } from './skill-service'
+import { createAndBindSkill } from './skill-service'
 
 /**
  * install_skill 会话安装审批中心（spec 16）。镜像 pending-writes：
@@ -77,66 +74,56 @@ class PendingSkillInstallsStore {
 
   /** 批准：建 imported skill + 绑定到当前 agent；绑定失败回滚已建 skill。 */
   async approve(id: string): Promise<boolean> {
-    const entry = this.map.get(id)
+    const entry = this.take(id)
     if (!entry) return false
     const { install } = entry
 
     let skillId: string | undefined
     try {
-      const skill = await createSkill({
+      const skill = createAndBindSkill({
         name: install.name,
         description: install.description,
         category: install.category,
         instruction: install.instruction,
         source: 'imported',
         sourceUri: install.sourceUrl,
-      })
+      }, install.agentId)
       skillId = skill.id
-
-      const agent = await db.query.agents.findFirst({
-        where: eq(schema.agents.id, install.agentId),
-      })
-      if (agent) {
-        const next = agent.skillIds.includes(skill.id)
-          ? agent.skillIds
-          : [...agent.skillIds, skill.id]
-        await db.update(schema.agents).set({ skillIds: next }).where(eq(schema.agents.id, agent.id))
-      }
     } catch (err) {
       console.error('[pendingSkillInstalls] approve failed', err)
-      if (skillId) await deleteSkill(skillId).catch(() => {}) // 回滚半截 skill
-      this.finalize(id, false)
+      this.finalize(entry, false)
       return false
     }
 
-    this.finalize(id, true, skillId)
+    this.finalize(entry, true, skillId)
     return true
   }
 
   reject(id: string): boolean {
-    if (!this.map.has(id)) return false
-    this.finalize(id, false)
+    const entry = this.take(id)
+    if (!entry) return false
+    this.finalize(entry, false)
     return true
   }
 
-  /** run abort 路径：resolve 为未安装并移除，不发 SSE（run cleanup 会处理前端）。 */
+  /** 中止也广播终态，让所有客户端移除审批卡。 */
   cancel(id: string): void {
-    const entry = this.map.get(id)
-    if (!entry) return
-    entry.resolver?.({ installed: false })
-    this.map.delete(id)
+    this.reject(id)
   }
 
-  private finalize(id: string, installed: boolean, skillId?: string) {
+  private take(id: string): PendingEntry | undefined {
     const entry = this.map.get(id)
-    if (!entry) return
-    entry.resolver?.({ installed, skillId })
     this.map.delete(id)
+    return entry
+  }
+
+  private finalize(entry: PendingEntry, installed: boolean, skillId?: string) {
+    entry.resolver?.({ installed, skillId })
     eventBus.publish({
       type: 'skill_install.resolved',
       conversationId: entry.install.conversationId,
       timestamp: Date.now(),
-      pendingId: id,
+      pendingId: entry.install.id,
       installed,
       skillId,
     })

@@ -67,12 +67,12 @@ export interface CreateSkillArgs extends SkillDraftInput {
   isGlobalDefault?: boolean
 }
 
-export async function createSkill(args: CreateSkillArgs): Promise<SkillRow> {
+function buildSkillRow(args: CreateSkillArgs): SkillRow {
   const error = validateSkillDraft(args)
   if (error) throw new Error(error)
 
   const now = Date.now()
-  const row = {
+  return {
     id: newSkillId(),
     name: args.name.trim(),
     description: args.description.trim(),
@@ -86,10 +86,30 @@ export async function createSkill(args: CreateSkillArgs): Promise<SkillRow> {
     enabled: true,
     createdAt: now,
     updatedAt: now,
-  } satisfies typeof schema.skills.$inferInsert
+  }
+}
 
+export async function createSkill(args: CreateSkillArgs): Promise<SkillRow> {
+  const row = buildSkillRow(args)
   await db.insert(schema.skills).values(row)
   return row
+}
+
+// 同步事务让同时批准的不同 Skill 也读取最新绑定，失败时不留下半截安装。
+export function createAndBindSkill(args: CreateSkillArgs, agentId: string): SkillRow {
+  const skill = buildSkillRow(args)
+  return db.transaction((tx) => {
+    const agent = tx.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get()
+    if (!agent) throw new Error(`Cannot install skill: agent not found: ${agentId}`)
+
+    tx.insert(schema.skills).values(skill).run()
+    const result = tx.update(schema.agents)
+      .set({ skillIds: [...agent.skillIds, skill.id] })
+      .where(eq(schema.agents.id, agentId))
+      .run()
+    if (result.changes !== 1) throw new Error(`Cannot bind installed skill to agent: ${agentId}`)
+    return skill
+  })
 }
 
 export interface UpdateSkillPatch {
@@ -201,6 +221,21 @@ export interface InstallCatalogSkillArgs {
 const clampTo = (value: string, max: number): string =>
   value.length > max ? value.slice(0, max).trimEnd() : value
 
+// 市场与会话安装采用同一元数据上限；正文必须完整通过校验，不截断方法论。
+export function normalizeImportedSkillDraft(draft: SkillDraftInput): SkillDraftInput {
+  const name = clampTo(draft.name.trim() || 'Untitled Skill', SKILL_NAME_MAX)
+  const normalized = {
+    ...draft,
+    name,
+    description: clampTo(draft.description.trim() || name, SKILL_DESCRIPTION_MAX),
+    category: draft.category.trim(),
+    instruction: draft.instruction.trim(),
+  }
+  const error = validateSkillDraft(normalized)
+  if (error) throw new Error(error)
+  return normalized
+}
+
 /**
  * 从精选目录安装：经 `skill-fetch`（GitHub 主机白名单 + SSRF 防御）拉取 `sourceUri` 指向的
  * SKILL.md，解析后建为 `source='imported'`。**用户点击即授权**，不走 install_skill 的 LLM 审批门；
@@ -215,16 +250,14 @@ export async function installCatalogSkill(args: InstallCatalogSkillArgs): Promis
     throw new Error('该链接指向一个仓库而非单个 SKILL.md，无法直接安装')
   }
   const { parsed, finalUrl } = result
-  const name = clampTo((args.name?.trim() || parsed.name || 'Untitled Skill'), SKILL_NAME_MAX)
-  const description = clampTo(
-    (args.description?.trim() || parsed.description || name),
-    SKILL_DESCRIPTION_MAX,
-  )
-  return createSkill({
-    name,
-    description,
+  const draft = normalizeImportedSkillDraft({
+    name: args.name?.trim() || parsed.name,
+    description: args.description?.trim() || parsed.description,
     category: args.category,
     instruction: parsed.instruction,
+  })
+  return createSkill({
+    ...draft,
     source: 'imported',
     sourceUri: finalUrl,
   })
