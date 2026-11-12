@@ -1,15 +1,33 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { CustomRequestContext } from '../../src/server/adapters/custom-request-policy'
-import { createEvalRequestPolicy, DEFAULT_EVAL_REQUEST_LIMITS, isEvalBudgetExceeded } from './request-policy'
+import type { CustomRequestContext, CustomToolContext } from '../../src/server/adapters/custom-request-policy'
+import { createEvalRequestPolicy, createEvalToolPolicy, DEFAULT_EVAL_REQUEST_LIMITS, isEvalBudgetExceeded } from './request-policy'
 
 const context: CustomRequestContext = {
   runId: 'run-test', agentId: 'agent-test', conversationId: 'conv-test', messageId: 'message-test',
   provider: 'openai', requestedModel: 'gpt-6-luna', turn: 1,
 }
 const signal = () => new AbortController().signal
+const toolContext: CustomToolContext = { ...context, callId: 'call-test', toolName: 'bash', args: { command: 'pwd' } }
 
 describe('Terminal-Bench request policy', () => {
+  it('reserves tools synchronously across runs and latches exhaustion', () => {
+    const policy = createEvalToolPolicy(6)
+    for (let n = 0; n < 6; n++) policy.beforeTool({ ...toolContext, runId: `run-${n}` }, signal())
+    expect(() => policy.beforeTool(toolContext, signal())).toThrow('maximum tool calls reached')
+    expect(() => policy.beforeTool(toolContext, signal())).toThrow('budget_exhausted')
+  })
+
+  it('does not reserve an aborted tool and validates finite tool limits', () => {
+    const policy = createEvalToolPolicy(1)
+    const controller = new AbortController()
+    controller.abort()
+    expect(() => policy.beforeTool(toolContext, controller.signal)).toThrow()
+    expect(() => policy.beforeTool(toolContext, signal())).not.toThrow()
+    expect(() => policy.beforeTool(toolContext, signal())).toThrow('budget_exhausted')
+    for (const limit of [0, -1, 1.5, Infinity, 10001]) expect(() => createEvalToolPolicy(limit)).toThrow()
+  })
+
   it('sets the approved output limit, reasoning mode and retry policy', () => {
     const options = createEvalRequestPolicy()
     expect(options.maxRetries).toBe(0)

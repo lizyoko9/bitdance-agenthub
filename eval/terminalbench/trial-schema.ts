@@ -4,7 +4,7 @@ import path from 'node:path'
 import { z } from 'zod'
 
 import { CustomMaxTurnsSchema, DEFAULT_CUSTOM_MAX_TURNS } from '../../src/server/adapters/custom-agent-limits'
-import { DEFAULT_EVAL_REQUEST_LIMITS, EvalRequestLimitsSchema } from './request-policy'
+import { DEFAULT_EVAL_REQUEST_LIMITS, EvalMaxToolCallsSchema, EvalRequestLimitsSchema } from './request-policy'
 
 const AbsolutePath = z.string().min(1).refine(path.isAbsolute, 'Path must be absolute')
 
@@ -16,6 +16,7 @@ export const TrialRequestSchema = z.object({
   modelId: z.string().min(1).max(128).regex(/^[\w.-]+$/).default('gpt-6-luna'),
   timeoutMs: z.number().int().positive().max(600_000).default(600_000),
   maxTurns: CustomMaxTurnsSchema.default(DEFAULT_CUSTOM_MAX_TURNS),
+  maxToolCalls: EvalMaxToolCallsSchema.optional(),
   requestLimits: EvalRequestLimitsSchema.default(DEFAULT_EVAL_REQUEST_LIMITS),
   outputDir: AbsolutePath,
 }).strict()

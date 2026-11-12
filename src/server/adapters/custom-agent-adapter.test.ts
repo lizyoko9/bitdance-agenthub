@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createEvalRequestPolicy, EvalBudgetExceededError } from '../../../eval/terminalbench/request-policy'
+import { createEvalRequestPolicy, createEvalToolPolicy, EvalBudgetExceededError } from '../../../eval/terminalbench/request-policy'
 import type { StreamEvent } from '@/shared/types'
 
 import { CustomAgentAdapter } from './custom-agent-adapter'
@@ -66,6 +66,40 @@ describe('Custom adapter optional request policy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(10)
     expect(tools.execute).toHaveBeenCalledTimes(9)
     expect(events.at(-1)?.type).toBe('run.usage')
+  })
+
+  it('rejects the seventh tool before publishing or executing it and retains usage', async () => {
+    fetchMock.mockImplementation(async () => toolResponse())
+    const events: StreamEvent[] = []
+    const adapter = new CustomAgentAdapter({ ...createEvalRequestPolicy(), toolPolicy: createEvalToolPolicy(6) })
+    const run = async () => {
+      for await (const event of adapter.stream(input({ toolNames: ['bash'] }), new AbortController().signal)) events.push(event)
+    }
+    await expect(run()).rejects.toMatchObject({ code: 'budget_exhausted', message: 'budget_exhausted: maximum tool calls reached' })
+    expect(tools.execute).toHaveBeenCalledTimes(6)
+    expect(events.filter((event) => event.type === 'tool.call')).toHaveLength(6)
+    expect(fetchMock).toHaveBeenCalledTimes(7)
+    expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: { inputTokens: 70, outputTokens: 14 } })
+    expect(events.at(-2)?.type).toBe('message.end')
+  })
+
+  it('shares the opt-in tool allowance across runs on the same adapter', async () => {
+    fetchMock.mockImplementation(async () => toolResponse())
+    const adapter = new CustomAgentAdapter({ maxTurns: 1, toolPolicy: createEvalToolPolicy(6) })
+    const outcomes = await Promise.allSettled(Array.from({ length: 7 }, (_, n) =>
+      consume(adapter, input({ runId: `shared-${n}`, toolNames: ['bash'] }))))
+    expect(tools.execute).toHaveBeenCalledTimes(6)
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected' && outcome.reason.code === 'iteration_limit')).toHaveLength(6)
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected' && outcome.reason.code === 'budget_exhausted')).toHaveLength(1)
+  })
+
+  it('retains native nonzero exit values and false error flags with the tool policy enabled', async () => {
+    fetchMock.mockResolvedValueOnce(toolResponse())
+    tools.execute.mockResolvedValueOnce({ ok: true, value: { exitCode: 23, output: 'STATUS: OK\nRESULT: complete\n' } })
+    const events = await consume(new CustomAgentAdapter({ toolPolicy: createEvalToolPolicy(6) }), input({ toolNames: ['bash'] }))
+    expect(events.find((event) => event.type === 'tool.result')).toMatchObject({
+      result: { exitCode: 23, output: 'STATUS: OK\nRESULT: complete\n' }, isError: false,
+    })
   })
 
   it('keeps the fallback finite and retains usage when iteration exhaustion fails', async () => {

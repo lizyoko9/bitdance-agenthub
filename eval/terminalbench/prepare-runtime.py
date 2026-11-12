@@ -9,7 +9,7 @@ import subprocess
 import tarfile
 
 
-SOURCE_DIRS = ("src/server", "src/db", "src/shared", "eval/terminalbench")
+SOURCE_DIRS = ("src/server", "src/db", "src/shared", "eval/terminalbench", "eval/tracetrial")
 EXPLICIT_FILES = (
     "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json",
     "eval/package.json",

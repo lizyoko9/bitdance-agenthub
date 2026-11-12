@@ -89,7 +89,8 @@ python3 eval/terminalbench/prepare-runtime.py \
 ```
 
 The allowlist includes non-test TypeScript under `src/server`, `src/db`,
-`src/shared`, and `eval/terminalbench`, plus `src/lib/artifact-preview.ts`, root
+`src/shared`, `eval/terminalbench`, and the shared `eval/tracetrial` TypeScript entry,
+plus `src/lib/artifact-preview.ts`, root
 package/lock/workspace and TS config, the SQLite ABI probe, and the installer.
 `eval/package.json` preserves the headless CLI's ESM module boundary.
 Symlinks are rejected. It never includes host `node_modules`, `.env*`, databases,

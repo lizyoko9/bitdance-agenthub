@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { runTraceTrial, TRACETRIAL_SOURCE_REVISION } from '../tracetrial/run-agenthub'
 import type { loadTrialRuntime, TrialRuntime } from './profile'
 import type { CustomRequestObservation } from './request-policy'
 import { redactLog, runHeadlessTrial, summarizeRequestUsage } from './run-agenthub'
@@ -41,6 +42,9 @@ describe('headless input and artifacts', () => {
     expect(() => validateTrialRequest({ ...request, instruction: ' \n ' })).toThrow()
     expect(() => validateTrialRequest({ ...request, timeoutMs: 600_001 })).toThrow()
     expect(() => validateTrialRequest({ ...request, maxTurns: 0 })).toThrow()
+    expect(request.maxToolCalls).toBeUndefined()
+    expect(validateTrialRequest({ ...request, maxToolCalls: 6 }).maxToolCalls).toBe(6)
+    for (const maxToolCalls of [0, -1, 1.5, 10001]) expect(() => validateTrialRequest({ ...request, maxToolCalls })).toThrow()
     expect(() => validateTrialRequest({ ...request, requestLimits: { maxRequests: 1001 } })).toThrow()
   })
 
@@ -106,14 +110,45 @@ print(json.dumps(build_trial_request(${JSON.stringify(request.instruction)}, ${J
     expect(JSON.parse(readFileSync(path.join(request.outputDir, 'requests.jsonl'), 'utf8'))).toMatchObject({ runId: 'root', parentRunId: null, usageComplete: true })
     const manifest = JSON.parse(readFileSync(path.join(request.outputDir, 'manifest.json'), 'utf8'))
     expect(manifest).toMatchObject({ taskId: request.taskId, model: { provider: 'openai', requestedModel: request.modelId }, limits: { maxTurns: 64, maxRequests: 32, maxTotalRequestBytes: 1048576, sdkRetries: 0 } })
+    expect(manifest.scope).toContain('Harbor')
+    expect(manifest).not.toHaveProperty('benchmark')
+    expect(manifest.limits).not.toHaveProperty('maxToolCalls')
     await expect(runHeadlessTrial(request, { loadRuntime })).rejects.toThrow(/fresh output directory/)
+  })
+
+  it('records the TraceTrial identity and native result without changing official instruction bytes', async () => {
+    const { request: original } = fixture()
+    const request = validateTrialRequest({ ...original, taskId: 'E8-exit-code-masked-by-output-001', maxToolCalls: 6, timeoutMs: 120000 })
+    const loadRuntime = vi.fn<typeof loadTrialRuntime>(async (_request, _onRequest, options): Promise<TrialRuntime> => {
+      expect(options).toEqual({ benchmark: 'tracetrial' })
+      let emit: Parameters<TrialRuntime['subscribe']>[0] = () => {}
+      return {
+        conversationId: 'conv', dataDir: '/isolated/state', workerIds: ['worker'], orchestratorId: 'orch', close: vi.fn(), abort: async () => true, approvePending: vi.fn(),
+        subscribe: (listener) => { emit = listener; return () => {} },
+        async start() {
+          emit({ type: 'run.start', conversationId: 'conv', timestamp: 1, runId: 'root', agentId: 'worker', triggerMessageId: 'msg' })
+          emit({ type: 'tool.result', conversationId: 'conv', timestamp: 2, messageId: 'msg', callId: 'native', result: { exitCode: 23, output: 'STATUS: OK\nRESULT: complete\n' }, isError: false })
+          emit({ type: 'run.end', conversationId: 'conv', timestamp: 3, runId: 'root', status: 'complete' })
+          return { runIds: ['root'] }
+        },
+      }
+    })
+    const result = await runTraceTrial(request, { loadRuntime })
+    expect(result).toMatchObject({ runStatus: 'complete', allRunsSettled: true, terminationReason: 'completed' })
+    const manifest = JSON.parse(readFileSync(path.join(request.outputDir, 'manifest.json'), 'utf8'))
+    expect(manifest).toMatchObject({ benchmark: 'tracetrial', sourceRevision: TRACETRIAL_SOURCE_REVISION, limits: { maxToolCalls: 6, timeoutMs: 120000 } })
+    expect(manifest.scope).not.toContain('Harbor')
+    expect(manifest).not.toHaveProperty('harborVersion')
+    expect(loadRuntime.mock.calls[0][0].instruction).toBe(original.instruction)
+    expect(readFileSync(path.join(request.outputDir, 'events.jsonl'), 'utf8')).toContain('"isError":false')
+    expect(readFileSync(path.join(request.outputDir, 'events.jsonl'), 'utf8')).toContain('"exitCode":23')
   })
 
   it('redacts known credentials and bearer tokens in failures', () => {
     expect(redactLog('failure: tiny-secret Authorization: Bearer token-value', ['tiny-secret'])).toBe('failure: [REDACTED] Authorization: Bearer [REDACTED]')
   })
 
-  it('creates the real isolated profile before importing database modules and leaves the ordinary database untouched', () => {
+  it.each(['terminalbench', 'tracetrial'] as const)('creates the real isolated %s profile and leaves the ordinary database untouched', (benchmark) => {
     const { directory } = fixture()
     const bundle = path.join(directory, 'runtime')
     mkdirSync(bundle)
@@ -134,7 +169,7 @@ print(json.dumps(build_trial_request(${JSON.stringify(request.instruction)}, ${J
       fs.writeFileSync(path.join(ordinary, 'agenthub.db'), 'ordinary database sentinel');
       process.env.AGENTHUB_DATA_DIR = ordinary;
       const { createIsolatedProfile } = await import(${JSON.stringify(profileUrl)});
-      const profile = await createIsolatedProfile({outputDir:path.join(${JSON.stringify(directory)}, 'profile'), group:'orch-gate', modelId:'gpt-6-luna'}, () => {});
+      const profile = await createIsolatedProfile({outputDir:path.join(${JSON.stringify(directory)}, 'profile'), group:'orch-gate', modelId:'gpt-6-luna', maxToolCalls:${benchmark === 'tracetrial' ? 6 : 'undefined'}}, () => {}, ${JSON.stringify({ benchmark })});
       const { db, sqlite } = await import(${JSON.stringify(clientUrl)});
       assert.notEqual(process.env.AGENTHUB_DATA_DIR, ordinary);
       assert.equal(sqlite.name, path.join(profile.dataDir, 'agenthub.db'));
@@ -142,6 +177,7 @@ print(json.dumps(build_trial_request(${JSON.stringify(request.instruction)}, ${J
       const ids = new Set([...profile.workerIds, profile.orchestratorId]);
       const agents = (await db.query.agents.findMany()).filter(agent => ids.has(agent.id));
       assert.equal(agents.length, 2);
+      assert.equal(agents.find(agent => agent.id === profile.workerIds[0]).name, ${JSON.stringify(benchmark === 'tracetrial' ? 'TraceTrial-Bench executor' : 'Terminal-Bench executor')});
       for (const agent of agents) { assert.equal(agent.modelId, 'gpt-6-luna'); assert.equal(agent.modelProvider, 'openai'); assert.equal(agent.adapterName, 'custom'); assert.equal(agent.apiKey, null); assert.deepEqual(agent.skillIds, []); }
       assert.ok((await db.query.skills.findMany()).every(skill => !skill.isGlobalDefault));
       profile.close();

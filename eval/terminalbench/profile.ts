@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import type { StreamEvent } from '../../src/shared/types'
 import { DEFAULT_CUSTOM_MAX_TURNS } from '../../src/server/adapters/custom-agent-limits'
-import { createEvalRequestPolicy, type CustomRequestObservation } from './request-policy'
+import { createEvalRequestPolicy, createEvalToolPolicy, type CustomRequestObservation } from './request-policy'
 import type { TrialRequest } from './trial-schema'
 
 export interface TrialProfile {
@@ -21,12 +21,17 @@ export interface TrialRuntime extends TrialProfile {
   abort(runId: string): Promise<boolean>
 }
 
+export interface TrialProfileOptions {
+  benchmark?: 'terminalbench' | 'tracetrial'
+}
+
 const WORKER_PROMPT = `You are AgentHub's terminal task execution agent. Complete the user's original task inside the bound workspace using the available file and command tools. Inspect relevant files, make necessary changes, and run appropriate checks. Keep the final response concise and accurately report remaining blockers.`
 const WORKER_TOOLS = ['fs_list', 'fs_read', 'fs_write', 'bash', 'ask_user']
 
 export async function createIsolatedProfile(
-  request: Pick<TrialRequest, 'outputDir' | 'group' | 'modelId'> & Partial<Pick<TrialRequest, 'maxTurns' | 'requestLimits'>>,
+  request: Pick<TrialRequest, 'outputDir' | 'group' | 'modelId'> & Partial<Pick<TrialRequest, 'maxTurns' | 'maxToolCalls' | 'requestLimits'>>,
   onRequest: (observation: CustomRequestObservation) => void,
+  options: TrialProfileOptions = {},
 ): Promise<TrialProfile> {
   if ((globalThis as { sqlite?: unknown }).sqlite) {
     throw new Error('Headless trial requires a fresh process before database modules are loaded')
@@ -46,7 +51,7 @@ export async function createIsolatedProfile(
     await db.update(schema.skills).set({ isGlobalDefault: false })
     await db.update(schema.agents).set({ skillIds: [] })
     const worker = await agents.createCustomAgent({
-      name: 'Terminal-Bench executor',
+      name: options.benchmark === 'tracetrial' ? 'TraceTrial-Bench executor' : 'Terminal-Bench executor',
       avatar: '🛠️',
       description: 'Executes and verifies the official terminal task',
       capabilities: ['terminal', 'coding', 'verification'],
@@ -74,6 +79,7 @@ export async function createIsolatedProfile(
     agentRegistry.register(new CustomAgentAdapter({
       ...createEvalRequestPolicy(request.requestLimits, onRequest),
       maxTurns: request.maxTurns ?? DEFAULT_CUSTOM_MAX_TURNS,
+      ...(request.maxToolCalls === undefined ? {} : { toolPolicy: createEvalToolPolicy(request.maxToolCalls) }),
     }))
     return { dataDir, workerIds: [worker.id], orchestratorId: orchestrator.id, close: () => sqlite.close() }
   } catch (error) {
@@ -85,8 +91,9 @@ export async function createIsolatedProfile(
 export async function loadTrialRuntime(
   request: TrialRequest,
   onRequest: (observation: CustomRequestObservation) => void,
+  options: TrialProfileOptions = {},
 ): Promise<TrialRuntime> {
-  const profile = await createIsolatedProfile(request, onRequest)
+  const profile = await createIsolatedProfile(request, onRequest, options)
   try {
     const [conversations, { eventBus }, { pendingDispatchPlans }, { pendingBashCommands }, { pendingQuestions }, { pendingWrites }, { flushAllMessageParts }] = await Promise.all([
       import('../../src/server/conversation-service'),
@@ -99,7 +106,7 @@ export async function loadTrialRuntime(
     ])
     const single = request.group === 'single'
     const conversation = await conversations.createConversation({
-      title: `[Terminal-Bench] ${request.taskId} / ${request.group}`,
+      title: `[${options.benchmark === 'tracetrial' ? 'TraceTrial-Bench' : 'Terminal-Bench'}] ${request.taskId} / ${request.group}`,
       mode: single ? 'single' : 'group',
       agentIds: single ? profile.workerIds : [profile.orchestratorId, ...profile.workerIds],
       boundPath: request.cwd,

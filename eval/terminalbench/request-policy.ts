@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type {
   CustomAgentAdapterOptions,
   CustomRequestObservation,
+  CustomToolPolicy,
 } from '../../src/server/adapters/custom-request-policy'
 
 export type { CustomAgentAdapterOptions, CustomRequestObservation }
@@ -22,6 +23,7 @@ export const EvalRequestLimitsSchema = z.object({
 }).strict()
 
 export type EvalRequestLimits = z.input<typeof EvalRequestLimitsSchema>
+export const EvalMaxToolCallsSchema = z.number().int().positive().max(10_000)
 
 export class EvalBudgetExceededError extends Error {
   readonly code = 'budget_exhausted'
@@ -36,6 +38,23 @@ export function isEvalBudgetExceeded(error: unknown): boolean {
   return error instanceof EvalBudgetExceededError || (
     !!error && typeof error === 'object' && 'code' in error && error.code === 'budget_exhausted'
   )
+}
+
+export function createEvalToolPolicy(maxToolCalls: number): CustomToolPolicy {
+  const limit = EvalMaxToolCallsSchema.parse(maxToolCalls)
+  let toolCalls = 0
+  let exhausted: EvalBudgetExceededError | undefined
+  return {
+    beforeTool(_context, signal) {
+      signal.throwIfAborted()
+      if (exhausted) throw exhausted
+      if (toolCalls >= limit) {
+        exhausted = new EvalBudgetExceededError('maximum tool calls reached')
+        throw exhausted
+      }
+      toolCalls++
+    },
+  }
 }
 
 export function createEvalRequestPolicy(

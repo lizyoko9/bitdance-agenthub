@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
-import { loadTrialRuntime, type TrialRuntime } from './profile'
+import { loadTrialRuntime, type TrialProfileOptions, type TrialRuntime } from './profile'
 import type { CustomRequestObservation } from './request-policy'
 import { classifyTrialTermination, executeTrial, type ExecutionResult } from './trial-execution'
 import { validateTrialRequest, type TrialRequest } from './trial-schema'
@@ -37,14 +37,14 @@ function commitId(): string | null {
   }
 }
 
-export async function runHeadlessTrial(
-  request: TrialRequest,
-  options: {
-    loadRuntime?: typeof loadTrialRuntime
-    signal?: AbortSignal
-    secrets?: string[]
-  } = {},
-) {
+export interface HeadlessTrialOptions extends TrialProfileOptions {
+  loadRuntime?: typeof loadTrialRuntime
+  signal?: AbortSignal
+  secrets?: string[]
+  sourceRevision?: string | null
+}
+
+export async function runHeadlessTrial(request: TrialRequest, options: HeadlessTrialOptions = {}) {
   mkdirSync(request.outputDir, { recursive: true })
   if (existsSync(path.join(request.outputDir, 'manifest.json'))) throw new Error('Trial output already contains a manifest; use a fresh output directory')
   const secrets = options.secrets ?? [process.env.OPENAI_API_KEY ?? '']
@@ -52,15 +52,19 @@ export async function runHeadlessTrial(
   const writeJson = (name: string, value: unknown) => writeFileSync(path.join(request.outputDir, name), `${serialize(value)}\n`)
   const observations: CustomRequestObservation[] = []
   const parentRunIds = new Map<string, string | undefined>()
+  const traceTrial = options.benchmark === 'tracetrial'
   const manifest = {
     schemaVersion: 1,
-    scope: 'one-task integration smoke; official verifier reward is recorded by Harbor',
+    ...(traceTrial ? { benchmark: 'tracetrial', sourceRevision: options.sourceRevision ?? null } : {}),
+    scope: traceTrial
+      ? 'custom AgentHub execution adapter single-task smoke; official TraceTrial verifier and layered scoring are recorded separately'
+      : 'one-task integration smoke; official verifier reward is recorded by Harbor',
     taskId: request.taskId,
     group: request.group,
     instructionSha256: createHash('sha256').update(request.instruction).digest('hex'),
     agenthubCommit: commitId(),
     runtimePackageSha256: process.env.AGENTHUB_EVAL_PACKAGE_SHA256 ?? null,
-    harborVersion: process.env.AGENTHUB_EVAL_HARBOR_VERSION ?? null,
+    ...(traceTrial ? {} : { harborVersion: process.env.AGENTHUB_EVAL_HARBOR_VERSION ?? null }),
     datasetVersion: process.env.AGENTHUB_EVAL_DATASET_VERSION ?? null,
     imageDigest: process.env.AGENTHUB_EVAL_IMAGE_DIGEST ?? null,
     taskSha256: process.env.AGENTHUB_EVAL_TASK_SHA256 ?? null,
@@ -69,7 +73,7 @@ export async function runHeadlessTrial(
     nodeVersion: process.version,
     cwd: request.cwd,
     model: { adapter: 'custom', provider: 'openai', requestedModel: request.modelId, reasoningEffort: 'none' },
-    limits: { ...request.requestLimits, maxTurns: request.maxTurns, timeoutMs: request.timeoutMs, sdkRetries: 0 },
+    limits: { ...request.requestLimits, maxTurns: request.maxTurns, ...(request.maxToolCalls === undefined ? {} : { maxToolCalls: request.maxToolCalls }), timeoutMs: request.timeoutMs, sdkRetries: 0 },
     policy: { skills: 'none, including public pool', writes: 'auto', plans: 'deferred approval', bash: 'deferred approval after existing policy checks', questions: 'fixed continuation answer' },
     startedAt: new Date().toISOString(),
   }
@@ -83,7 +87,7 @@ export async function runHeadlessTrial(
     runtime = await (options.loadRuntime ?? loadTrialRuntime)(request, (observation) => {
       observations.push(observation)
       appendFileSync(path.join(request.outputDir, 'requests.jsonl'), `${serialize({ ...observation, parentRunId: parentRunIds.get(observation.runId) ?? null })}\n`)
-    })
+    }, { benchmark: options.benchmark })
     writeJson('manifest.json', { ...manifest, dataDir: runtime.dataDir, conversationId: runtime.conversationId, workerIds: runtime.workerIds, orchestratorId: runtime.orchestratorId })
     execution = await executeTrial(runtime, request.timeoutMs, (event) => {
       if (event.type === 'run.start') parentRunIds.set(event.runId, event.parentRunId)
@@ -115,7 +119,7 @@ export async function runHeadlessTrial(
   return JSON.parse(serialize(result)) as typeof result
 }
 
-async function main(): Promise<void> {
+export async function runHeadlessCli(options: Pick<HeadlessTrialOptions, 'benchmark' | 'sourceRevision'> = {}): Promise<void> {
   const { values } = parseArgs({ options: { request: { type: 'string' } }, strict: true })
   if (!values.request) throw new Error('Usage: run-agenthub.ts --request <trial.json>')
   const request = validateTrialRequest(JSON.parse(readFileSync(values.request, 'utf8')))
@@ -125,7 +129,7 @@ async function main(): Promise<void> {
   process.once('SIGTERM', stop)
   process.once('SIGINT', stop)
   try {
-    const result = await runHeadlessTrial(request, { signal: controller.signal })
+    const result = await runHeadlessTrial(request, { ...options, signal: controller.signal })
     process.stdout.write(`AgentHub trial ${request.taskId}: ${result.runStatus}\n`)
     process.exitCode = result.runStatus === 'complete' ? 0 : 1
     if (!result.allRunsSettled) process.exit(process.exitCode)
@@ -136,7 +140,7 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((failure) => {
+  runHeadlessCli().catch((failure) => {
     process.stderr.write(`${redactLog(failure instanceof Error ? failure.message : String(failure), [process.env.OPENAI_API_KEY ?? ''])}\n`)
     process.exitCode = 1
   })

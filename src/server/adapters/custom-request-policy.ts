@@ -43,6 +43,16 @@ export interface CustomRequestPolicy {
   observe(observation: CustomRequestObservation): void
 }
 
+export interface CustomToolContext extends CustomRequestContext {
+  callId: string
+  toolName: string
+  args: unknown
+}
+
+export interface CustomToolPolicy {
+  beforeTool(context: CustomToolContext, signal: AbortSignal): void
+}
+
 export interface CustomAgentAdapterOptions {
   maxTurns?: number
   maxRetries?: number
@@ -51,6 +61,7 @@ export interface CustomAgentAdapterOptions {
     'reasoning_effort' | 'max_completion_tokens'
   >
   requestPolicy?: CustomRequestPolicy
+  toolPolicy?: CustomToolPolicy
 }
 
 const numberOrNull = (value: unknown): number | null =>

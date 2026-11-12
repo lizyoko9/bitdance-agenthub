@@ -4,6 +4,8 @@
 
 公开 Terminal-Bench 任务的容器内 headless 接入、独立 Harbor 依赖、请求限额和复现命令见 [`terminalbench/README.md`](./terminalbench/README.md)。该入口使用官方 verifier，并将首次一题一次的短预算运行标为集成 smoke；各次运行结果单独留档。
 
+TraceTrial-Bench 的固定 E8 机制题接入见 [`tracetrial/README.md`](./tracetrial/README.md)：真实运行 AgentHub Application Services 和工具，保留原生失败语义，使用官方规则与 Harness/Agent 双层评分。其单题自定义 adapter 试跑用于观察执行与反馈机制，不提供多 Agent 协作收益或全量 benchmark 结论。各入口的预算、原始记录和评分结果分别保存。
+
 ## 题目
 
 `tasks/<id>/` 下每道题包含 `task.json`（需求、验收命令、超时）、`repo/`（初始项目）、`hidden/`（验收测试，run 结束后才复制进 workspace 的 `__eval__/`）、`solution/`（参考解）。全部是零依赖 Node 项目，验收用 `node --test`。

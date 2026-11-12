@@ -296,6 +296,29 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           args = {}
         }
 
+        try {
+          // Consumers may execute a tool as soon as tool.call is published.
+          this.options.toolPolicy?.beforeTool({
+            runId: input.runId,
+            agentId: input.agentId,
+            conversationId: input.conversationId,
+            messageId,
+            requestedModel: modelId,
+            provider: modelProvider,
+            turn,
+            callId: tc.id,
+            toolName: tc.name,
+            args,
+          }, signal)
+        } catch (error) {
+          if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
+            yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
+          }
+          yield baseEvent(input, { type: 'message.end', messageId })
+          yield baseEvent(input, { type: 'run.usage', runId: input.runId, usage: { ...runUsage, model: modelId } })
+          throw error
+        }
+
         yield baseEvent(input, {
           type: 'tool.call',
           messageId,
