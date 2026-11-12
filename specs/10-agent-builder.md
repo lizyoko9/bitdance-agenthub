@@ -33,7 +33,7 @@ Agent Studio 的模板市场首版是静态蓝图：模板用于生成可编辑 
 |---|---|---|---|---|
 | `name` | string | ✓ | — | trim 后非空 |
 | `description` | string | ✓ | — | trim 后非空，UI 一句话简介 |
-| `capabilities` | string[] | — | `[]` | 用逗号 / 空格 / 中文逗号分隔，自动 split |
+| `capabilities` | string[] | — | `[]` | 输入时保留原始文本；提交时按逗号 / 空格 / 中文逗号分隔，不吞掉尚未输入完成的分隔符 |
 | `systemPrompt` | string | ✓ | Custom agent scaffold | 决定 agent 行为；创建态默认填入可编辑的 harness 模板 |
 | `modelProvider` | enum | — | `'deepseek'` | 见下方 Provider 矩阵 |
 | `modelId` | string | — | provider 默认 | 切换 provider 时自动重置 |
