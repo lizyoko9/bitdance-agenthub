@@ -9,6 +9,9 @@ it is an integration smoke test and is not a Terminal-Bench leaderboard score.
 The completed first run is documented in [2026-11-12 smoke results](results/2026-11-12-smoke.md):
 oracle reward 1.0; AgentHub reward 0.0. The report retains the failed task result
 and distinguishes execution completion from task success.
+The authorized [expanded-budget rerun](results/2026-11-12-expanded-budget-smoke.md)
+completed naturally after 29 requests and again received reward 0.0 (28/37 checks).
+It is a second diagnostic single-task run, not evidence of a harness improvement.
 
 Fixed inputs:
 
