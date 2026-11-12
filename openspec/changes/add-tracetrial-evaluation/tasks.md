@@ -8,7 +8,7 @@
 
 - [x] 2.1 Add an opt-in tool-call preflight with shared finite counting and regression tests.
 - [x] 2.2 Add a container-local TraceTrial launcher using real headless services and a fresh isolated profile; preserve Terminal-Bench behavior.
-- [ ] 2.3 Prepare a fixed Linux runtime and public-only task workspace; validate no-key installation and finite cleanup.
+- [x] 2.3 Prepare a fixed Linux runtime and public-only task workspace; validate no-key installation and finite cleanup.
 - [x] 2.4 Normalize authentic AgentHub events with provenance, retain native failure flags, and generate official execution evidence/capability records.
 
 ## 3. Official scoring with bounded judge
@@ -19,7 +19,7 @@
 
 ## 4. One-task smoke and handoff
 
-- [ ] 4.1 Complete typecheck, lint, relevant tests and strict spec validation; commit and hash the exact trial sources.
-- [ ] 4.2 Run exactly one fresh E8 actor trial and score its retained evidence within the approved budgets, without actor rerun or model fallback.
-- [ ] 4.3 Audit task/runtime hashes, traces, request limits and archived credentials; report all observed Harness/Agent outcomes and limitations.
-- [ ] 4.4 Finish the result/reproduction report, update task status, commit and merge the completed integration.
+- [x] 4.1 Complete typecheck, lint, relevant tests and strict spec validation; commit and hash the exact trial sources.
+- [x] 4.2 Run exactly one fresh E8 actor trial and score its retained evidence within the approved budgets, without actor rerun or model fallback.
+- [x] 4.3 Audit task/runtime hashes, traces, request limits and archived credentials; report all observed Harness/Agent outcomes and limitations.
+- [x] 4.4 Finish the result/reproduction report, update task status, commit and merge the completed integration.

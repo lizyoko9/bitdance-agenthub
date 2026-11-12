@@ -2,6 +2,8 @@
 
 本入口用于观察 AgentHub 的执行、工具反馈与验证机制。首轮范围固定为一个 E8 任务、一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
 
+[2026-11-12 首轮结果](results/2026-11-12-e8-smoke.md)：Harness 35.7143/50、Agent 50/50，官方总分 85.7143/100、判定 fail；定位到非零退出的失败分类未一致传播，Agent 正确完成交付。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`，任务为 `E8-exit-code-masked-by-output-001`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，设计与批准预算见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)。
 
 ## 测量对象与执行路径
