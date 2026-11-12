@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import path from 'node:path'
 
 import type { StreamEvent } from '../../src/shared/types'
+import { DEFAULT_CUSTOM_MAX_TURNS } from '../../src/server/adapters/custom-agent-limits'
 import { createEvalRequestPolicy, type CustomRequestObservation } from './request-policy'
 import type { TrialRequest } from './trial-schema'
 
@@ -24,7 +25,7 @@ const WORKER_PROMPT = `You are AgentHub's terminal task execution agent. Complet
 const WORKER_TOOLS = ['fs_list', 'fs_read', 'fs_write', 'bash', 'ask_user']
 
 export async function createIsolatedProfile(
-  request: Pick<TrialRequest, 'outputDir' | 'group' | 'modelId'>,
+  request: Pick<TrialRequest, 'outputDir' | 'group' | 'modelId'> & Partial<Pick<TrialRequest, 'maxTurns' | 'requestLimits'>>,
   onRequest: (observation: CustomRequestObservation) => void,
 ): Promise<TrialProfile> {
   if ((globalThis as { sqlite?: unknown }).sqlite) {
@@ -70,7 +71,10 @@ export async function createIsolatedProfile(
       apiBaseUrl: null,
     })
     await db.update(schema.appSettings).set({ openaiApiKey: null })
-    agentRegistry.register(new CustomAgentAdapter(createEvalRequestPolicy({}, onRequest)))
+    agentRegistry.register(new CustomAgentAdapter({
+      ...createEvalRequestPolicy(request.requestLimits, onRequest),
+      maxTurns: request.maxTurns ?? DEFAULT_CUSTOM_MAX_TURNS,
+    }))
     return { dataDir, workerIds: [worker.id], orchestratorId: orchestrator.id, close: () => sqlite.close() }
   } catch (error) {
     sqlite.close()

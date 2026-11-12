@@ -8,6 +8,7 @@ import type { ToolContext } from '@/server/tools/types'
 import type { DeployStatusRecord, ModelProvider, StreamEvent } from '@/shared/types'
 
 import { resolveCustomProviderClientConfig } from './custom-provider-client'
+import { CustomAgentTerminationError, resolveCustomMaxTurns } from './custom-agent-limits'
 import { CustomRequestTracker, type CustomAgentAdapterOptions, type CustomRequestStatus } from './custom-request-policy'
 import type { AdapterAttachment, AdapterInput, AgentPlatformAdapter } from './types'
 
@@ -34,8 +35,11 @@ const MAX_IMAGES_PER_MESSAGE = 5
 
 export class CustomAgentAdapter implements AgentPlatformAdapter {
   readonly name = 'custom' as const
+  private readonly maxTurns: number
 
-  constructor(private options: CustomAgentAdapterOptions = {}) {}
+  constructor(private options: CustomAgentAdapterOptions = {}) {
+    this.maxTurns = resolveCustomMaxTurns(options.maxTurns)
+  }
 
   async *stream(input: AdapterInput, signal: AbortSignal): AsyncIterable<StreamEvent> {
     if (!input.customConfig) {
@@ -80,7 +84,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       { role: 'user', content: userContent },
     ]
 
-    const MAX_TURNS = 8
     let turn = 0
     // 跨 turn 累加 token 用量；run 结束前 yield run.usage 给 AgentRunner 落库
     const runUsage = {
@@ -91,7 +94,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       lastInputTokens: 0,
     }
 
-    while (turn < MAX_TURNS) {
+    while (turn < this.maxTurns) {
       if (signal.aborted) return
       turn++
 
@@ -264,7 +267,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       }
       messages.push(assistantMsg as ChatMessage)
 
-      if (toolCalls.length === 0 || finishReason === 'stop') {
+      const modelStopped = finishReason === 'stop' && toolCallBuffer.size === 0
+      const requestsTools = finishReason === 'tool_calls' && toolCalls.length > 0 && toolCalls.length === toolCallBuffer.size
+      if (!requestsTools) {
         if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
           yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
         }
@@ -274,6 +279,11 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           runId: input.runId,
           usage: { ...runUsage, model: modelId },
         })
+        if (!modelStopped) {
+          const reason = finishReason === 'length' ? 'output_limit'
+            : finishReason === 'content_filter' ? 'content_filter' : 'model_interrupted'
+          throw new CustomAgentTerminationError(reason, turn, this.maxTurns)
+        }
         return
       }
 
@@ -357,12 +367,13 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       yield baseEvent(input, { type: 'message.end', messageId })
       // 继续下一轮
     }
-    // 到达 MAX_TURNS 兜底：把累计 usage emit 一下（正常路径在 line 232 已 emit 过 + return）
     yield baseEvent(input, {
       type: 'run.usage',
       runId: input.runId,
       usage: { ...runUsage, model: modelId },
     })
+    if (signal.aborted) return
+    throw new CustomAgentTerminationError('iteration_limit', turn, this.maxTurns)
   }
 }
 

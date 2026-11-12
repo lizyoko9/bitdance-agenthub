@@ -4,6 +4,7 @@ import { createEvalRequestPolicy, EvalBudgetExceededError } from '../../../eval/
 import type { StreamEvent } from '@/shared/types'
 
 import { CustomAgentAdapter } from './custom-agent-adapter'
+import { DEFAULT_CUSTOM_MAX_TURNS, CustomAgentTerminationError } from './custom-agent-limits'
 import type { CustomRequestObservation } from './custom-request-policy'
 import type { AdapterInput } from './types'
 
@@ -34,6 +35,11 @@ function chunk(choices: unknown[], usage?: unknown) {
 
 const done = () => response([chunk([{ index: 0, delta: { content: 'Done' }, finish_reason: 'stop' }])])
 
+const toolResponse = (finishReason: string | null = 'tool_calls') => response([
+  chunk([{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call-tool', type: 'function', function: { name: 'bash', arguments: '{"command":"pwd"}' } }] }, finish_reason: finishReason }]),
+  chunk([], { prompt_tokens: 10, completion_tokens: 2 }),
+])
+
 async function consume(adapter: CustomAgentAdapter, adapterInput = input(), signal = new AbortController().signal) {
   const events: StreamEvent[] = []
   for await (const event of adapter.stream(adapterInput, signal)) events.push(event)
@@ -45,11 +51,109 @@ describe('Custom adapter optional request policy', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubEnv('AGENTHUB_CUSTOM_MAX_TURNS', undefined)
     vi.stubGlobal('fetch', fetchMock)
     fetchMock.mockImplementation(async () => done())
+    tools.execute.mockResolvedValue({ ok: true, value: { exitCode: 0 } })
   })
 
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+
+  it('can complete beyond eight turns with the finite default', async () => {
+    let turn = 0
+    fetchMock.mockImplementation(async () => ++turn <= 9 ? toolResponse() : done())
+    const events = await consume(new CustomAgentAdapter(), input({ toolNames: ['bash'] }))
+    expect(fetchMock).toHaveBeenCalledTimes(10)
+    expect(tools.execute).toHaveBeenCalledTimes(9)
+    expect(events.at(-1)?.type).toBe('run.usage')
+  })
+
+  it('keeps the fallback finite and retains usage when iteration exhaustion fails', async () => {
+    fetchMock.mockImplementation(async () => toolResponse())
+    const events: StreamEvent[] = []
+    const run = async () => {
+      for await (const event of new CustomAgentAdapter().stream(input({ toolNames: ['bash'] }), new AbortController().signal)) events.push(event)
+    }
+    await expect(run()).rejects.toMatchObject({ code: 'iteration_limit', turns: DEFAULT_CUSTOM_MAX_TURNS, maxTurns: DEFAULT_CUSTOM_MAX_TURNS })
+    expect(fetchMock).toHaveBeenCalledTimes(DEFAULT_CUSTOM_MAX_TURNS)
+    expect(tools.execute).toHaveBeenCalledTimes(DEFAULT_CUSTOM_MAX_TURNS)
+    expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: { inputTokens: 320, outputTokens: 64 } })
+  })
+
+  it('honors an explicit turn limit and reports exhaustion instead of normal completion', async () => {
+    fetchMock.mockImplementation(async () => toolResponse())
+    await expect(consume(new CustomAgentAdapter({ maxTurns: 2 }), input({ toolNames: ['bash'] })))
+      .rejects.toMatchObject({ code: 'iteration_limit', message: expect.stringMatching(/^iteration_limit:/), turns: 2, maxTurns: 2 })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(tools.execute).toHaveBeenCalledTimes(2)
+  })
+
+  it('allows voluntary stop on the final configured turn', async () => {
+    fetchMock.mockResolvedValueOnce(toolResponse())
+    await expect(consume(new CustomAgentAdapter({ maxTurns: 2 }), input({ toolNames: ['bash'] }))).resolves.toBeDefined()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(tools.execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses environment configuration unless a runtime override is supplied', async () => {
+    vi.stubEnv('AGENTHUB_CUSTOM_MAX_TURNS', '1')
+    fetchMock.mockImplementation(async () => toolResponse())
+    await expect(consume(new CustomAgentAdapter(), input({ toolNames: ['bash'] }))).rejects.toMatchObject({ maxTurns: 1 })
+    vi.stubEnv('AGENTHUB_CUSTOM_MAX_TURNS', 'invalid')
+    await expect(consume(new CustomAgentAdapter({ maxTurns: 2 }), input({ toolNames: ['bash'] }))).rejects.toMatchObject({ maxTurns: 2 })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 10_001])('rejects invalid runtime maxTurns %s before requests', (maxTurns) => {
+    expect(() => new CustomAgentAdapter({ maxTurns })).toThrow(/maxTurns/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['', 'invalid', '0', '-1', '1.5', '10001'])('rejects invalid environment maxTurns %s before requests', (maxTurns) => {
+    vi.stubEnv('AGENTHUB_CUSTOM_MAX_TURNS', maxTurns)
+    expect(() => new CustomAgentAdapter()).toThrow(/AGENTHUB_CUSTOM_MAX_TURNS/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not execute truncated tool arguments as a completed task', async () => {
+    fetchMock.mockResolvedValueOnce(toolResponse('length'))
+    await expect(consume(new CustomAgentAdapter(), input({ toolNames: ['bash'] })))
+      .rejects.toMatchObject({ code: 'output_limit', message: expect.stringMatching(/^output_limit:/) })
+    expect(tools.execute).not.toHaveBeenCalled()
+  })
+
+  it.each(['length', 'content_filter', null])('does not treat finish reason %s without tools as voluntary completion', async (finishReason) => {
+    fetchMock.mockResolvedValueOnce(response([chunk([{ index: 0, delta: { content: 'Partial' }, finish_reason: finishReason }])]))
+    const code = finishReason === 'length' ? 'output_limit' : finishReason === 'content_filter' ? 'content_filter' : 'model_interrupted'
+    await expect(consume(new CustomAgentAdapter())).rejects.toMatchObject({ code })
+  })
+
+  it.each(['stop', 'tool_calls'])('rejects an incomplete tool delta with finish reason %s instead of dropping it', async (finishReason) => {
+    fetchMock.mockResolvedValueOnce(response([chunk([{ index: 0, delta: {
+      tool_calls: [{ index: 0, id: 'incomplete-call', type: 'function', function: { arguments: '{}' } }],
+    }, finish_reason: finishReason }])]))
+    await expect(consume(new CustomAgentAdapter(), input({ toolNames: ['bash'] }))).rejects.toMatchObject({ code: 'model_interrupted' })
+    expect(tools.execute).not.toHaveBeenCalled()
+  })
+
+  it('does not misclassify cancellation during the final tool as iteration exhaustion', async () => {
+    const controller = new AbortController()
+    fetchMock.mockResolvedValueOnce(toolResponse())
+    tools.execute.mockImplementationOnce(async () => {
+      controller.abort()
+      return { ok: true, value: 'cancelled' }
+    })
+    await expect(consume(new CustomAgentAdapter({ maxTurns: 1 }), input({ toolNames: ['bash'] }), controller.signal)).resolves.toBeDefined()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps counters independent for concurrent runs sharing an adapter', async () => {
+    fetchMock.mockImplementation(async () => toolResponse())
+    const adapter = new CustomAgentAdapter({ maxTurns: 2 })
+    const outcomes = await Promise.allSettled([consume(adapter, input({ runId: 'a', toolNames: ['bash'] })), consume(adapter, input({ runId: 'b', toolNames: ['bash'] }))])
+    expect(outcomes.every((outcome) => outcome.status === 'rejected' && outcome.reason instanceof CustomAgentTerminationError && outcome.reason.turns === 2)).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
 
   it('preserves normal request parameters and default SDK retries when no policy is supplied', async () => {
     fetchMock.mockResolvedValueOnce(new Response('{"error":{"message":"busy","type":"rate_limit_error"}}', {
@@ -105,7 +209,7 @@ describe('Custom adapter optional request policy', () => {
       chunk([], { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_tokens_details: { cached_tokens: 40 }, completion_tokens_details: { reasoning_tokens: 0 } }),
     ]))
     const observations: CustomRequestObservation[] = []
-    const adapter = new CustomAgentAdapter(createEvalRequestPolicy({}, (value) => observations.push(value)))
+    const adapter = new CustomAgentAdapter({ ...createEvalRequestPolicy({}, (value) => observations.push(value)), maxTurns: 1 })
     for await (const event of adapter.stream(input({ toolNames: ['plan_tasks'] }), new AbortController().signal)) {
       if (event.type === 'tool.call') {
         expect(observations).toHaveLength(1)

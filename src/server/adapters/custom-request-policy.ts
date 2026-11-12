@@ -44,6 +44,7 @@ export interface CustomRequestPolicy {
 }
 
 export interface CustomAgentAdapterOptions {
+  maxTurns?: number
   maxRetries?: number
   requestSettings?: Pick<
     OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,

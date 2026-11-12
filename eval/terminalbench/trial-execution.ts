@@ -10,12 +10,24 @@ export interface TrialRun {
 
 export interface ExecutionResult {
   runStatus: 'complete' | 'failed' | 'aborted' | 'unknown'
+  terminationReason: TrialTerminationReason
   rootRunIds: string[]
   runs: TrialRun[]
   allRunsSettled: boolean
   timedOut: boolean
   budgetExhausted: boolean
   error?: string
+}
+
+const ERROR_TERMINATIONS = ['iteration_limit', 'output_limit', 'content_filter', 'model_interrupted', 'budget_exhausted'] as const
+export type TrialTerminationReason = typeof ERROR_TERMINATIONS[number] | 'completed' | 'timed_out' | 'aborted' | 'error' | 'unknown'
+
+export function classifyTrialTermination(result: Pick<ExecutionResult, 'runStatus' | 'timedOut' | 'error'>): TrialTerminationReason {
+  if (result.timedOut) return 'timed_out'
+  if (result.runStatus === 'aborted') return 'aborted'
+  if (result.error) return ERROR_TERMINATIONS.find((reason) => result.error?.startsWith(`${reason}:`)) ?? 'error'
+  if (result.runStatus === 'complete') return 'completed'
+  return result.runStatus === 'failed' ? 'error' : 'unknown'
 }
 
 export async function executeTrial(
@@ -63,7 +75,7 @@ export async function executeTrial(
     } else if (event.type === 'run.end') {
       const run = runs.get(event.runId) ?? { runId: event.runId }
       runs.set(event.runId, { ...run, status: event.status, error: event.error })
-      if (event.error?.includes('budget_exhausted')) {
+      if (event.error?.startsWith('budget_exhausted:')) {
         budgetExhausted = true
         stop(event.error)
       }
@@ -124,5 +136,6 @@ export async function executeTrial(
     : budgetExhausted || error || rootStatuses.includes('failed') ? 'failed'
     : rootStatuses.includes('aborted') ? 'aborted'
     : settled() && rootStatuses.every((status) => status === 'complete') ? 'complete' : 'unknown'
-  return { runStatus, rootRunIds: [...roots], runs: [...runs.values()], allRunsSettled: settled(), timedOut, budgetExhausted, error }
+  const terminationReason = classifyTrialTermination({ runStatus, timedOut, error })
+  return { runStatus, terminationReason, rootRunIds: [...roots], runs: [...runs.values()], allRunsSettled: settled(), timedOut, budgetExhausted, error }
 }

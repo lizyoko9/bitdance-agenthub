@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { StreamEvent } from '../../src/shared/types'
 import type { TrialRuntime } from './profile'
-import { executeTrial } from './trial-execution'
+import { classifyTrialTermination, executeTrial } from './trial-execution'
 
 type EventBody<T = StreamEvent> = T extends StreamEvent ? Omit<T, 'conversationId' | 'timestamp'> : never
 
@@ -38,7 +38,7 @@ describe('headless trial lifecycle', () => {
     })
     const events: unknown[] = []
     const result = await executeTrial(fake.runtime, 1000, (event) => events.push(event))
-    expect(result.runStatus).toBe('complete')
+    expect(result).toMatchObject({ runStatus: 'complete', terminationReason: 'completed' })
     expect(fake.runtime.approvePending).toHaveBeenCalledOnce()
     expect(events).toContainEqual({ type: 'eval.interaction', action: 'fixed_answer', pendingType: 'ask_user.pending' })
   })
@@ -66,7 +66,7 @@ describe('headless trial lifecycle', () => {
     const result = await executeTrial(fake.runtime, 10, () => {}, undefined, 50)
     expect(fake.runtime.abort).toHaveBeenCalledWith('root')
     expect(fake.runtime.abort).toHaveBeenCalledWith('child')
-    expect(result).toMatchObject({ timedOut: true, allRunsSettled: true, runStatus: 'aborted' })
+    expect(result).toMatchObject({ timedOut: true, allRunsSettled: true, runStatus: 'aborted', terminationReason: 'timed_out' })
   })
 
   it('stops the other runs when a child exhausts the shared request budget', async () => {
@@ -78,8 +78,45 @@ describe('headless trial lifecycle', () => {
     }
     fake.runtime.abort = vi.fn(async (runId) => { fake.end(runId, 'aborted'); return true })
     const result = await executeTrial(fake.runtime, 1000, () => {})
-    expect(result).toMatchObject({ budgetExhausted: true, runStatus: 'failed', allRunsSettled: true })
+    expect(result).toMatchObject({ budgetExhausted: true, runStatus: 'failed', allRunsSettled: true, terminationReason: 'budget_exhausted' })
     expect(fake.runtime.abort).toHaveBeenCalledWith('root')
+  })
+
+  it.each(['iteration_limit', 'output_limit', 'content_filter', 'model_interrupted'])('retains %s independently of normal completion and the HTTP budget', async (reason) => {
+    const fake = fakeRuntime()
+    fake.runtime.start = async () => {
+      fake.start('root')
+      fake.end('root', 'failed', `${reason}: adapter stopped before completion`)
+      return { runIds: ['root'] }
+    }
+    const result = await executeTrial(fake.runtime, 1000, () => {})
+    expect(result).toMatchObject({ runStatus: 'failed', terminationReason: reason, budgetExhausted: false, allRunsSettled: true })
+  })
+
+  it('distinguishes process cancellation from timeout and adapter limits', async () => {
+    const fake = fakeRuntime()
+    const controller = new AbortController()
+    fake.runtime.start = async () => {
+      fake.start('root')
+      setImmediate(() => controller.abort())
+      return { runIds: ['root'] }
+    }
+    fake.runtime.abort = vi.fn(async (runId) => { fake.end(runId, 'aborted'); return true })
+    const result = await executeTrial(fake.runtime, 1000, () => {}, controller.signal)
+    expect(result).toMatchObject({ runStatus: 'aborted', terminationReason: 'aborted', timedOut: false })
+  })
+
+  it('does not interpret an incidental code mention inside an ordinary error as limit exhaustion', async () => {
+    const fake = fakeRuntime()
+    fake.runtime.start = async () => {
+      fake.start('root')
+      fake.end('root', 'failed', 'Provider rejected text mentioning budget_exhausted: literal')
+      return { runIds: ['root'] }
+    }
+    const result = await executeTrial(fake.runtime, 1000, () => {})
+    expect(result).toMatchObject({ terminationReason: 'error', budgetExhausted: false })
+    expect(classifyTrialTermination({ runStatus: 'failed', timedOut: false, error: 'Provider rejected text mentioning iteration_limit: literal' })).toBe('error')
+    expect(classifyTrialTermination({ runStatus: 'unknown', timedOut: false })).toBe('unknown')
   })
 
   it('has finite cleanup even when sendMessage never returns or responds to cancellation', async () => {

@@ -35,10 +35,23 @@ describe('headless input and artifacts', () => {
   it('preserves exact official instruction bytes and rejects unsupported or secret-bearing input', () => {
     const { request } = fixture()
     expect(request.instruction).toBe('Exact official instruction\n')
+    expect(request).toMatchObject({ maxTurns: 32, requestLimits: { maxRequests: 8, maxTotalRequestBytes: 262144, maxCompletionTokens: 2048, maxRequestBytes: 65536 } })
     expect(() => validateTrialRequest({ ...request, group: 'custom' })).toThrow()
     expect(() => validateTrialRequest({ ...request, apiKey: 'not-allowed' })).toThrow()
     expect(() => validateTrialRequest({ ...request, instruction: ' \n ' })).toThrow()
     expect(() => validateTrialRequest({ ...request, timeoutMs: 600_001 })).toThrow()
+    expect(() => validateTrialRequest({ ...request, maxTurns: 0 })).toThrow()
+    expect(() => validateTrialRequest({ ...request, requestLimits: { maxRequests: 1001 } })).toThrow()
+  })
+
+  it('accepts explicit budgets above eight through the actual Python request builder', () => {
+    const { request } = fixture()
+    const script = `import json, sys
+sys.path.insert(0, ${JSON.stringify(path.resolve('eval/terminalbench'))})
+from request_contract import build_trial_request
+print(json.dumps(build_trial_request(${JSON.stringify(request.instruction)}, ${JSON.stringify(request.cwd)}, 'single', 'gpt-6-luna', 600, ${JSON.stringify(request.outputDir)}, 64, 32, 1048576)))`
+    const actual = JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }))
+    expect(validateTrialRequest(actual)).toMatchObject({ maxTurns: 64, requestLimits: { maxRequests: 32, maxTotalRequestBytes: 1048576, maxCompletionTokens: 2048, maxRequestBytes: 65536 } })
   })
 
   it('accepts the actual Harbor Python request builder without changing the instruction', () => {
@@ -67,7 +80,8 @@ print(json.dumps(build_trial_request(${JSON.stringify(request.instruction)}, ${J
   })
 
   it('records the actual entry path, request ledger, and redacted artifacts without model calls', async () => {
-    const { request } = fixture()
+    const { request: original } = fixture()
+    const request = validateTrialRequest({ ...original, maxTurns: 64, requestLimits: { maxRequests: 32, maxTotalRequestBytes: 1048576 } })
     const secret = 'sk-fixture-secret-123456'
     const loadRuntime = vi.fn<typeof loadTrialRuntime>(async (_request, onRequest): Promise<TrialRuntime> => {
       let emit: Parameters<TrialRuntime['subscribe']>[0] = () => {}
@@ -84,14 +98,14 @@ print(json.dumps(build_trial_request(${JSON.stringify(request.instruction)}, ${J
       }
     })
     const result = await runHeadlessTrial(request, { loadRuntime, secrets: [secret] })
-    expect(result).toMatchObject({ runStatus: 'complete', allRunsSettled: true, usage: { complete: true, observedRequests: 1, inputTokens: 120 } })
+    expect(result).toMatchObject({ runStatus: 'complete', terminationReason: 'completed', allRunsSettled: true, usage: { complete: true, observedRequests: 1, inputTokens: 120 } })
     expect(loadRuntime).toHaveBeenCalledOnce()
     const events = readFileSync(path.join(request.outputDir, 'events.jsonl'), 'utf8')
     expect(events).not.toContain(secret)
     expect(events).toContain('[REDACTED]')
     expect(JSON.parse(readFileSync(path.join(request.outputDir, 'requests.jsonl'), 'utf8'))).toMatchObject({ runId: 'root', parentRunId: null, usageComplete: true })
     const manifest = JSON.parse(readFileSync(path.join(request.outputDir, 'manifest.json'), 'utf8'))
-    expect(manifest).toMatchObject({ taskId: request.taskId, model: { provider: 'openai', requestedModel: request.modelId }, limits: { maxRequests: 8, sdkRetries: 0 } })
+    expect(manifest).toMatchObject({ taskId: request.taskId, model: { provider: 'openai', requestedModel: request.modelId }, limits: { maxTurns: 64, maxRequests: 32, maxTotalRequestBytes: 1048576, sdkRetries: 0 } })
     await expect(runHeadlessTrial(request, { loadRuntime })).rejects.toThrow(/fresh output directory/)
   })
 

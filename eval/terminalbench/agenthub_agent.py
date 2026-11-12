@@ -12,7 +12,7 @@ from harbor.agents.installed.base import BaseInstalledAgent, NonZeroAgentExitCod
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from eval.terminalbench.request_contract import TASK_ID, build_trial_request
+from eval.terminalbench.request_contract import TASK_ID, build_trial_request, validate_trial_limits
 from eval.terminalbench.build_proxy import validate_build_proxy
 
 
@@ -28,7 +28,12 @@ class AgentHubAgent(BaseInstalledAgent):
 
     def __init__(self, *args, runtime_archive: str, task_sha256: str, group: str = "single",
                  task_id: str = TASK_ID, timeout_sec: int = 600, setup_proxy: str | None = None,
-                 api_proxy: str | None = None, **kwargs):
+                 api_proxy: str | None = None, max_turns: int = 32, max_requests: int = 8,
+                 max_total_request_bytes: int = 256 * 1024, **kwargs):
+        limits = validate_trial_limits(max_turns, max_requests, max_total_request_bytes)
+        self.max_turns = limits["maxTurns"]
+        self.max_requests = limits["maxRequests"]
+        self.max_total_request_bytes = limits["maxTotalRequestBytes"]
         self.runtime_archive = Path(runtime_archive).expanduser().resolve(strict=True)
         self.archive_sha256 = hashlib.sha256(self.runtime_archive.read_bytes()).hexdigest()
         with tarfile.open(self.runtime_archive, "r:gz") as archive:
@@ -96,7 +101,8 @@ class AgentHubAgent(BaseInstalledAgent):
             raise ValueError(f"Approved task cwd must be /app, got {cwd!r}")
 
         output_dir = "/installed-agent/agenthub-trial"
-        request = build_trial_request(instruction, cwd, self.group, model_id, self.timeout_sec, output_dir)
+        request = build_trial_request(instruction, cwd, self.group, model_id, self.timeout_sec, output_dir,
+                                      self.max_turns, self.max_requests, self.max_total_request_bytes)
         await environment.exec(f"mkdir -p {output_dir} /installed-agent/agenthub-home", user="root")
         with tempfile.TemporaryDirectory(prefix="agenthub-request-") as temporary:
             request_file = Path(temporary) / "request.json"
@@ -157,6 +163,9 @@ class AgentHubAgent(BaseInstalledAgent):
             "instructionSha256": hashlib.sha256(instruction.encode()).hexdigest(),
             "exitCode": exit_code, "executionError": execution_error,
             "runStatus": status.get("runStatus", "unknown"),
+            "terminationReason": status.get("terminationReason", "unknown"),
+            "maxTurns": self.max_turns,
+            "requestLimits": request["requestLimits"],
             "timedOut": status.get("timedOut"), "budgetExhausted": status.get("budgetExhausted"),
             "usageComplete": usage.get("complete", False),
         }

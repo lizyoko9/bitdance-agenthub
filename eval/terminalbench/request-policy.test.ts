@@ -37,6 +37,12 @@ describe('Terminal-Bench request policy', () => {
     expect(() => policy.beforeRequest(context, 1, signal())).toThrow('cumulative request bodies')
   })
 
+  it('uses an explicitly larger request and cumulative-input budget without a hidden eight-request cap', () => {
+    const policy = createEvalRequestPolicy({ maxRequests: 12, maxTotalRequestBytes: 1024 * 1024 }).requestPolicy!
+    for (let n = 1; n <= 12; n++) expect(policy.beforeRequest({ ...context, runId: `run-${n}` }, 65536, signal())).toBe(n)
+    expect(() => policy.beforeRequest(context, 1, signal())).toThrow('maximum HTTP requests reached')
+  })
+
   it('does not reserve an aborted attempt or invent a usage observation', () => {
     const observed = vi.fn()
     const policy = createEvalRequestPolicy({}, observed).requestPolicy!
@@ -47,8 +53,9 @@ describe('Terminal-Bench request policy', () => {
     expect(observed).not.toHaveBeenCalled()
   })
 
-  it('rejects expanded or invalid limits and identifies a serialized budget error', () => {
-    expect(() => createEvalRequestPolicy({ maxRequests: 9 })).toThrow()
+  it('rejects invalid or excessive limits and identifies a serialized budget error', () => {
+    expect(() => createEvalRequestPolicy({ maxRequests: 1001 })).toThrow()
+    expect(() => createEvalRequestPolicy({ maxTotalRequestBytes: 64 * 1024 * 1024 + 1 })).toThrow()
     expect(() => createEvalRequestPolicy({ maxRequestBytes: -1 })).toThrow()
     expect(() => createEvalRequestPolicy({ maxCompletionTokens: 2049 })).toThrow()
     expect(isEvalBudgetExceeded({ code: 'budget_exhausted' })).toBe(true)

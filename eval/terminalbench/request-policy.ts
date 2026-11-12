@@ -14,14 +14,14 @@ export const DEFAULT_EVAL_REQUEST_LIMITS = {
   maxCompletionTokens: 2048,
 } as const
 
-const LimitsSchema = z.object({
-  maxRequests: z.number().int().positive().max(DEFAULT_EVAL_REQUEST_LIMITS.maxRequests).default(DEFAULT_EVAL_REQUEST_LIMITS.maxRequests),
+export const EvalRequestLimitsSchema = z.object({
+  maxRequests: z.number().int().positive().max(1000).default(DEFAULT_EVAL_REQUEST_LIMITS.maxRequests),
   maxRequestBytes: z.number().int().positive().max(DEFAULT_EVAL_REQUEST_LIMITS.maxRequestBytes).default(DEFAULT_EVAL_REQUEST_LIMITS.maxRequestBytes),
-  maxTotalRequestBytes: z.number().int().positive().max(DEFAULT_EVAL_REQUEST_LIMITS.maxTotalRequestBytes).default(DEFAULT_EVAL_REQUEST_LIMITS.maxTotalRequestBytes),
+  maxTotalRequestBytes: z.number().int().positive().max(64 * 1024 * 1024).default(DEFAULT_EVAL_REQUEST_LIMITS.maxTotalRequestBytes),
   maxCompletionTokens: z.number().int().positive().max(DEFAULT_EVAL_REQUEST_LIMITS.maxCompletionTokens).default(DEFAULT_EVAL_REQUEST_LIMITS.maxCompletionTokens),
-})
+}).strict()
 
-export type EvalRequestLimits = z.input<typeof LimitsSchema>
+export type EvalRequestLimits = z.input<typeof EvalRequestLimitsSchema>
 
 export class EvalBudgetExceededError extends Error {
   readonly code = 'budget_exhausted'
@@ -42,7 +42,7 @@ export function createEvalRequestPolicy(
   limits: EvalRequestLimits = {},
   onObservation: (observation: CustomRequestObservation) => void = () => {},
 ): CustomAgentAdapterOptions {
-  const configured = LimitsSchema.parse(limits)
+  const configured = EvalRequestLimitsSchema.parse(limits)
   let requestCount = 0
   let totalRequestBytes = 0
   let exhausted: EvalBudgetExceededError | undefined

@@ -178,6 +178,49 @@ the CLI's explicit 600s smoke limit. An external `timeout` allows 30s for shutdo
 then sends TERM with a 15s kill grace; Harbor's environment command has a separate
 finite backstop. No automatic model fallback or additional trial is requested.
 
+## Turn limits and future trial budgets
+
+CustomAgentAdapter now uses a finite default of **32 model turns per run**.
+Ordinary application runs can set `AGENTHUB_CUSTOM_MAX_TURNS=64`; an explicit
+constructor option such as `new CustomAgentAdapter({ maxTurns: 64 })` takes
+precedence. Values must be integers between 1 and 10000. A turn is one model
+response and can contain several tool calls. The default is an adjustable
+fallback, not a validated optimum for Terminal-Bench.
+
+The evaluation profile always supplies its explicit `maxTurns`, so unrelated host
+environment settings cannot change its recorded budget. Python Agent options are:
+
+| Option | Default | Accepted range |
+|---|---:|---:|
+| `max_turns` | 32 per run | 1–10000 |
+| `max_requests` | 8 across the trial | 1–1000 |
+| `max_total_request_bytes` | 262144 across the trial | 1–67108864 |
+
+The first smoke's default request count, cumulative input allowance, per-request
+64KiB bound, and per-request 2048 output-token limit remain unchanged. Changing
+the loop limit alone does not increase the shared HTTP allowance. A future trial
+can explicitly select, for example, the following additional agent arguments:
+
+```text
+--ak max_turns=64 --ak max_requests=32 --ak max_total_request_bytes=1048576
+```
+
+These flags describe a larger future budget; this repair does not run that trial.
+Select and authorize the new budget before sending more model requests. The CLI
+JSON equivalents are `maxTurns` and `requestLimits: { maxRequests,
+maxTotalRequestBytes }`. Input validation fills the other request limits with their
+existing defaults. The manifest records the effective values, and the Python
+wrapper retains the selected settings in `harbor-agenthub.json`.
+
+The Custom adapter completes normally only when the model explicitly returns
+`stop` without tools. If the final allowed response still asks for tools, those
+tools finish, usage is retained, and Runner records `failed` with an
+`iteration_limit:` error. A `length` response becomes `output_limit` and incomplete
+tool arguments are not executed. A model that stops voluntarily on its last
+allowed request still completes normally; reaching a count does not itself mean
+failure. Planning stages that intentionally close the stream after `plan_tasks`
+are not treated as exhausted loops.
+
 ## Records and interpretation
 
 AgentHub code lives at `/installed-agent/agenthub`, its CLI output at
@@ -190,6 +233,12 @@ The wrapper populates Harbor token totals only when the request ledger reports
 complete usage. Unknown usage remains unset, and no USD cost is invented.
 Execution status, budget exhaustion, timeout, and Harbor's official reward are
 separate fields. A completed AgentHub run is not itself a passed task.
+New results also record `terminationReason`: `completed`, `iteration_limit`,
+`output_limit`, `content_filter`, `model_interrupted`, `budget_exhausted`,
+`timed_out`, `aborted`, `error`, or `unknown`. Classification follows the actual
+terminal event or stable error prefix, not request-count equality. `completed`
+describes completed service execution; the official reward remains independent.
+Historical first-run results retain their original records and interpretation.
 
 The task's declared source artifacts go to its official separate verifier image;
 AgentHub does not upload hidden tests or solutions into the model environment.

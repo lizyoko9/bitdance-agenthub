@@ -13,6 +13,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.environments.base import ExecResult
 
 from agenthub_agent import AgentHubAgent, NonZeroAgentExitCodeError
+from request_contract import build_trial_request
 
 
 spec = importlib.util.spec_from_file_location("prepare_runtime", Path(__file__).with_name("prepare-runtime.py"))
@@ -110,7 +111,40 @@ class InstalledAgentTests(unittest.TestCase):
             self.assertIsNone(context.cost_usd)
             self.assertEqual(context.metadata["scope"], "integration-smoke")
             self.assertIsNone(context.metadata["apiProxy"])
+            self.assertEqual(context.metadata["maxTurns"], 32)
+            self.assertEqual(context.metadata["requestLimits"], {"maxRequests": 8, "maxTotalRequestBytes": 262144})
             self.assertEqual((logs / "events.jsonl").read_text(), "[REDACTED]")
+
+    def test_explicit_larger_limits_reach_the_cli_and_retained_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "source.tar.gz"
+            self._write_source_archive(archive)
+            agent = AgentHubAgent(logs_dir=Path(temporary) / "logs", runtime_archive=str(archive),
+                                  task_sha256="0" * 64, max_turns="64", max_requests="32",
+                                  max_total_request_bytes="1048576")
+            context = AgentContext()
+            environment = FakeEnvironment({"runStatus": "failed", "terminationReason": "iteration_limit",
+                                           "usage": {"complete": False}}, exit_code=1)
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-secret"}, clear=True):
+                with self.assertRaises(NonZeroAgentExitCodeError):
+                    asyncio.run(agent.run("Exact instruction\n", environment, context))
+            self.assertEqual(environment.uploaded_request["maxTurns"], 64)
+            self.assertEqual(environment.uploaded_request["requestLimits"],
+                             {"maxRequests": 32, "maxTotalRequestBytes": 1048576})
+            retained = json.loads((agent.logs_dir / "harbor-agenthub.json").read_text())
+            self.assertEqual(retained["maxTurns"], 64)
+            self.assertEqual(retained["requestLimits"], environment.uploaded_request["requestLimits"])
+            self.assertEqual(retained["terminationReason"], "iteration_limit")
+
+    def test_new_limit_options_reject_invalid_values_before_container_execution(self):
+        for option, invalid in (("max_turns", 0), ("max_turns", 10001), ("max_turns", 1.5),
+                                ("max_requests", True), ("max_requests", "1.5"), ("max_requests", 1001),
+                                ("max_total_request_bytes", -1), ("max_total_request_bytes", 64 * 1024 * 1024 + 1)):
+            with self.subTest(option=option, invalid=invalid), self.assertRaises(ValueError):
+                AgentHubAgent(logs_dir=Path("/unused"), runtime_archive="/nonexistent", task_sha256="0" * 64,
+                              **{option: invalid})
+        with self.assertRaises(ValueError):
+            build_trial_request("instruction", "/app", "single", "gpt-6-luna", 600, "/logs", max_turns=0)
 
     def test_explicit_api_proxy_is_scoped_to_the_filtered_node_invocation(self):
         with tempfile.TemporaryDirectory() as temporary:

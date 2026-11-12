@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 import { loadTrialRuntime, type TrialRuntime } from './profile'
-import { DEFAULT_EVAL_REQUEST_LIMITS, type CustomRequestObservation } from './request-policy'
-import { executeTrial, type ExecutionResult } from './trial-execution'
+import type { CustomRequestObservation } from './request-policy'
+import { classifyTrialTermination, executeTrial, type ExecutionResult } from './trial-execution'
 import { validateTrialRequest, type TrialRequest } from './trial-schema'
 
 const TOKEN_FIELDS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'reasoningTokens'] as const
@@ -69,7 +69,7 @@ export async function runHeadlessTrial(
     nodeVersion: process.version,
     cwd: request.cwd,
     model: { adapter: 'custom', provider: 'openai', requestedModel: request.modelId, reasoningEffort: 'none' },
-    limits: { ...DEFAULT_EVAL_REQUEST_LIMITS, timeoutMs: request.timeoutMs, sdkRetries: 0 },
+    limits: { ...request.requestLimits, maxTurns: request.maxTurns, timeoutMs: request.timeoutMs, sdkRetries: 0 },
     policy: { skills: 'none, including public pool', writes: 'auto', plans: 'deferred approval', bash: 'deferred approval after existing policy checks', questions: 'fixed continuation answer' },
     startedAt: new Date().toISOString(),
   }
@@ -78,7 +78,7 @@ export async function runHeadlessTrial(
   writeFileSync(path.join(request.outputDir, 'events.jsonl'), '')
   const startedAt = Date.now()
   let runtime: TrialRuntime | undefined
-  let execution: ExecutionResult = { runStatus: 'failed', rootRunIds: [], runs: [], allRunsSettled: false, timedOut: false, budgetExhausted: false }
+  let execution: ExecutionResult = { runStatus: 'failed', terminationReason: 'error', rootRunIds: [], runs: [], allRunsSettled: false, timedOut: false, budgetExhausted: false }
   try {
     runtime = await (options.loadRuntime ?? loadTrialRuntime)(request, (observation) => {
       observations.push(observation)
@@ -91,7 +91,7 @@ export async function runHeadlessTrial(
     }, options.signal)
   } catch (failure) {
     execution.error = failure instanceof Error ? failure.message : String(failure)
-    execution.budgetExhausted = execution.error.includes('budget_exhausted')
+    execution.budgetExhausted = execution.error.startsWith('budget_exhausted:')
   } finally {
     try {
       runtime?.close()
@@ -100,6 +100,7 @@ export async function runHeadlessTrial(
       execution.runStatus = 'failed'
     }
   }
+  execution.terminationReason = classifyTrialTermination(execution)
   const result = {
     schemaVersion: 1,
     taskId: request.taskId,
