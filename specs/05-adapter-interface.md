@@ -391,10 +391,12 @@ SDK 提供 `canUseTool(toolName, toolInput, options) => PermissionResult` 钩子
 ClaudeCodeAdapter **复用 SDK 原生 Agent Skills**（`@anthropic-ai/claude-agent-sdk` 自带渐进披露：磁盘发现 `SKILL.md` → 仅 name+description 进上下文 → 模型调原生 `Skill` 工具加载正文），而非 AgentHub 自建 catalog/load_skill（custom/codex 才用后者）。
 
 - AgentRunner 把 agent 选用的 Skill 解析后经 `AdapterInput.skills`（`{name,description,instruction}[]`）传入，**不**注入 systemPrompt 文本。
-- adapter run 前把每个 skill 物化成 `<cwd>/.claude/skills/agenthub-<i>-<slug>/SKILL.md`（`buildSkillMarkdown` 序列化；`agenthub-` 前缀目录隔离用户自有 skill），并设 `options.skills = [skill 名]` 精确启用（不连带 workspace 里用户其它 skill）。
+- adapter run 前把每个 skill 物化成 `<cwd>/.claude/skills/agenthub-<run UUID>-<i>/SKILL.md`（`buildSkillMarkdown` 序列化；每次创建独占目录，禁止覆盖已有目录）。临时 frontmatter `name` 与目录名一致，`description` 保留原名称；`options.skills` 使用这些唯一名称精确过滤，避免同名 Skill 在并行 run 间混用。
+- 无绑定、plan 阶段或物化失败时显式传 `options.skills=[]`，不省略该配置（省略会让 SDK 加载所有发现的 Skill）。
+- 物化前校验 `.claude` / `skills` 父链真实路径，拒绝符号链接与 workspace 外路径；物化失败时回滚本次已经创建的资源。
 - `settingSources: ['project']` 使物化目录被当作项目 skill 发现。
-- run 结束 / 中止在 `finally` 清理本次物化目录（只删 `agenthub-` 前缀）；plan 阶段不挂 skill。
-- local 模式注意：物化写进用户真实 workspace（前缀隔离 + 用完即删）；进程被强杀时可能残留前缀目录，可被下次同名覆盖。
+- run 结束 / 中止在 `finally` 清理本次物化资源；只删除身份仍匹配的本次 `SKILL.md` 与空目录，不递归删除，不删除用户追加的文件或被替换的目录；plan 阶段不挂 skill。
+- local 模式注意：物化写进用户真实 workspace（独占目录 + 用完即删）；进程被强杀时可能残留前缀目录，后续 run 不接管、不覆盖这些残留目录。
 
 ### 工具集
 

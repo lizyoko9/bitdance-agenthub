@@ -33,6 +33,23 @@ ClaudeCodeAdapter MUST use `@anthropic-ai/claude-agent-sdk` and route supported 
 - **THEN** the adapter creates a pending write
 - **AND** waits for user approval before allowing the SDK tool.
 
+### Requirement: Claude skills SHALL use isolated owned files
+
+ClaudeCodeAdapter MUST create fresh skill directories under a verified workspace parent chain, reject symlinked parents, and use invocation-unique skill names in both frontmatter and SDK filtering. An empty skill set MUST be passed explicitly to avoid loading unrelated workspace skills. Cleanup MUST remove only the files and empty directories created by that invocation whose identities still match.
+
+#### Scenario: Workspace skills parent is a symlink
+- **WHEN** `.claude` or `.claude/skills` is a symlink
+- **THEN** skill materialization is refused without writing or deleting its target.
+
+#### Scenario: Concurrent runs use different skills
+- **WHEN** two runs materialize skills in the same workspace
+- **THEN** their directories differ even when names or indexes collide
+- **AND** finishing either run does not change the other run's files.
+
+#### Scenario: Users add files to a materialized directory
+- **WHEN** cleanup finds unrelated files or replaced directories
+- **THEN** it preserves those resources rather than recursively deleting them.
+
 ### Requirement: CodexAdapter SHALL use the Codex SDK
 
 CodexAdapter MUST use `@openai/codex-sdk` `runStreamed()` rather than treating CLI spawn as the primary integration path.

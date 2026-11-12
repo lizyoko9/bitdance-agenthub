@@ -167,7 +167,7 @@ const history = await buildHistoryFor(agent.id, args.conversationId, {
 - **按 adapter 分策略**（loadable）：
   - `custom`：catalog + 短 skill 内联，提供 `load_skill` 工具按需取长 skill；有有效 Skill 时自动把 `load_skill` 加入 `toolNames`（不占用户勾选）。
   - `codex`：同 custom 的文本注入（catalog + 内联，loadable=true）；`load_skill` 经 agenthub MCP bridge 暴露（`scripts/agenthub-codex-mcp.mjs` 注册 + 内部端点 `EXPOSED_TOOLS`），不走 `toolNames`。
-  - `claude-code`：**不注入文本**，改由 adapter 把有效 skill 物化成 workspace `.claude/skills/agenthub-<i>-<slug>/SKILL.md` + 设 `options.skills`，交 SDK 原生渐进披露（`Skill` 工具）；run 结束清理物化目录（见 spec 05）。AgentRunner 经 `AdapterInput.skills` 传解析结果。
+  - `claude-code`：**不注入文本**，改由 adapter 把有效 skill 物化成 workspace `.claude/skills/agenthub-<run UUID>-<i>/SKILL.md`，临时唯一名称用于 `options.skills` 过滤，交 SDK 原生渐进披露（`Skill` 工具）；每次创建独占目录，校验父链并按资源身份非递归清理，避免并行 run 互相覆盖（见 spec 05）。AgentRunner 经 `AdapterInput.skills` 传解析结果。
   - `load_skill` 作用域严格限定 agent 的**有效 Skill 集**（自选 ∪ 公共；集合外 id 拒绝，防越权）。
 - Skill **不扩权**：只影响行为策略，不改变用户配置的工具权限；安全/工具约束（第 3 段）优先级高于 Skill。
 
