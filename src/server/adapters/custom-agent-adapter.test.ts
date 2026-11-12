@@ -190,6 +190,15 @@ describe('Custom adapter optional request policy', () => {
     expect(observations).not.toHaveBeenCalled()
   })
 
+  it('forwards an explicitly larger output budget and allows serialized requests above the original 64KiB limit', async () => {
+    const adapter = new CustomAgentAdapter(createEvalRequestPolicy({ maxCompletionTokens: 8192, maxRequestBytes: 256 * 1024, maxTotalRequestBytes: 4 * 1024 * 1024 }))
+    await consume(adapter, input({ prompt: 'a'.repeat(80_000) }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = fetchMock.mock.calls[0][1]!.body as string
+    expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(64 * 1024)
+    expect(JSON.parse(body)).toMatchObject({ max_completion_tokens: 8192, reasoning_effort: 'none' })
+  })
+
   it('disables SDK retries for failed evaluation HTTP requests and records unknown usage', async () => {
     fetchMock.mockResolvedValue(new Response('{"error":{"message":"busy","type":"rate_limit_error"}}', {
       status: 429, headers: { 'content-type': 'application/json' },

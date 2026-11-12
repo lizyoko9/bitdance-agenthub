@@ -112,7 +112,8 @@ class InstalledAgentTests(unittest.TestCase):
             self.assertEqual(context.metadata["scope"], "integration-smoke")
             self.assertIsNone(context.metadata["apiProxy"])
             self.assertEqual(context.metadata["maxTurns"], 32)
-            self.assertEqual(context.metadata["requestLimits"], {"maxRequests": 8, "maxTotalRequestBytes": 262144})
+            self.assertEqual(context.metadata["requestLimits"], {"maxRequests": 8, "maxTotalRequestBytes": 262144,
+                                                               "maxRequestBytes": 65536, "maxCompletionTokens": 2048})
             self.assertEqual((logs / "events.jsonl").read_text(), "[REDACTED]")
 
     def test_explicit_larger_limits_reach_the_cli_and_retained_metadata(self):
@@ -121,7 +122,8 @@ class InstalledAgentTests(unittest.TestCase):
             self._write_source_archive(archive)
             agent = AgentHubAgent(logs_dir=Path(temporary) / "logs", runtime_archive=str(archive),
                                   task_sha256="0" * 64, max_turns="64", max_requests="32",
-                                  max_total_request_bytes="1048576")
+                                  max_total_request_bytes="4194304", max_request_bytes="262144",
+                                  max_completion_tokens="8192")
             context = AgentContext()
             environment = FakeEnvironment({"runStatus": "failed", "terminationReason": "iteration_limit",
                                            "usage": {"complete": False}}, exit_code=1)
@@ -130,7 +132,8 @@ class InstalledAgentTests(unittest.TestCase):
                     asyncio.run(agent.run("Exact instruction\n", environment, context))
             self.assertEqual(environment.uploaded_request["maxTurns"], 64)
             self.assertEqual(environment.uploaded_request["requestLimits"],
-                             {"maxRequests": 32, "maxTotalRequestBytes": 1048576})
+                             {"maxRequests": 32, "maxTotalRequestBytes": 4194304,
+                              "maxRequestBytes": 262144, "maxCompletionTokens": 8192})
             retained = json.loads((agent.logs_dir / "harbor-agenthub.json").read_text())
             self.assertEqual(retained["maxTurns"], 64)
             self.assertEqual(retained["requestLimits"], environment.uploaded_request["requestLimits"])
@@ -139,12 +142,27 @@ class InstalledAgentTests(unittest.TestCase):
     def test_new_limit_options_reject_invalid_values_before_container_execution(self):
         for option, invalid in (("max_turns", 0), ("max_turns", 10001), ("max_turns", 1.5),
                                 ("max_requests", True), ("max_requests", "1.5"), ("max_requests", 1001),
-                                ("max_total_request_bytes", -1), ("max_total_request_bytes", 64 * 1024 * 1024 + 1)):
+                                ("max_total_request_bytes", -1), ("max_total_request_bytes", 64 * 1024 * 1024 + 1),
+                                ("max_request_bytes", False), ("max_request_bytes", "1.5"),
+                                ("max_request_bytes", 0), ("max_request_bytes", 262145),
+                                ("max_completion_tokens", True), ("max_completion_tokens", 1.5),
+                                ("max_completion_tokens", 0), ("max_completion_tokens", "8193")):
             with self.subTest(option=option, invalid=invalid), self.assertRaises(ValueError):
                 AgentHubAgent(logs_dir=Path("/unused"), runtime_archive="/nonexistent", task_sha256="0" * 64,
                               **{option: invalid})
         with self.assertRaises(ValueError):
             build_trial_request("instruction", "/app", "single", "gpt-6-luna", 600, "/logs", max_turns=0)
+
+    def test_request_budget_edges_and_defaults_are_explicit_in_the_request_contract(self):
+        request = build_trial_request("instruction", "/app", "single", "gpt-6-luna", 600, "/logs")
+        self.assertEqual(request["requestLimits"], {"maxRequests": 8, "maxTotalRequestBytes": 262144,
+                                                  "maxRequestBytes": 65536, "maxCompletionTokens": 2048})
+        for byte_limit, token_limit in ((1, 1), ("262144", "8192")):
+            with self.subTest(byte_limit=byte_limit, token_limit=token_limit):
+                request = build_trial_request("instruction", "/app", "single", "gpt-6-luna", 600, "/logs",
+                                              max_request_bytes=byte_limit, max_completion_tokens=token_limit)
+                self.assertEqual(request["requestLimits"]["maxRequestBytes"], int(byte_limit))
+                self.assertEqual(request["requestLimits"]["maxCompletionTokens"], int(token_limit))
 
     def test_explicit_api_proxy_is_scoped_to_the_filtered_node_invocation(self):
         with tempfile.TemporaryDirectory() as temporary:

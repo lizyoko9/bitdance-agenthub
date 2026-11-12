@@ -194,23 +194,27 @@ environment settings cannot change its recorded budget. Python Agent options are
 |---|---:|---:|
 | `max_turns` | 32 per run | 1–10000 |
 | `max_requests` | 8 across the trial | 1–1000 |
+| `max_request_bytes` | 65536 per request | 1–262144 |
 | `max_total_request_bytes` | 262144 across the trial | 1–67108864 |
+| `max_completion_tokens` | 2048 per request | 1–8192 |
 
 The first smoke's default request count, cumulative input allowance, per-request
-64KiB bound, and per-request 2048 output-token limit remain unchanged. Changing
-the loop limit alone does not increase the shared HTTP allowance. A future trial
-can explicitly select, for example, the following additional agent arguments:
+64KiB bound, and per-request 2048 output-token limit remain unchanged. Each bound
+is now explicitly configurable, so changing the loop limit alone does not increase
+the other allowances. A trial can explicitly select these additional arguments:
 
 ```text
---ak max_turns=64 --ak max_requests=32 --ak max_total_request_bytes=1048576
+--ak max_turns=32 --ak max_requests=32 --ak max_request_bytes=262144
+--ak max_total_request_bytes=4194304 --ak max_completion_tokens=8192
 ```
 
-These flags describe a larger future budget; this repair does not run that trial.
 Select and authorize the new budget before sending more model requests. The CLI
-JSON equivalents are `maxTurns` and `requestLimits: { maxRequests,
-maxTotalRequestBytes }`. Input validation fills the other request limits with their
-existing defaults. The manifest records the effective values, and the Python
-wrapper retains the selected settings in `harbor-agenthub.json`.
+JSON equivalents are `maxTurns` and `requestLimits: { maxRequests, maxRequestBytes,
+maxTotalRequestBytes, maxCompletionTokens }`. Input validation fills omitted
+request limits with the existing defaults. The manifest records the effective
+values, and the Python wrapper retains the selected settings in
+`harbor-agenthub.json`. A one-task rerun is diagnostic and is not a controlled
+comparison when multiple budgets and termination behavior change together.
 
 The Custom adapter completes normally only when the model explicitly returns
 `stop` without tools. If the final allowed response still asks for tools, those

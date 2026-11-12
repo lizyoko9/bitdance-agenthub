@@ -16,9 +16,9 @@ export const DEFAULT_EVAL_REQUEST_LIMITS = {
 
 export const EvalRequestLimitsSchema = z.object({
   maxRequests: z.number().int().positive().max(1000).default(DEFAULT_EVAL_REQUEST_LIMITS.maxRequests),
-  maxRequestBytes: z.number().int().positive().max(DEFAULT_EVAL_REQUEST_LIMITS.maxRequestBytes).default(DEFAULT_EVAL_REQUEST_LIMITS.maxRequestBytes),
+  maxRequestBytes: z.number().int().positive().max(256 * 1024).default(DEFAULT_EVAL_REQUEST_LIMITS.maxRequestBytes),
   maxTotalRequestBytes: z.number().int().positive().max(64 * 1024 * 1024).default(DEFAULT_EVAL_REQUEST_LIMITS.maxTotalRequestBytes),
-  maxCompletionTokens: z.number().int().positive().max(DEFAULT_EVAL_REQUEST_LIMITS.maxCompletionTokens).default(DEFAULT_EVAL_REQUEST_LIMITS.maxCompletionTokens),
+  maxCompletionTokens: z.number().int().positive().max(8192).default(DEFAULT_EVAL_REQUEST_LIMITS.maxCompletionTokens),
 }).strict()
 
 export type EvalRequestLimits = z.input<typeof EvalRequestLimitsSchema>
