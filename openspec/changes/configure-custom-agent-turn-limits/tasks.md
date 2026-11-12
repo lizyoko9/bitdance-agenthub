@@ -12,7 +12,15 @@
 
 ## 3. Evaluation configuration and handoff
 
-- [ ] 3.1 Pass explicit turn/request settings through Python, trial schema and isolated profile, and record effective limits.
-- [ ] 3.2 Classify actual termination reasons independently from request-count equality and official reward.
-- [ ] 3.3 Test the cross-language contract and document configuration without rerunning a paid trial or altering historical results.
-- [ ] 3.4 Run typecheck, lint, focused/full tests and strict spec checks; commit and merge the repair.
+- [x] 3.1 Pass explicit turn/request settings through Python, trial schema and isolated profile, and record effective limits.
+- [x] 3.2 Classify actual termination reasons independently from request-count equality and official reward.
+- [x] 3.3 Test the cross-language contract and document configuration without rerunning a paid trial or altering historical results.
+- [x] 3.4 Run typecheck, lint, focused/full tests and strict spec checks; commit and merge the repair.
+
+## Validation
+
+- Full Vitest: 51 files passed; 377 tests passed, 2 skipped.
+- Python evaluation integration: 14 tests passed.
+- Typecheck, lint, strict change/capability validation and diff whitespace checks passed.
+- Actual ConversationService/AgentRunner tests verified durable failed/iteration_limit and last-turn voluntary completion, using mocked HTTP and the real file tool.
+- No paid model request or benchmark rerun; the first smoke's reward and artifacts remain historical evidence.
