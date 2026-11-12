@@ -117,7 +117,7 @@ def _http_transport(job: dict[str, Any]) -> dict[str, Any]:
     try:
         completed = subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), "--http-worker"],
-            input=json.dumps(job).encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            input=json.dumps(job, ensure_ascii=False).encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=job["timeout"], check=False, env=_minimal_environment(),
         )
     except subprocess.TimeoutExpired:

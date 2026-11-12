@@ -37,6 +37,17 @@ def checked_source(source):
     return source
 
 
+def check_installed_benchmark(source):
+    for package in ('tracetrial_bench', 'harness_tracer'):
+        module = __import__(package)
+        installed = Path(module.__file__).resolve().parent
+        expected = Path(source) / package
+        installed_hashes = {name: value for name, value in directory_hashes(installed).items() if name.endswith('.py')}
+        expected_hashes = {name: value for name, value in directory_hashes(expected).items() if name.endswith('.py')}
+        if installed_hashes != expected_hashes:
+            raise ValueError(f'Imported {package} does not match the approved source checkout')
+
+
 def docker_environment():
     allowed = ('PATH', 'HOME', 'USER', 'TMPDIR', 'LANG', 'DOCKER_HOST', 'DOCKER_CONFIG')
     return {name: os.environ[name] for name in allowed if name in os.environ}
@@ -53,6 +64,7 @@ def docker(*arguments, environment=None, timeout=120, check=True):
 
 def prepare_build(source, output):
     source = checked_source(source)
+    check_installed_benchmark(source)
     destination = Path(output).resolve()
     destination.mkdir(parents=True, exist_ok=False)
     spec = importlib.util.spec_from_file_location('prepare_runtime', ROOT / 'eval/terminalbench/prepare-runtime.py')
@@ -103,6 +115,7 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy):
     from .score_trial import score_retained_trial
 
     source = checked_source(source)
+    check_installed_benchmark(source)
     key = os.environ.get('OPENAI_API_KEY', '').strip()
     if not key:
         raise RuntimeError('The previously authorized OpenAI credential is unavailable')
@@ -187,8 +200,11 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy):
     provider_dir = native / 'recorder/provider_requests'
     if provider_dir.is_dir():
         shutil.copytree(provider_dir, layout.artifacts_dir / 'provider_requests')
+    hashes_after = directory_hashes(task.task_dir)
     write_json(layout.artifacts_dir / 'source-integrity.json', {'before': hashes_before,
-        'after': directory_hashes(task.task_dir), 'unchanged': hashes_before == directory_hashes(task.task_dir)})
+        'after': hashes_after, 'unchanged': hashes_before == hashes_after})
+    if hashes_before != hashes_after:
+        raise RuntimeError('Official task inputs changed; refusing to score this trial')
     if trace.get('structured_trace_status') != 'available':
         raise RuntimeError('Native trace admission failed; actor retained and not rerun')
     scores = score_retained_trial(task=task, layout=layout, trace_summary=trace,
