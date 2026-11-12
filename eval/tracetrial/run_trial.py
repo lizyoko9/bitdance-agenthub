@@ -86,7 +86,7 @@ def prepare_build(source, output):
 
 def build_image(context, image, proxy):
     manifest = json.loads((Path(context) / 'build-manifest.json').read_text())
-    command = ['docker', 'build', '--network=bridge', '--build-arg', f'HTTP_PROXY={proxy}',
+    command = ['docker', 'build', '--network=default', '--build-arg', f'HTTP_PROXY={proxy}',
         '--build-arg', f'HTTPS_PROXY={proxy}', '--build-arg', f'ACTOR_UID={os.getuid()}',
         '--build-arg', f'ACTOR_GID={os.getgid()}', '--tag', image, str(context)]
     with (Path(context) / 'build.log').open('w') as stream:
