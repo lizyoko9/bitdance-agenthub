@@ -24,11 +24,11 @@
 - [x] 4.2 Prepare an allowlisted Linux-native runtime package using existing locked application dependencies; exclude host secrets, data, and reference answers.
 - [x] 4.3 Implement task-environment installation, CLI invocation, finite shutdown, log retrieval, and AgentContext population.
 - [x] 4.4 Preserve official instruction, artifacts, separate verifier settings, and reward; label shortened trial limits in reports.
-- [ ] 4.5 Install the approved isolated evaluation dependency and verify fixed runtime imports and command invocation.
+- [x] 4.5 Install the approved isolated evaluation dependency and verify fixed runtime imports and command invocation.
 
 ## 5. First public task and handoff
 
-- [ ] 5.1 Build the fixed bun-sourcemap-leak environment and run an independent no-key oracle trial with the official verifier.
-- [ ] 5.2 If infrastructure validation passes, start a fresh one-task, one-trial single-Agent run with the approved OpenAI profile and limits; do not silently retry, change models, or reuse oracle output.
-- [ ] 5.3 Retain official reward and all failure categories; report the outcome as an integration smoke rather than a full benchmark score.
-- [ ] 5.4 Run typecheck, lint, and relevant tests; synchronize capability documents and record exact reproduction commands and remaining constraints.
+- [x] 5.1 Build the fixed bun-sourcemap-leak environment and run an independent no-key oracle trial with the official verifier.
+- [x] 5.2 If infrastructure validation passes, start a fresh one-task, one-trial single-Agent run with the approved OpenAI profile and limits; do not silently retry, change models, or reuse oracle output.
+- [x] 5.3 Retain official reward and all failure categories; report the outcome as an integration smoke rather than a full benchmark score.
+- [x] 5.4 Run typecheck, lint, and relevant tests; synchronize capability documents and record exact reproduction commands and remaining constraints.

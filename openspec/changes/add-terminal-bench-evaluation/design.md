@@ -2,7 +2,7 @@
 
 现有 `eval/run-eval.ts` 面向自建 fixture，会复制初始仓库并在结束后注入隐藏测试，因此不直接用于 Terminal-Bench。AgentHub 的文件工具、supervisor 验证命令、冲突检测和项目产物都访问本地文件系统；只把 `bash` 替换成 Docker exec 会混用容器和宿主执行。
 
-用户已确认本方案的实现、独立 Harbor 依赖、OpenAI 凭据复用和首次真实试跑范围。本机 uv 与 Colima/Docker 可用，Docker 架构为 aarch64；Harbor 0.25.0 已安装在独立 Python 3.13.17 评测环境。独立无凭据 oracle trial 已实际启动，但停在官方环境构建超时，尚未完成 oracle/verifier 验证；当前需修复构建网络路径后使用新 trial 复核。付费模型 trial 尚未开始，Luna 权限仍未验证。
+用户已确认本方案的实现、独立 Harbor 依赖、OpenAI 凭据复用和首次真实试跑范围。Harbor 0.25.0 已安装在独立 Python 3.13.17 评测环境。2026-11-12 已在 Colima Linux ARM64 完成独立无凭据 oracle（官方 reward 1.0，37/37）及全新环境的单次模型 smoke（官方 reward 0.0，28/37，仅作诊断）。真实模型为 gpt-6-luna，8 次 HTTP 请求均为 200；未追加模型 trial。完整版本、限制与失败分析见 `eval/terminalbench/results/2026-11-12-smoke.md`。
 
 ## Goals / Non-Goals
 
@@ -127,8 +127,8 @@ byte 限制不是 token 上限，费用估算不是严格美元硬限。达到�
 ## Open Questions
 
 - 已获用户确认：独立 Harbor 依赖、headless 入口及可选请求策略、默认 Luna/首轮限额，以及先独立 oracle、后新环境模型 trial 的执行顺序。
-- 已安装：独立评测环境中的 Harbor 0.25.0；已静态核实任务 schema、artifacts、separate verifier 及固定镜像的 linux/arm64 清单。实际 oracle trial 因官方环境构建超时而未完成，待修复构建网络路径后重新验证；镜像清单与无模型代码测试不构成本机端到端成功证据。
-- 待首次真实请求验证：现有凭据的 Luna 模型权限；失败不自动新增 Key 或切换模型。
+- 已实测：独立 Harbor 0.25.0、Linux 原生运行包、官方 ARM64 环境和 separate verifier 完成执行；构建/安装/API 使用显式局部代理，未修改官方任务文件或全局网络配置。
+- 已验证：现有凭据可调用 gpt-6-luna；首轮模型 trial 未通过官方验收，不能据此声称完整基准成绩或编排提升。
 
 ## Sources
 

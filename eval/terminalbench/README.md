@@ -6,6 +6,10 @@ Harbor owns task creation, artifact collection, the separate verifier, and rewar
 The first trial is one task, `single`, one attempt, with a ten-minute agent budget;
 it is an integration smoke test and is not a Terminal-Bench leaderboard score.
 
+The completed first run is documented in [2026-11-12 smoke results](results/2026-11-12-smoke.md):
+oracle reward 1.0; AgentHub reward 0.0. The report retains the failed task result
+and distinguishes execution completion from task success.
+
 Fixed inputs:
 
 - Harbor `0.25.0` in a separate Python environment (Python 3.12+).
@@ -61,8 +65,9 @@ and does not inherit the host's proxy or Node settings. Replace
 `CONTAINER_REACHABLE_HOST` with the already tested container-reachable host address.
 
 `AGENTHUB_BUILD_PROXY` affects image builds, `setup_proxy` affects runtime
-installation downloads, and `api_proxy` affects the Node model CLI. Select each
-independently as needed; none modifies global configuration or the official task.
+installation downloads, and `api_proxy` affects the Node model CLI and tool
+subprocesses that inherit its environment. Select each independently as needed;
+none modifies global configuration or the official task.
 
 Install the approved Python evaluation dependency into an isolated environment:
 
