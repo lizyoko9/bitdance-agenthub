@@ -6,8 +6,7 @@ import {
   type Options,
 } from '@anthropic-ai/claude-agent-sdk'
 import { eq } from 'drizzle-orm'
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
+import { statSync } from 'node:fs'
 import { z } from 'zod'
 
 import { classifyBashApproval, waitForBashApproval } from '@/server/bash-command-approval'
@@ -24,9 +23,9 @@ import { toolRegistry } from '@/server/tools/registry'
 import type { ToolContext } from '@/server/tools/types'
 import { assertPathWithinWorkspace, getEffectiveCwd } from '@/server/workspace-utils'
 import type { DeployStatusRecord, StreamEvent } from '@/shared/types'
-import { buildSkillMarkdown } from '@/shared/skill-import'
 
 import { buildChildProcessEnv, createAdapterEvent } from './adapter-utils'
+import { materializeClaudeSkills, type MaterializedClaudeSkills } from './claude-skill-files'
 import { claudeCodeSessions } from './session-store'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
 
@@ -442,14 +441,13 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     const previousSessionId = claudeCodeSessions.get(input.conversationId)
 
     // 把选用的 Skill 物化成 .claude/skills/<dir>/SKILL.md，交给 SDK 原生渐进披露（options.skills + Skill 工具）。
-    // 用 agenthub- 前缀目录隔离用户自己的 skill，run 结束在 finally 清理。plan 阶段不挂 skill。
-    let materializedSkillDirs: string[] = []
+    // 每个 run 独占临时目录，finally 只清理仍属于本次物化的文件。plan 阶段不挂 skill。
+    let materializedSkills: MaterializedClaudeSkills | undefined
     let enabledSkillNames: string[] = []
     if (!isPlanStage && input.skills && input.skills.length > 0) {
       try {
-        const m = materializeSkills(getEffectiveCwd(workspace), input.skills)
-        materializedSkillDirs = m.dirs
-        enabledSkillNames = m.names
+        materializedSkills = materializeClaudeSkills(getEffectiveCwd(workspace), input.skills)
+        enabledSkillNames = materializedSkills.names
       } catch (err) {
         console.warn('[claude-code-adapter] skill materialization failed; continuing without skills', err)
       }
@@ -472,7 +470,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
       // 'project' = 只读绑定目录里的 CLAUDE.md（项目级上下文），不读用户全局 ~/.claude 设定（避免污染）
       settingSources: ['project'],
       // 仅启用本 run 物化的 skill（精确过滤，不连带用户 workspace 里的其它 .claude/skills）
-      ...(enabledSkillNames.length > 0 ? { skills: enabledSkillNames } : {}),
+      skills: enabledSkillNames,
       permissionMode: 'default', // 自己 canUseTool 接管
       env: buildSdkEnv(input.apiKey, input.apiBaseUrl),
       ...(previousSessionId ? { resume: previousSessionId } : {}),
@@ -690,7 +688,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
       }
     } finally {
       signal.removeEventListener('abort', onAbort)
-      if (materializedSkillDirs.length > 0) cleanupSkillDirs(materializedSkillDirs)
+      materializedSkills?.cleanup()
     }
 
     yield baseEvent({ type: 'message.end' as const, messageId }) as StreamEvent
@@ -717,48 +715,6 @@ export function filterAgentHubMcpToolsForRun<T extends { name: string }>(
 
 function getSdkMcpToolName(entry: { name?: string }): string {
   return entry.name ?? ''
-}
-
-const AGENTHUB_SKILL_DIR_PREFIX = 'agenthub-'
-
-/** dir 名：agenthub-<index>-<slug>，前缀隔离用户自有 skill、index 防重名碰撞。 */
-function skillDirSlug(name: string, index: number): string {
-  const base =
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'skill'
-  return `${AGENTHUB_SKILL_DIR_PREFIX}${index}-${base}`
-}
-
-/** 把选用 skill 物化成 <cwd>/.claude/skills/<dir>/SKILL.md；返回创建的目录与启用的 skill 名（去重）。 */
-function materializeSkills(
-  cwd: string,
-  skills: { name: string; description: string; instruction: string }[],
-): { dirs: string[]; names: string[] } {
-  const dirs: string[] = []
-  const names = new Set<string>()
-  skills.forEach((skill, index) => {
-    const dir = path.join(cwd, '.claude', 'skills', skillDirSlug(skill.name, index))
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(path.join(dir, 'SKILL.md'), buildSkillMarkdown(skill), 'utf8')
-    dirs.push(dir)
-    names.add(skill.name)
-  })
-  return { dirs, names: Array.from(names) }
-}
-
-/** run 结束清理本次物化的 skill 目录（只删我们建的 agenthub- 前缀目录）。 */
-function cleanupSkillDirs(dirs: string[]): void {
-  for (const dir of dirs) {
-    if (!path.basename(dir).startsWith(AGENTHUB_SKILL_DIR_PREFIX)) continue
-    try {
-      rmSync(dir, { recursive: true, force: true })
-    } catch {
-      // 清理失败不影响 run 结果；前缀目录可被下次同名覆盖。
-    }
-  }
 }
 
 function recordClaudeSdkFileWrite(
