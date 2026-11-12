@@ -1,0 +1,19 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER 0
+COPY runtime.tar.gz /tmp/agenthub-runtime.tar.gz
+COPY baseline-runtime-source.json /opt/agenthub-eval/baseline-runtime-source.json
+COPY refresh-runtime.py /opt/agenthub-eval/refresh-runtime.py
+RUN --network=none python3 /opt/agenthub-eval/refresh-runtime.py /tmp/agenthub-runtime.tar.gz /installed-agent/agenthub /opt/agenthub-eval/baseline-runtime-source.json && rm /tmp/agenthub-runtime.tar.gz
+COPY recorder /opt/recorder
+COPY container_worker.py /opt/agenthub-eval/container_worker.py
+ENV PATH="/installed-agent/node/bin:${PATH}" PYTHONPATH=/opt/recorder
+ARG ACTOR_UID=501
+ARG ACTOR_GID=20
+RUN --network=none chmod a+rx /installed-agent && mkdir -p /state/home && chown ${ACTOR_UID}:${ACTOR_GID} /state /state/home
+USER ${ACTOR_UID}:${ACTOR_GID}
+WORKDIR /installed-agent/agenthub
+RUN --network=none node --input-type=module -e 'import Database from "better-sqlite3"; const db=new Database(":memory:"); db.prepare("select 1").get(); db.close(); console.log(JSON.stringify({probe:"sqlite",uid:process.getuid(),node:process.version,arch:process.arch}));'
+RUN --network=none node --import tsx --input-type=module -e 'const m=await import("./eval/tracetrial/run-agenthub.ts"); if(typeof m.runTraceTrial!=="function") throw Error("TraceTrial entry missing"); if(process.getuid()===0 || process.env.OPENAI_API_KEY) throw Error("Probe must be non-root without a provider credential");'
+RUN --network=none node --import tsx --input-type=module -e 'const fs=await import("node:fs"); const d=fs.mkdtempSync("/state/probe-"); try {const {createIsolatedProfile}=await import("./eval/terminalbench/profile.ts"); const p=await createIsolatedProfile({outputDir:d,group:"single",modelId:"gpt-6-luna"},()=>{},{benchmark:"tracetrial"}); p.close(); console.log(JSON.stringify({probe:"profile",uid:process.getuid(),modelCalls:0}));} finally {fs.rmSync(d,{recursive:true,force:true});}'
+CMD ["sleep", "infinity"]

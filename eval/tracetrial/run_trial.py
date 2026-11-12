@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,9 @@ MODEL = 'gpt-6-luna'
 RECORDER_FILES = ('tracetrial_bench/__init__.py', 'tracetrial_bench/provider_request_recorder.py',
                   'harness_tracer/__init__.py', 'harness_tracer/provider_requests.py')
 ROOT = Path(__file__).resolve().parents[2]
+REFRESH_CONTROLLER_FILES = ('eval/tracetrial/run_trial.py', 'eval/tracetrial/Dockerfile.refresh',
+    'eval/tracetrial/refresh-runtime.py', 'eval/tracetrial/container_worker.py',
+    'eval/terminalbench/prepare-runtime.py')
 
 
 def write_json(path, payload):
@@ -63,7 +67,42 @@ def docker(*arguments, environment=None, timeout=120, check=True, input_text=Non
     return result
 
 
-def prepare_build(source, output):
+def refresh_module():
+    spec = importlib.util.spec_from_file_location('refresh_runtime', Path(__file__).with_name('refresh-runtime.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def require_committed_sources(names):
+    paths = sorted(set(names))
+    tracked = subprocess.run(['git', 'ls-files', '--error-unmatch', '--', *paths], cwd=ROOT,
+                             capture_output=True, text=True)
+    changed = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=all', '--', *paths],
+                                      cwd=ROOT, text=True)
+    if tracked.returncode or changed:
+        raise ValueError('Commit all runtime and refresh controller sources before preparing a reused image')
+    return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+
+
+def inspect_reuse_image(reference):
+    if not isinstance(reference, str) or not re.fullmatch(r'[a-z0-9][a-z0-9./_:-]*@sha256:[0-9a-f]{64}', reference):
+        raise ValueError('Reuse image must be a locally available pinned RepoDigest')
+    inspection = json.loads(docker('image', 'inspect', reference).stdout)[0]
+    if reference not in inspection.get('RepoDigests', []) or inspection.get('Os') != 'linux':
+        raise ValueError('Reuse image must be a local Linux image with the exact pinned RepoDigest')
+    return inspection
+
+
+def retain_baseline_manifest(inspection, destination):
+    container = docker('create', '--network=none', inspection['Id']).stdout.strip()
+    try:
+        docker('cp', container + ':/installed-agent/agenthub/runtime-source.json', destination)
+    finally:
+        docker('rm', container)
+
+
+def prepare_build(source, output, reuse_image=None):
     source = checked_source(source)
     check_installed_benchmark(source)
     destination = Path(output).resolve()
@@ -71,26 +110,57 @@ def prepare_build(source, output):
     spec = importlib.util.spec_from_file_location('prepare_runtime', ROOT / 'eval/terminalbench/prepare-runtime.py')
     packer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(packer)
+    controller_commit = None
+    if reuse_image is not None:
+        names = [str(path.relative_to(ROOT)) for path in packer.source_files(ROOT)]
+        controller_commit = require_committed_sources([*names, *REFRESH_CONTROLLER_FILES])
+        inspection = inspect_reuse_image(reuse_image)
     archive = packer.prepare(ROOT, destination / 'runtime.tar.gz')
-    for name in ('Dockerfile', 'container_worker.py'):
-        shutil.copy2(Path(__file__).with_name(name), destination / name)
+    shutil.copy2(Path(__file__).with_name('Dockerfile.refresh' if reuse_image else 'Dockerfile'), destination / 'Dockerfile')
+    shutil.copy2(Path(__file__).with_name('container_worker.py'), destination / 'container_worker.py')
     shutil.copy2(ROOT / 'eval/terminalbench/install-runtime.sh', destination / 'install-runtime.sh')
     for name in RECORDER_FILES:
         target = destination / 'recorder' / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source / name, target)
+    reuse = {}
+    if reuse_image is not None:
+        helper = refresh_module()
+        shutil.copy2(Path(__file__).with_name('refresh-runtime.py'), destination / 'refresh-runtime.py')
+        baseline = destination / 'baseline-runtime-source.json'
+        retain_baseline_manifest(inspection, baseline)
+        old = helper.read_manifest(baseline.read_bytes())
+        new, _ = helper.read_archive(destination / 'runtime.tar.gz')
+        dependency_hashes = helper.validate_dependencies(old, new)
+        reuse = {'baseImage': {'reference': reuse_image, 'id': inspection['Id'],
+            'architecture': inspection['Architecture'], 'os': inspection['Os'],
+            'layers': inspection.get('RootFS', {}).get('Layers', []),
+            'runtimeSourceSha256': hashlib.sha256(baseline.read_bytes()).hexdigest(),
+            'runtimeCommit': old.get('agenthubCommit')},
+            'reuseReason': 'Exact Node/pnpm and dependency inputs; overlay verified committed allowlisted sources only',
+            'dependencyInputs': dependency_hashes, 'controllerCommit': controller_commit,
+            'controllerFiles': {name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest()
+                                for name in REFRESH_CONTROLLER_FILES}}
+        if require_committed_sources([*names, *REFRESH_CONTROLLER_FILES]) != controller_commit or archive['agenthubCommit'] != controller_commit:
+            raise ValueError('Committed sources changed while preparing the refreshed runtime')
     write_json(destination / 'build-manifest.json', {'sourceRevision': SOURCE_REVISION,
         'runtime': archive, 'buildFiles': directory_hashes(destination),
-        'actorUid': os.getuid(), 'actorGid': os.getgid(), 'containsPrivateTasks': False})
+        'actorUid': os.getuid(), 'actorGid': os.getgid(), 'containsPrivateTasks': False, **reuse})
     return destination
 
 
 def build_image(context, image, proxy):
     manifest = json.loads((Path(context) / 'build-manifest.json').read_text())
     verify_build_files(context, manifest)
+    reuse_arguments = []
+    if manifest.get('baseImage'):
+        base = manifest['baseImage']
+        if inspect_reuse_image(base['reference'])['Id'] != base['id']:
+            raise ValueError('Local reuse image differs from the prepared immutable image ID')
+        reuse_arguments = ['--pull=false', '--build-arg', 'BASE_IMAGE=' + base['reference']]
     command = ['docker', 'build', '--network=default', '--build-arg', f'HTTP_PROXY={proxy}',
         '--build-arg', f'HTTPS_PROXY={proxy}', '--build-arg', f'ACTOR_UID={os.getuid()}',
-        '--build-arg', f'ACTOR_GID={os.getgid()}', '--tag', image, str(context)]
+        '--build-arg', f'ACTOR_GID={os.getgid()}', *reuse_arguments, '--tag', image, str(context)]
     with (Path(context) / 'build.log').open('w') as stream:
         result = subprocess.run(command, env=docker_environment(), stdout=stream,
             stderr=subprocess.STDOUT, timeout=2400)
@@ -98,7 +168,8 @@ def build_image(context, image, proxy):
         raise RuntimeError('Runtime build failed; inspect build.log (no actor has started)')
     inspection = json.loads(docker('image', 'inspect', image).stdout)[0]
     write_json(Path(context) / 'image.json', {'id': inspection['Id'], 'architecture': inspection['Architecture'],
-        'os': inspection['Os'], 'runtime': manifest['runtime'], 'upstream': SOURCE_REVISION})
+        'os': inspection['Os'], 'runtime': manifest['runtime'], 'upstream': SOURCE_REVISION,
+        **({'baseImage': manifest['baseImage']} if manifest.get('baseImage') else {})})
 
 
 def verify_build_files(context, manifest):
@@ -120,6 +191,10 @@ def verify_runtime_sources(context):
             raise ValueError(f'Runtime source differs from committed archive: {name}')
     if hashlib.sha256(Path(__file__).with_name('container_worker.py').read_bytes()).hexdigest() != hashlib.sha256((Path(context)/'container_worker.py').read_bytes()).hexdigest():
         raise ValueError('Container worker differs from committed build context')
+    build = json.loads((Path(context)/'build-manifest.json').read_text())
+    for name, digest in build.get('controllerFiles', {}).items():
+        if name not in REFRESH_CONTROLLER_FILES or hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != digest:
+            raise ValueError('Refresh controller source differs from committed build context')
 
 
 def actor_request(task):
@@ -244,12 +319,15 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--context', type=Path, required=True)
     parser.add_argument('--image', default='agenthub/tracetrial:e8-local')
+    parser.add_argument('--reuse-image', help='prepare-build only: exact locally available baseline RepoDigest')
     parser.add_argument('--out', type=Path)
     parser.add_argument('--actor-proxy', default='http://192.168.5.2:7890')
     parser.add_argument('--judge-proxy', default='http://127.0.0.1:7890')
     args = parser.parse_args()
+    if args.reuse_image and args.action != 'prepare-build':
+        parser.error('--reuse-image is only accepted by prepare-build')
     if args.action == 'prepare-build':
-        result = {'context': str(prepare_build(args.source, args.context))}
+        result = {'context': str(prepare_build(args.source, args.context, reuse_image=args.reuse_image))}
     elif args.action == 'build':
         checked_source(args.source)
         build_image(args.context, args.image, args.actor_proxy)

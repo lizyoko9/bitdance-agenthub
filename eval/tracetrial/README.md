@@ -62,12 +62,15 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 
 `prepare-build` 打包白名单源码及四个官方 recorder 文件；`build` 安装 Linux Node 24.13.1、pnpm 10.29.3 和原 lockfile，运行无模型 import / SQLite / 非 root profile 探针。`run` 只启动一个 actor，保存证据并销毁容器，再对保留结果评分。actor、评分 sidecar 和 run 目录均拒绝复用；失败时不自动创建新 trial。运行包 commit 与宿主 driver commit 分别记录，所有实际容器源码与构建文件在执行前重新核对哈希，镜像使用不可变 ID。
 
+当本地已有本入口构建的依赖镜像，`prepare-build` 可增加 `--reuse-image <repository@sha256:digest>`。该路径要求运行源码与 controller 已提交，核验本地固定镜像及原 runtime manifest，并验证 Node/pnpm、package/lockfile/workspace/SQLite 构建脚本完全一致。随后仅更新白名单源码，保留原 `node_modules`；所有刷新与无模型探针的 Docker RUN 使用 `--network=none`。依赖输入变化时拒绝刷新，改用正常 clean build。基线 image ID、依赖哈希与新的 runtime/image 来源均留档；默认不传此参数仍执行完整安装。
+
 离线验证：
 
 ```sh
 /private/tmp/agenthub-tracetrial-venv/bin/python -m unittest \
   eval.tracetrial.test_container_worker eval.tracetrial.test_run_trial \
-  eval.tracetrial.test_trace_adapter eval.tracetrial.test_judge eval.tracetrial.test_score_trial
+  eval.tracetrial.test_trace_adapter eval.tracetrial.test_judge eval.tracetrial.test_score_trial \
+  eval.tracetrial.test_refresh_runtime
 ```
 
 `createEvalToolPolicy()` 只在评测显式配置时安装。一个 profile 只创建一次闭包，所有 run 共用工具计数；它在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。第七次调用不发布可执行事件、不执行工具，保留可用 usage 后记录 `budget_exhausted`。普通应用和原 Terminal-Bench 入口省略此设置时不增加工具限制；原有 Workspace、审批和命令安全检查继续生效。
@@ -78,7 +81,7 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 
 先保留 AgentHub 的原始 `tool.call`、`tool.result`、assistant 和 run 事件，再转换为官方 canonical trace。转换保留稳定 ID、顺序、来源引用、工具参数和模型实际可见的结果。只声明已实现且有证据支持的 `native_exec_v1`、`post_tool_v1`，再使用官方 helper 生成 execution probe 证据。
 
-AgentHub Bash 当前可能同时给出非零 `exitCode` 与 `ok=true` / `isError=false`。本次测量必须保留这种组合，不能在 adapter 中改成 `isError=true`，也不能据此补造成功或失败事件。合并输出不能拆成虚构的 stdout/stderr；provider 元数据记录不能冒充完整 API wire capture 或其他 harness 的 native session。
+2026-11-12 基线记录了非零 `exitCode` 与原生 `isError=false` 的组合；后续生产修复会在 Bash 执行层赋予一致的失败分类。评测 normalizer 必须始终保留各版本实际发出的原生值，不能根据退出码补正标志或补造成功/失败事件。合并输出不能拆成虚构的 stdout/stderr；provider 元数据记录不能冒充完整 API wire capture 或其他 harness 的 native session。
 
 官方评分分为 Harness 和 Agent 两层。E8 两层合计有六个 rule 项及五个 LLM rubric 项，规则结果与 rubric 结果按原上游流程解析、聚合，并保留原始及 effective 判定、`original_score` / `resolved_from` 和 attribution。自定义 judge requester 仅负责兼容请求参数与实施预算，保留官方 rubric、证据选择和评分逻辑。只运行 rule verifier 的结果必须标为部分诊断。
 
