@@ -268,49 +268,27 @@ Orchestrator 子任务执行使用 AgentRunner 模块级全局信号量，默认
 `executePlan` 只接收已编译并通过语义校验的 plan；缺失依赖、重复 id、自依赖、循环依赖等坏 plan 应在进入本阶段前给出清晰错误。
 
 ```typescript
-async function executePlan(
-  plan: DispatchPlanItem[],
-  ctx: { parentRunId: string, conversationId: string }
-): Promise<Map<string, TaskResult>> {
-  const completed = new Map<string, TaskResult>()
-  const remaining = new Set(plan.map(t => t.id))
-
-  while (remaining.size > 0) {
-    // 上游没有成功完成的任务，不启动下游，直接标 skipped
-    const skipped = plan.filter(t =>
-      remaining.has(t.id) &&
-      (t.dependsOn ?? []).some(d => completed.has(d) && completed.get(d)?.status !== 'complete')
-    )
-    for (const t of skipped) {
-      const result = { taskId: t.id, status: 'skipped', error: 'Upstream task did not complete' }
-      publish({ type: 'dispatch.end', parentRunId: ctx.parentRunId,
-                taskId: t.id, status: 'skipped', error: result.error })
-      completed.set(t.id, result)
-      remaining.delete(t.id)
+// 示意：终态是报告/验收/重试生命周期结束，不是单个 child run.end。
+async function executePlan(plan, ctx) {
+  const pending = new Set(plan.map(task => task.id))
+  const active = new Map()
+  const terminal = new Map()
+  const scope = linkedDispatchCancellation(ctx.signal)
+  try {
+    while (pending.size || active.size) {
+      propagateBlockedDescendants(pending, terminal)
+      admitReadyTasks(pending, active, terminal, scope.signal)
+      // 所有启动的 promise 都包装为带 taskId 的终态 envelope；等待单个完成。
+      const completion = await nextOwnedCompletion(active)
+      terminal.set(completion.taskId, completion.result)
+      // 立即重算就绪集合；不等待无关 active task。
     }
-
-    // 找出所有依赖已成功完成的任务
-    const ready = plan.filter(t =>
-      remaining.has(t.id) &&
-      (t.dependsOn ?? []).every(d => completed.get(d)?.status === 'complete')
-    )
-
-    if (ready.length === 0) {
-      throw new Error('Circular dependency or missing dependency in plan')
-    }
-
-    // 同一波并行执行；runSubTask 内部会先等待全局子任务信号量
-    const results = await Promise.all(
-      ready.map(t => runSubTask(t, completed, ctx))
-    )
-
-    for (let i = 0; i < ready.length; i++) {
-      completed.set(ready[i].id, results[i])
-      remaining.delete(ready[i].id)
-    }
+    return terminal
+  } finally {
+    await cancelAndDrainOwnedTasks(scope, active)
+    collectOverlappingUnorderedWriteConflicts()
+    cleanupOwnedRunEvidenceAndListeners()
   }
-
-  return completed
 }
 
 async function runSubTask(
@@ -474,10 +452,10 @@ PLAN → EXECUTE → (有失败/冲突 且未达上限?) → REPLAN(补救) → 
    并等待用户审批 / 编辑；若校验失败则当前 run 失败并报告明确错误
 8. 用户批准后，AgentRunner 重新编译校验用户提交的 plan，发布 dispatch.plan 并进入 Stage 2
 9. AgentRunner.executePlan(...):
-   for each wave:
-     Promise.all(ready.map(task =>
-       wait global sub-agent semaphore, then AgentRunner.run(subAgent, ..., parentRunId=orchRunId)
-     ))
+   track pending / in-flight / terminal tasks
+   admit ready tasks through the existing global semaphore
+   on each semantic task completion: store result and unlock eligible successors
+   on abort/unexpected error: stop admission, cancel and drain owned work, finally clean evidence
 10. 所有子 run 结束 → AgentRunner 回到 Orchestrator，
    把 task_results 作为新一轮 prompt 喂给 Adapter，跑 Stage 3
 11. Orchestrator 输出聚合消息
@@ -521,3 +499,12 @@ After Stage 1 produces a compiled and validated plan, AgentRunner registers a pe
 Approval submits the full plan back to the server. AgentRunner re-runs `compileDispatchPlan` and `validateDispatchPlan`; only the approved compiled plan is published through `dispatch.plan` and executed by the DAG scheduler. Invalid edits return an API error and keep the pending review open.
 
 Rejection resolves the pending review with `approved=false`, launches no child runs, and skips Stage 2/Stage 3 for that Orchestrator run.
+
+
+### 连续调度与关闭契约
+
+依赖已满足的任务在单个前驱完成后即可就绪，无需等待无关任务；全进程子 Agent 并发上限继续为 4，已排队任务保持信号量 FIFO。普通 failed/aborted/skipped 结果只阻断其依赖分支，依赖跳过传播到固定点。没有 ready 任务但仍有 in-flight 时继续等待，不能误报环。
+
+每次 dispatch 使用链接父信号的独立取消域；异常拒绝或父中止停止新 admission，取消自有等待/运行任务，等待已启动工作真实结束后退出。每个 task 的终态事件只发布一次；子 run（含重试）的 ID 在创建时即纳入所有权，finally 清理本 dispatch 的 evidence/listener，不清别的 dispatch。取消是合作式，不能把未结束的 Promise 宣称为已停止。
+
+写冲突按实际取得 semaphore 到任务结束的执行区间检测，使用递增顺序而非毫秒相等判断。只有区间重叠且无传递依赖关系的任务，写同路径不同内容时构成并发冲突；跨旧波次的 B/C 也覆盖，严格依赖 A/C 的覆盖、同内容写入、非重叠写入不报冲突。收集冲突后再清理写记录；Bash/SDK 绕过 fs_write 的写入仍是已知盲区。
