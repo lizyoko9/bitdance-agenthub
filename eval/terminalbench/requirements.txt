@@ -1,0 +1,2 @@
+# Evaluation-only Python environment; never install into the application environment.
+harbor==0.25.0

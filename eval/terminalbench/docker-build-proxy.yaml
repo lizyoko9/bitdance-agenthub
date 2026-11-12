@@ -1,0 +1,13 @@
+services:
+  main:
+    build:
+      context: ${CONTEXT_DIR}
+      args:
+        HTTP_PROXY: ${AGENTHUB_BUILD_PROXY:?Set a container-reachable build proxy URL}
+        HTTPS_PROXY: ${AGENTHUB_BUILD_PROXY:?Set a container-reachable build proxy URL}
+        http_proxy: ${AGENTHUB_BUILD_PROXY:?Set a container-reachable build proxy URL}
+        https_proxy: ${AGENTHUB_BUILD_PROXY:?Set a container-reachable build proxy URL}
+        NO_PROXY: localhost,127.0.0.1,::1
+        no_proxy: localhost,127.0.0.1,::1
+    pull_policy: build
+    command: ["sh", "-c", "sleep infinity"]

@@ -8,6 +8,7 @@ import type { ToolContext } from '@/server/tools/types'
 import type { DeployStatusRecord, ModelProvider, StreamEvent } from '@/shared/types'
 
 import { resolveCustomProviderClientConfig } from './custom-provider-client'
+import { CustomRequestTracker, type CustomAgentAdapterOptions, type CustomRequestStatus } from './custom-request-policy'
 import type { AdapterAttachment, AdapterInput, AgentPlatformAdapter } from './types'
 
 /**
@@ -34,6 +35,8 @@ const MAX_IMAGES_PER_MESSAGE = 5
 export class CustomAgentAdapter implements AgentPlatformAdapter {
   readonly name = 'custom' as const
 
+  constructor(private options: CustomAgentAdapterOptions = {}) {}
+
   async *stream(input: AdapterInput, signal: AbortSignal): AsyncIterable<StreamEvent> {
     if (!input.customConfig) {
       throw new Error('CustomAgentAdapter requires customConfig')
@@ -46,7 +49,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     const systemPrompt = input.systemPrompt
     const apiKey = input.apiKey
 
-    const client = buildClient(modelProvider, apiKey, input.apiBaseUrl)
+    const defaultClient = this.options.requestPolicy
+      ? undefined
+      : buildClient(modelProvider, apiKey, input.apiBaseUrl, this.options)
 
     const toolDefs = toolRegistry.resolve(input.toolNames)
     const apiTools = toolDefs.map(toApiTool)
@@ -105,6 +110,18 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       let nextPartIndex = 0
       const toolCallBuffer = new Map<number, AccumulatingToolCall>()
 
+      const request = this.options.requestPolicy
+        ? new CustomRequestTracker(this.options.requestPolicy, {
+            runId: input.runId,
+            agentId: input.agentId,
+            conversationId: input.conversationId,
+            messageId,
+            requestedModel: modelId,
+            provider: modelProvider,
+            turn,
+          }, signal)
+        : undefined
+      const client = defaultClient ?? buildClient(modelProvider, apiKey, input.apiBaseUrl, this.options, request?.fetch)
       let stream: Awaited<ReturnType<typeof client.chat.completions.create>>
       try {
         stream = await client.chat.completions.create(
@@ -114,97 +131,109 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
             tools: apiTools.length > 0 ? apiTools : undefined,
             stream: true,
             stream_options: { include_usage: true },
+            ...this.options.requestSettings,
           },
           { signal },
         )
       } catch (err) {
+        request?.finish(signal.aborted ? 'aborted' : 'failed')
         yield baseEvent(input, { type: 'message.end', messageId })
-        throw err
+        throw request?.policyError ?? err
       }
 
       let finishReason: string | null = null
       // 本 turn 单条 message 的 usage（per-message）；与 runUsage 同时维护
       const msgUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
 
-      for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
-        if (signal.aborted) return
-        // Final usage chunk (stream_options.include_usage)：choices 通常空，只携 usage。
-        // DeepSeek 还附带 prompt_cache_hit_tokens / prompt_cache_miss_tokens。
-        const usage = (chunk as { usage?: Record<string, number> | null }).usage
-        if (usage) {
-          const inp = usage.prompt_tokens ?? 0
-          const out = usage.completion_tokens ?? 0
-          const cached = usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? 0
-          msgUsage.inputTokens += inp
-          msgUsage.outputTokens += out
-          msgUsage.cacheReadTokens += cached
-          runUsage.inputTokens += inp
-          runUsage.outputTokens += out
-          runUsage.cacheReadTokens += cached
-          runUsage.lastInputTokens = inp
-        }
-        const choice = chunk.choices[0]
-        if (!choice) continue
-        // DeepSeek V4/R1 等 thinking-mode 模型在 delta 上加了 reasoning_content
-        // 字段，OpenAI SDK 的官方类型不含，这里宽放成扩展形态。
-        const delta = choice.delta as OpenAI.Chat.Completions.ChatCompletionChunk['choices'][number]['delta'] & {
-          reasoning_content?: string
-        }
+      let requestStatus: CustomRequestStatus = 'interrupted'
+      try {
+        for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
+          if (signal.aborted) return
+          request?.observeChunk(chunk)
+          // Final usage chunk (stream_options.include_usage)：choices 通常空，只携 usage。
+          // DeepSeek 还附带 prompt_cache_hit_tokens / prompt_cache_miss_tokens。
+          const usage = (chunk as { usage?: Record<string, number> | null }).usage
+          if (usage) {
+            const inp = usage.prompt_tokens ?? 0
+            const out = usage.completion_tokens ?? 0
+            const cached = usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? 0
+            msgUsage.inputTokens += inp
+            msgUsage.outputTokens += out
+            msgUsage.cacheReadTokens += cached
+            runUsage.inputTokens += inp
+            runUsage.outputTokens += out
+            runUsage.cacheReadTokens += cached
+            runUsage.lastInputTokens = inp
+          }
+          const choice = chunk.choices[0]
+          if (!choice) continue
+          // DeepSeek V4/R1 等 thinking-mode 模型在 delta 上加了 reasoning_content
+          // 字段，OpenAI SDK 的官方类型不含，这里宽放成扩展形态。
+          const delta = choice.delta as OpenAI.Chat.Completions.ChatCompletionChunk['choices'][number]['delta'] & {
+            reasoning_content?: string
+          }
 
-        // —— reasoning_content (thinking mode) —— 先 yield 出来让 UI 渲染 thinking part
-        if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
-          if (thinkingPartIndex < 0) {
-            thinkingPartIndex = nextPartIndex++
+          // —— reasoning_content (thinking mode) —— 先 yield 出来让 UI 渲染 thinking part
+          if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
+            if (thinkingPartIndex < 0) {
+              thinkingPartIndex = nextPartIndex++
+              yield baseEvent(input, {
+                type: 'part.start',
+                messageId,
+                partIndex: thinkingPartIndex,
+                part: { type: 'thinking', content: '' },
+              })
+            }
+            reasoningBuffer += delta.reasoning_content
             yield baseEvent(input, {
-              type: 'part.start',
+              type: 'part.delta',
               messageId,
               partIndex: thinkingPartIndex,
-              part: { type: 'thinking', content: '' },
+              delta: { type: 'thinking.append', text: delta.reasoning_content },
             })
           }
-          reasoningBuffer += delta.reasoning_content
-          yield baseEvent(input, {
-            type: 'part.delta',
-            messageId,
-            partIndex: thinkingPartIndex,
-            delta: { type: 'thinking.append', text: delta.reasoning_content },
-          })
-        }
 
-        if (typeof delta.content === 'string' && delta.content.length > 0) {
-          if (textPartIndex < 0) {
-            textPartIndex = nextPartIndex++
+          if (typeof delta.content === 'string' && delta.content.length > 0) {
+            if (textPartIndex < 0) {
+              textPartIndex = nextPartIndex++
+              yield baseEvent(input, {
+                type: 'part.start',
+                messageId,
+                partIndex: textPartIndex,
+                part: { type: 'text', content: '' },
+              })
+            }
+            textBuffer += delta.content
             yield baseEvent(input, {
-              type: 'part.start',
+              type: 'part.delta',
               messageId,
               partIndex: textPartIndex,
-              part: { type: 'text', content: '' },
+              delta: { type: 'text.append', text: delta.content },
             })
           }
-          textBuffer += delta.content
-          yield baseEvent(input, {
-            type: 'part.delta',
-            messageId,
-            partIndex: textPartIndex,
-            delta: { type: 'text.append', text: delta.content },
-          })
-        }
 
-        if (delta.tool_calls) {
-          for (const tcd of delta.tool_calls) {
-            const idx = tcd.index
-            let entry = toolCallBuffer.get(idx)
-            if (!entry) {
-              entry = { id: '', name: '', argsBuffer: '' }
-              toolCallBuffer.set(idx, entry)
+          if (delta.tool_calls) {
+            for (const tcd of delta.tool_calls) {
+              const idx = tcd.index
+              let entry = toolCallBuffer.get(idx)
+              if (!entry) {
+                entry = { id: '', name: '', argsBuffer: '' }
+                toolCallBuffer.set(idx, entry)
+              }
+              if (tcd.id) entry.id = tcd.id
+              if (tcd.function?.name) entry.name = tcd.function.name
+              if (tcd.function?.arguments) entry.argsBuffer += tcd.function.arguments
             }
-            if (tcd.id) entry.id = tcd.id
-            if (tcd.function?.name) entry.name = tcd.function.name
-            if (tcd.function?.arguments) entry.argsBuffer += tcd.function.arguments
           }
-        }
 
-        if (choice.finish_reason) finishReason = choice.finish_reason
+          if (choice.finish_reason) finishReason = choice.finish_reason
+        }
+        requestStatus = 'completed'
+      } catch (error) {
+        requestStatus = signal.aborted ? 'aborted' : 'failed'
+        throw error
+      } finally {
+        request?.finish(signal.aborted ? 'aborted' : requestStatus)
       }
 
       if (thinkingPartIndex >= 0) {
@@ -352,10 +381,13 @@ function buildClient(
   provider: ModelProvider,
   overrideKey?: string | null,
   apiBaseUrl?: string | null,
+  options: CustomAgentAdapterOptions = {},
+  fetch?: typeof globalThis.fetch,
 ): OpenAI {
   return new OpenAI({
     ...resolveCustomProviderClientConfig(provider, overrideKey, apiBaseUrl),
-    maxRetries: MAX_API_RETRIES,
+    maxRetries: options.maxRetries ?? MAX_API_RETRIES,
+    ...(fetch ? { fetch } : {}),
   })
 }
 
