@@ -147,7 +147,7 @@ interface AdapterInput {
        [{ type: 'text', text }, { type: 'image_url', image_url: { url: 'data:<mime>;base64,...' } }, ...]
      - 否则纯文本字符串
    
-3. tool loop（最多 MAX_TURNS=8 轮）:
+3. tool loop（每个 run 最多 maxTurns 轮，配置优先级见下节）:
    每轮：
      yield message.start (新 partIndex 重置)
      client.chat.completions.create({ model, messages, tools, stream: true })
@@ -157,21 +157,42 @@ interface AdapterInput {
        - delta.tool_calls → 累积 tool_calls
      yield message.end
      
-     若无 tool_calls：跳出循环
-     若有 tool_calls：
+     若 finish_reason='stop' 且无 tool_calls：正常结束
+     若 finish_reason='length'：保留 usage 后抛 output_limit，不执行残缺工具参数
+     若 finish_reason 为 content_filter、缺失或与工具响应不一致：明确失败
+     若 finish_reason='tool_calls' 且有 tool_calls：
        并行 toolRegistry.execute(name, args, ctx)
        逐个 yield tool.result
         write_artifact 检测 result.value.artifactId 存在 → yield artifact.create (拉 DB 详情)
         deploy_artifact / deploy_workspace 检测 DeployStatusRecord → yield deploy.status
        把 assistant 消息（含 tool_calls + reasoning_content）和 tool result 推回 messages
        继续下一轮
+   若仍需继续但已用完 maxTurns：保留 usage 后抛 iteration_limit
 ```
+
+### 轮数配置与结束原因
+
+`maxTurns` 是每次 `stream()` 的模型请求轮数上限，一轮可以包含多个工具调用，不等于工具命令数。配置按以下优先级解析，并在发送模型请求前验证为 `1..10000` 的整数：
+
+1. 构造函数 `new CustomAgentAdapter({ maxTurns: 64 })` 的显式选项。
+2. 进程环境变量 `AGENTHUB_CUSTOM_MAX_TURNS`。
+3. 默认值 `32`，作为有限、可调整的兜底值。
+
+各 run 独立计数；同一个 adapter 实例中的并行 run 不共用轮数。上限约束请求数量，不保证任务会在该轮数内解决。`maxTurns` 取值不改变原有工具权限、Workspace 边界或 AbortSignal。
+
+正常完成只接受模型明确返回 `finish_reason='stop'` 且没有工具调用；即使恰好是最后允许的一轮，这种响应仍正常完成。已执行最后一轮工具、但模型尚未主动结束时，adapter 先发出可用的 `run.usage`，再抛出 `CustomAgentTerminationError`，其 `code` 与消息前缀均为 `iteration_limit`。AgentRunner 沿现有失败路径将 `status='failed'` 和错误消息写入 `agent_runs`、发布 `run.end.error` 并展示对话内 `[失败]` 信息，不新增 DB 列或事件字段。
+
+`finish_reason='length'` 对应 `output_limit`；内容过滤对应 `content_filter`；缺失或不一致的结束标记对应 `model_interrupted`。这些情况都不能当作模型主动完成，也不执行残缺工具参数。Provider 异常、中止和评测请求预算错误继续沿各自既有路径传播。
+
+Orchestrator 计划阶段可能在收到 `plan_tasks` 后主动停止消费 generator，这属于调用方完成阶段；上限异常只在循环实际耗尽时抛出，不在 `finally` 中抛出，避免把有效计划误标为达到上限。
 
 ### 可选运行时评测策略
 
-`CustomAgentAdapter` 构造函数可接收 `CustomAgentAdapterOptions`（`src/server/adapters/custom-request-policy.ts`）：`requestSettings` 限定可覆盖 `reasoning_effort` / `max_completion_tokens`，`maxRetries` 控制 SDK 重试，`requestPolicy` 提供发送前检查和逐请求观察。普通应用不传选项时，仍使用现有请求参数、SDK 两次重试和最多八轮 tool loop；调用保留 `AbortSignal`，不改变 `AdapterInput` 或 `StreamEvent`。
+`CustomAgentAdapter` 构造函数可接收 `CustomAgentAdapterOptions`（`src/server/adapters/custom-request-policy.ts`）：`maxTurns` 指定上述单 run 轮数上限，`requestSettings` 限定可覆盖 `reasoning_effort` / `max_completion_tokens`，`maxRetries` 控制 SDK 重试，`requestPolicy` 提供发送前检查和逐请求观察。普通应用不传评测策略时，仍使用通常请求参数和 SDK 两次重试；轮数按上述环境变量/默认值解析。调用保留 `AbortSignal`，不改变 `AdapterInput` 或 `StreamEvent`。
 
-Terminal-Bench 入口使用 `eval/terminalbench/request-policy.ts` 的 `createEvalRequestPolicy()`：同一 trial 的根、子 run 共享外部 policy 闭包，在实际 HTTP 请求发送前检查 UTF-8 JSON body 大小和累计请求数。默认最多八个请求、单 body 64 KiB、累计 256 KiB，设置 `reasoning_effort='none'`、`max_completion_tokens=2048`、SDK 重试为零。额度耗尽后，后续请求保持拒绝；byte 约束不代表精确 token 或美元上限。评测配置不写入普通 Agent 或 DB schema。
+Terminal-Bench 入口使用 `eval/terminalbench/request-policy.ts` 的 `createEvalRequestPolicy()`：同一 trial 的根、子 run 共享外部 policy 闭包，在实际 HTTP 请求发送前检查 UTF-8 JSON body 大小和累计请求数。该 trial 的请求预算独立于每个 run 的 `maxTurns`。历史首轮 smoke 的默认额度继续为最多八个请求、单 body 64 KiB、累计 256 KiB、`max_completion_tokens=2048`，设置 `reasoning_effort='none'`、SDK 重试为零。trial 输入可显式设置 `maxTurns` 与 `requestLimits`，其中 `maxRequests` 可配置至 1000，累计 body 字节可配置至 64 MiB；单 body 和输出 token 的既有上限保持不变。Python wrapper 对应选项为 `max_turns`、`max_requests`、`max_total_request_bytes`，有效值写入 manifest。额度耗尽后，后续请求保持拒绝；byte 约束不代表精确 token 或美元上限。评测配置不写入普通 Agent 或 DB schema。
+
+评测 `result.json` 的 `terminationReason` 根据实际结束事件和错误前缀区分正常完成、`iteration_limit`、`output_limit`、`content_filter`、`model_interrupted`、`budget_exhausted`、超时、中止及其它失败。计数恰好等于上限不代表被截断：最后一次请求若模型主动结束，仍为正常完成。执行原因与官方 verifier reward 分别记录，历史试跑报告保留原结果。
 
 `requestPolicy.observe()` 接收白名单请求记录，包括 run/message/模型标识、实际尝试序号、请求 bytes、响应 request ID/model/fingerprint、耗时、HTTP 状态、结束状态和可用 usage。记录在 yield 工具事件之前保留，因此 Orchestrator 在 `plan_tasks` 处提前停止消费也不会覆盖该请求的用量。输入/输出、缓存读写和 reasoning tokens 的缺失值为 `null`；`usageComplete` 表示输入、输出总量均已取得。OpenAI 缓存读量读取 `prompt_tokens_details.cached_tokens`。观察记录不包含认证头、请求 body 或凭据。
 
@@ -239,7 +260,7 @@ const result = await toolRegistry.execute(name, args, ctx)
 |---|---|
 | `ClaudeCodeAdapter` | `SDKResultMessage.usage`（success / error 都有）+ `modelUsage` 拿实际模型 id |
 | `CodexAdapter` | `runStreamed()` 的 `turn.completed.usage` |
-| `CustomAgentAdapter` | 调用时设 `stream_options: { include_usage: true }`，stream 末尾会有一个携 `usage` 的特殊 chunk；跨 turn 累加（一个 run 内可能 ≤ MAX_TURNS=8 次 chat.completions.create） |
+| `CustomAgentAdapter` | 调用时设 `stream_options: { include_usage: true }`，stream 末尾会有一个携 `usage` 的特殊 chunk；跨 turn 累加（一个 run 内最多 `maxTurns` 次 chat.completions.create；自然结束或轮数耗尽均保留可用 usage） |
 | `MockAdapter` | 不上报 usage（agent_runs.usage = null） |
 
 **字段映射**（OpenAI 协议 → 我们的 `RunUsage`）：

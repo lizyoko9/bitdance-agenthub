@@ -285,7 +285,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `specs/stream-events/spec.md` — StreamEvent 协议
 - `specs/message-parts/spec.md` — MessagePart 结构
 - `specs/artifacts/spec.md` — Artifact 生命周期
-- `specs/adapters/spec.md` — Adapter 契约与 Claude/Codex/Custom 边界
+- `specs/adapters/spec.md` — Adapter 契约与 Claude/Codex/Custom 边界；Custom 可配置轮数与结束原因
 - `specs/terminal-bench-evaluation/spec.md` — 容器内公开任务评测、请求限额、运行记录与官方 verifier 边界
 - `specs/orchestrator/spec.md` — Orchestrator 调度
 - `specs/tools/spec.md` — 工具系统与审批
@@ -303,7 +303,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `02-stream-events.md` — StreamEvent 完整事件类型
 - `03-message-parts.md` — MessagePart 各类型详解
 - `04-artifacts.md` — Artifact 类型与渲染契约
-- `05-adapter-interface.md` — AgentPlatformAdapter 接口
+- `05-adapter-interface.md` — AgentPlatformAdapter 接口；Custom `maxTurns` / `AGENTHUB_CUSTOM_MAX_TURNS` 配置和达到上限的失败语义
 - `06-orchestrator-flow.md` — Orchestrator 三阶段工作流
 - `07-tools.md` — 内置工具清单与签名
 - `08-db-schema.md` — Drizzle schema 与索引（含 app_settings 全局 key 表）
@@ -322,7 +322,9 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `terminalbench/README.md` — 固定 Terminal-Bench 任务的独立环境验证与有界模型 smoke 运行方式；headless CLI 复用 Application Services、AgentRunner 和工具
 - `terminalbench/requirements.txt` — `Harbor==0.25.0`，安装在独立 Python 评测环境，不加入应用 pnpm dependencies；Linux 运行包复用现有 lockfile，不复制宿主 node_modules、DB 或凭据文件
 
-公开任务通过与否由官方 verifier reward 判定；AgentHub complete、预算耗尽、基础设施失败与官方 reward 分开记录。验证与真实试跑结果以各次保存的报告为准，运行说明不构成已跑通的证据。
+Custom tool loop 的轮数优先使用构造参数 `maxTurns`，其次读取 `AGENTHUB_CUSTOM_MAX_TURNS`，默认 32；有效值为 `1..10000` 的整数。模型主动停止与达到上限分别沿完成和 `iteration_limit` 失败路径记录，详见 Spec 05。评测的 trial 共享请求预算与单 run 轮数分别配置，首轮 smoke 的八请求默认额度不构成全局上限。
+
+公开任务通过与否由官方 verifier reward 判定；AgentHub complete、轮数/请求预算耗尽、基础设施失败与官方 reward 分开记录。验证与真实试跑结果以各次保存的报告为准，运行说明不构成已跑通的证据。
 
 ### `skills/`（可复用开发任务模板）
 
