@@ -125,7 +125,7 @@ interface AgentFormState {
   name: string
   avatar: string
   description: string
-  capabilities: string[]
+  capabilitiesText: string
   systemPrompt: string
   adapterName: AgentBuilderAdapter
   modelProvider: AgentBuilderProvider
@@ -142,7 +142,7 @@ function draftToForm(draft: AgentConfigDraft): AgentFormState {
     name: draft.name,
     avatar: draft.avatar,
     description: draft.description,
-    capabilities: [...draft.capabilities],
+    capabilitiesText: draft.capabilities.join(', '),
     systemPrompt: draft.systemPrompt,
     adapterName: draft.adapterName,
     modelProvider: draft.modelProvider ?? 'deepseek',
@@ -160,7 +160,7 @@ function createScratchForm(): AgentFormState {
     name: '',
     avatar: '',
     description: '',
-    capabilities: [],
+    capabilitiesText: '',
     systemPrompt: DEFAULT_CUSTOM_SYSTEM_PROMPT,
     adapterName: 'custom',
     modelProvider: 'deepseek',
@@ -175,6 +175,9 @@ function createScratchForm(): AgentFormState {
 
 const isSdkAdapter = (adapter: AgentBuilderAdapter) =>
   adapter === 'claude-code' || adapter === 'codex'
+
+const parseCapabilities = (text: string): string[] =>
+  text.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean)
 
 export function AgentStudio() {
   const router = useRouter()
@@ -287,7 +290,7 @@ export function AgentStudio() {
         name,
         avatar: state.avatar,
         description,
-        capabilities: state.capabilities,
+        capabilities: parseCapabilities(state.capabilitiesText),
         systemPrompt,
         adapterName: state.adapterName,
         modelProvider: sdk ? undefined : state.modelProvider,
@@ -1085,15 +1088,8 @@ function AgentConfigForm({
           </Field>
           <Field label="能力标签">
             <Input
-              value={form.capabilities.join(', ')}
-              onChange={(event) =>
-                patch({
-                  capabilities: event.target.value
-                    .split(/[,，\s]+/)
-                    .map((item) => item.trim())
-                    .filter(Boolean),
-                })
-              }
+              value={form.capabilitiesText}
+              onChange={(event) => patch({ capabilitiesText: event.target.value })}
               placeholder="testing, react, vitest"
               className="text-sm"
             />
@@ -1470,6 +1466,7 @@ function AgentPreviewCard({
   error: string | null
 }) {
   const sdk = isSdkAdapter(form.adapterName)
+  const capabilities = parseCapabilities(form.capabilitiesText)
   const selectedSkills = skills.filter((skill) => form.skillIds.includes(skill.id))
   const modelLine = sdk
     ? `${ADAPTER_LABELS[form.adapterName]} / ${form.modelId.trim() || 'SDK 默认'}`
@@ -1497,9 +1494,9 @@ function AgentPreviewCard({
           </div>
         </div>
 
-        {form.capabilities.length > 0 && (
+        {capabilities.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1">
-            {form.capabilities.map((capability) => (
+            {capabilities.map((capability) => (
               <span
                 key={capability}
                 className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
