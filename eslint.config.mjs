@@ -16,6 +16,11 @@ const eslintConfig = defineConfig([
     ".pnpm-store/**",
     ".understand-anything/**",
     "learn-claude-code/**",
+    // Runtime data dirs (gitignored): conversation workspaces hold agent-generated
+    // user code, not project source — never lint them.
+    ".agenthub-data/**",
+    ".agenthub-data-e2e/**",
+    ".agents/**",
     "release/**",
     "apps/mobile/android/**/build/**",
     "apps/mobile/android/app/src/main/assets/**",

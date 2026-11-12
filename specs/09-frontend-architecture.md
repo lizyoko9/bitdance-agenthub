@@ -60,6 +60,7 @@ interface AppState {
   pendingAttachmentsByConv: Record<string, AttachmentRow[]>  // 待发送附件
   pendingWritesByConv: Record<string, PendingWrite[]>        // Agent fs_write 审批队列（review 模式）
   pendingBashCommandsByConv: Record<string, PendingBashCommand[]> // Agent bash 关键命令审批队列
+  pendingSkillInstallsByConv: Record<string, PendingSkillInstall[]> // install_skill 会话安装审批队列
   highlightedMessageId: string | null                         // 跳转后短暂高亮
   streamConnected: boolean
 }
@@ -100,6 +101,8 @@ interface AppState {
 | `dispatch.end` | 优先通过 `parentRunId` 找 `dispatchesByRunId`，更新 `taskStatus[taskId]` 为 `complete` / `failed` / `aborted` / `skipped`；旧事件可用 `childRunId` 反查兜底 |
 | `fs_write.pending` | `pendingWritesByConv[convId].push(pendingWrite)`（已存在的 id 不重复 push） |
 | `fs_write.resolved` | 从 `pendingWritesByConv[convId]` 移除 `pendingId`；ChatPanel 的清理 effect 会同步关掉对应 `diff:<pwId>` tab |
+| `skill_install.pending` | `pendingSkillInstallsByConv[convId].push(pendingInstall)`（已存在的 id 不重复 push） |
+| `skill_install.resolved` | 从 `pendingSkillInstallsByConv[convId]` 移除 `pendingId` |
 | `bash_command.pending` | `pendingBashCommandsByConv[convId].push(pendingCommand)`（已存在的 id 不重复 push） |
 | `bash_command.resolved` | 从 `pendingBashCommandsByConv[convId]` 移除 `pendingId` |
 
@@ -108,6 +111,8 @@ interface AppState {
 **部署卡片**：`DeployStatusPart` 根据 `DeployStatusRecord.deploymentType` 区分本地静态部署与外部静态发布，根据 `sourceType` 区分 artifact 版本与 workspace 目录来源。`external_static` 时，`previewPath` 是公开 URL，卡片必须继续提供打开 / 复制操作，并在 `localPreviewPath` 存在时显示本地回退路径。源码包 / 容器包下载仍来自本地 deployment id。
 
 **bash 审批卡片**：`PendingBashCommandsPanel` 渲染当前会话 `pendingBashCommandsByConv`。卡片显示发起 Agent、命令、cwd 和审批原因，用户点击执行 / 拒绝后调用 `POST /api/conversations/:id/pending-bash-commands/:commandId`，最终通过 `bash_command.resolved` 清理 UI。
+
+**Skill 安装审批卡片**：`PendingSkillInstallsPanel` 渲染当前会话 `pendingSkillInstallsByConv`（`install_skill` 会话安装）。卡片显示发起 Agent、来源 URL（重定向后的最终地址）、解析出的 name/description + 可展开正文预览，用户点击安装 / 拒绝后调用 `POST /api/conversations/:id/pending-skill-installs/:piId`，最终通过 `skill_install.resolved` 清理 UI。
 
 **部署候选卡片**：`DeployCandidatesPart` 渲染 `deploy_candidates` message part。卡片列出当前会话多个 `web_app` 候选，每项显示标题、版本、创建 Agent、时间与 artifact id。点击候选的部署按钮调用 `POST /api/conversations/:id/deploy`，成功后把返回的 system message upsert 到 store；不通过 SSE，也不启动 AgentRun。
 
@@ -197,13 +202,14 @@ useEffect(() => {
 ```
 app/page.tsx
 └── <Home>
-    ├── <Sidebar />               ── 对话/产物库/Agents/分析 四 tab 切换
+    ├── <Sidebar />               ── 对话/产物库/Agents/Skills/分析 五 tab 切换
     │   ├── <ThemeToggle />
     │   ├── <NewConversationDialog />
     │   ├── <ConversationItem />  ── 单条会话 + hover 置顶/归档/重命名/删除
     │   ├── <ArtifactLibrary />
     │   ├── <AgentLibrary />
-    │   │   └── <CreateAgentDialog />    ── 顶部 radio 选 adapterName（'custom' / 'claude-code' / 'codex'）；SDK adapter 模式下隐藏 provider/工具集，Codex 使用 AgentHub 隔离 CODEX_HOME
+    │   │   └── <CreateAgentDialog />    ── 顶部 radio 选 adapterName（'custom' / 'claude-code' / 'codex'）；SDK adapter 模式下隐藏 provider/工具集，Codex 使用 AgentHub 隔离 CODEX_HOME；公共 Skill 标「已默认挂载」不占选择位
+    │   ├── <SkillLibrary />      ── Skills 库窄条：新建/编辑/删除/启停/切公共 + 「打开市场」入口（→ /skills）
     │   └── <RenameInput />       ── 内联重命名
     ├── <ChatPanel />             ── 当前会话主区
     │   ├── header: 头像堆 + AgentInfoPopover + 文件树/产物预览 toggle + FileLibraryDialog + AddAgentDialog + UsageBadge（点开 popover 看 token 拆分）
@@ -222,6 +228,7 @@ app/page.tsx
     │   │   │   │   │   └── <AttachmentChip />  ── 附件
     │   │   │   │   └── <DispatchPlanCard />  ── 调度卡片（Orchestrator）
     │   │   │   ├── <PendingWritesPanel>    ── 输入框上方的待审批列表（每条是 PendingWriteCard，含「查看更改」打 diff tab + 应用/拒绝）
+    │   │   │   ├── <PendingSkillInstallsPanel> ── install_skill 会话安装审批（来源 URL + 解析预览 + 安装/拒绝）
     │   │   │   └── <MessageInput>          ── @mention popup + 附件 + 引用回复 + Auto/Review 切换
     │   │   ├── isDiffTabId(activeTab): <PendingWriteDiffTab>   ── 中间区的 fs_write 审批 diff（react-diff-viewer-continued）
     │   │   └── 否则: <FileTab>            ── 文件浏览 / 编辑
@@ -232,6 +239,10 @@ app/page.tsx
 <StreamProvider>                  ── 顶层 layout，全局 SSE 接入
 <ThemeProvider>                   ── next-themes
 ```
+
+**独立全页路由**（不在 `app/page.tsx` 主工作台树内，各自 `src/app/<route>/page.tsx`）：
+- `/agents/new` → `<AgentStudio>`：Agent 模板市场 + 从零创建 + 配置屏。
+- `/skills` → `<SkillMarketplace>`：Skills 市场卡片网格（分类栏 + 搜索 + 排序 + 精选目录安装 + 公共开关 + 「被 N 个 Agent 使用」）。侧栏 Skills 库的「打开市场」跳到这里。含「在线市场」tab：经 `GET /api/skills/registry`（服务端代理 SkillsMP）搜 200 万+ 社区 skill——空/短搜索默认展示热门榜（种子词 + star 排序），卡片显示 star/作者；点卡片弹详情面板（`GET /api/skills/preview` 拉 SKILL.md 全文用 `<Markdown>` 渲染 + 安装 + GitHub），安装复用 skill-fetch。
 
 **组件原则**：
 - 组件文件名 `PascalCase.tsx`（CLAUDE.md §4.1），一个文件一个主组件 + 几个内联辅助

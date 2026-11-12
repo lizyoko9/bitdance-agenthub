@@ -300,6 +300,25 @@ export interface PendingWrite {
 }
 
 /**
+ * Agent 调 install_skill 想从 GitHub 链接安装一个 Skill；fetch+解析后注册待审批，
+ * 前端展示来源 URL + 解析出的 name/description/instruction 预览让用户决定。详见 specs/16。
+ */
+export interface PendingSkillInstall {
+  id: string                  // psi_<nanoid>
+  conversationId: string
+  agentId: string
+  runId: string
+  /** 经重定向后的最终来源 URL */
+  sourceUrl: string
+  name: string
+  description: string
+  category: string
+  /** 完整方法论正文（供用户审阅；面板里截断显示） */
+  instruction: string
+  createdAt: number
+}
+
+/**
  * Agent 调 ask_user 工具想结构化问用户问题；前端弹 dialog 让用户选项，
  * 选完后通过 attachResolver 唤醒 await，工具 handler 返回 answers。
  * Schema 对齐 Anthropic SDK 的 AskUserQuestion（1-4 questions × 2-4 options），
@@ -426,6 +445,8 @@ export type StreamEvent = BaseEvent &
     | { type: 'bash_command.resolved'; pendingId: string; approved: boolean }
     | { type: 'ask_user.pending'; pendingQuestion: PendingQuestion }
     | { type: 'ask_user.resolved'; pendingId: string; answered: boolean }
+    | { type: 'skill_install.pending'; pendingInstall: PendingSkillInstall }
+    | { type: 'skill_install.resolved'; pendingId: string; installed: boolean; skillId?: string }
     | { type: 'heartbeat' }
   )
 

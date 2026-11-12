@@ -37,11 +37,50 @@ export const agents = sqliteTable('agents', {
 
   toolNames: text('tool_names', { mode: 'json' }).$type<string[]>().notNull(),
 
+  /**
+   * 该 agent 选用的 Skill（方法论模块）id 列表。默认空数组。
+   * 运行时由 AgentRunner 解析为指令注入 system prompt（见 specs/13）；
+   * 缺失/已删除/禁用的 id 在解析期静默跳过，不影响 run。
+   */
+  skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull().default(sql`'[]'`),
+
   isBuiltin: integer('is_builtin', { mode: 'boolean' }).notNull().default(false),
   isOrchestrator: integer('is_orchestrator', { mode: 'boolean' }).notNull().default(false),
   supportsVision: integer('supports_vision', { mode: 'boolean' }).notNull().default(false),
 
   createdAt: integer('created_at').notNull(),
+})
+
+// ─── Skills (可复用方法论模块) ───────────────────────────────
+/**
+ * Skill = 可复用的「工作方法 / 工作流」指令包，被 Agent 选用后由 AgentRunner
+ * 注入 system prompt。Skill 本身**不授予可执行工具权限**（见 openspec tools spec）；
+ * `requiredToolNames` 只用于 UI 依赖提示（「此 Skill 配合 X 工具效果更好」）。
+ */
+export const skills = sqliteTable('skills', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  category: text('category').notNull(),
+  /** 注入到 system prompt 的方法论指令正文 */
+  instruction: text('instruction').notNull(),
+  /** 建议配套的 AgentHub 工具（仅 UI 提示，不扩权） */
+  requiredToolNames: text('required_tool_names', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  /** 来源：builtin（seed，不可删/编）/ user（库内自建）/ imported（导入或会话安装） */
+  source: text('source', { enum: ['builtin', 'user', 'imported'] })
+    .notNull()
+    .default('user'),
+  /** 公共 skill：为 true 时自动挂给所有 agent（有效 skill = 公共池 ∪ agent.skillIds）。默认 opt-in。 */
+  isGlobalDefault: integer('is_global_default', { mode: 'boolean' }).notNull().default(false),
+  /** 导入来源 URL（install_skill 会话安装时记录；手动导入/自建为 null）。 */
+  sourceUri: text('source_uri'),
+  isBuiltin: integer('is_builtin', { mode: 'boolean' }).notNull().default(false),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull().default(0),
 })
 
 // ─── Conversations ───────────────────────────────────────────
@@ -273,6 +312,9 @@ export type AppSettingsInsert = typeof appSettings.$inferInsert
 // ─── 类型导出（推断行类型）─────────────────────────────────
 export type AgentRow = typeof agents.$inferSelect
 export type AgentInsert = typeof agents.$inferInsert
+
+export type SkillRow = typeof skills.$inferSelect
+export type SkillInsert = typeof skills.$inferInsert
 
 export type ConversationRow = typeof conversations.$inferSelect
 export type ConversationInsert = typeof conversations.$inferInsert

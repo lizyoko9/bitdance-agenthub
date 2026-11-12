@@ -62,3 +62,12 @@ next-env.d.ts
 # IDE
 .vscode/
 .idea/
+
+# Local tooling / scratch dirs (not project source)
+/.pnpm-store/
+/.agents/
+/.understand-anything/
+/learn-claude-code/
+/skills-lock.json
+/.tmp_lark_doc_auth*.png
+

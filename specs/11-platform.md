@@ -131,6 +131,19 @@ const SHARED_BANNED: RegExp[] = [
 
 ---
 
+## 出站 fetch 策略（`install_skill` 的 SSRF 防御）
+
+`install_skill`（spec 16 / CLAUDE.md §5.5）是项目里唯一的「LLM 选 URL 的服务端出站请求」面。其 SSRF 防御策略以 `src/server/skill-fetch.ts` 为**单一数据源**，地位等同命令黑名单——新增/放宽必须在 PR 说明。要点：
+
+- 仅 `https`；**主机白名单**（GitHub：`raw.githubusercontent.com` / `github.com` / `gist*` / `api.github.com`）。
+- **DNS 解析后校验 IP**（`isBlockedAddress`）：拦回环 / 链路本地（含云元数据 `169.254.169.254`）/ 私有 / CGNAT / 多播 / IPv6（`::1`、`fe80::/10`、`fc00::/7`、`::ffff:` 映射）；畸形地址按拦截处理。
+- **逐跳重定向重校验**（≤3 跳，每跳重做白名单 + IP 校验）；≤256KB 流式截断；≤10s 超时；content-type 白名单；GET 无凭据，**不透传 AgentHub 内部 token**。
+- 已知局限：未做连接级 IP pinning（小 TOCTOU 窗口），首版靠 GitHub 白名单使其无实际危害；放开任意主机前需补 pinning。
+
+> 与命令黑名单同理：fetch 策略只在 fetch 层拦死请求；「装不装这份内容」由审批门（pending + 用户确认）兜底。
+
+---
+
 ## 进程清理
 
 **POSIX**：`child.kill('SIGTERM')`，5 秒未退升级到 `SIGKILL`（现状未实现升级，Phase 3 再补）。

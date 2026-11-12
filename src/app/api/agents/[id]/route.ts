@@ -19,6 +19,7 @@ const PatchBody = z
       .optional(),
     modelId: z.union([z.string().min(1), z.null()]).optional(),
     toolNames: z.array(z.string()).optional(),
+    skillIds: z.array(z.string()).optional(),
     supportsVision: z.boolean().optional(),
     // null 表示清除，空字符串当 null 处理
     apiKey: z.union([z.string(), z.null()]).optional(),

@@ -42,6 +42,7 @@ export function buildHeuristicAgentConfigDraft(input: AgentDraftRequest): AgentC
     modelProvider: DEFAULT_PROVIDER,
     modelId: AGENT_BUILDER_PROVIDER_DEFAULTS[DEFAULT_PROVIDER].defaultModel,
     toolNames: permissionSummaries.map((summary) => summary.toolName),
+    skillIds: [],
     supportsVision: true,
     rationale: [
       `根据描述匹配到「${preset.label}」工具预设。`,

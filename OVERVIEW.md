@@ -56,7 +56,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | CustomAgentAdapter | ✅ | OpenAI 兼容（DeepSeek/OpenAI/火山方舟）+ 自驱 tool loop |
 | MockAdapter | ✅ | 开发期不烧 token |
 | CodexAdapter | ✅ | @openai/codex-sdk + 线程续接 + AgentHub MCP bridge |
-| 自建 Agent | ✅ | 表单/对话式创建,自定义 prompt + 工具集 |
+| 自建 Agent | ✅ | 表单/对话式创建,自定义 prompt + 工具集 + Skills（方法论模块:库 CRUD/导入 SKILL.md/渐进披露注入/`install_skill` 会话安装,见 spec 13/16） |
 | Orchestrator 编排 | ✅ | 三阶段规划 + DAG 调度 + 级联中止 + 可视化卡 + 同波次代码冲突检测（检测+上报，不自动合并） |
 | 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · plan_tasks · ask_user |
 | Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL + 本地静态发布/源码包/容器包) / document(md) / image / 版本对比 diff（历史 diff 只读兼容） / **ppt(幻灯片分页预览 + 完整 theme token + 导出真 .pptx)** · code_file workspace 预览/编辑 · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
@@ -87,7 +87,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 ### L5 UI 组件（`src/components/`）
 | 区域 | 文件 |
 |---|---|
-| 侧栏（会话/产物库/Agents/分析 Tab） | `sidebar.tsx` |
+| 侧栏（会话/产物库/Agents/Skills/分析 Tab） | `sidebar.tsx` |
 | 聊天主面板 | `chat-panel.tsx` · `message-list.tsx` · `message-item.tsx` · `message-parts.tsx` |
 | 输入框（附件/审批模式/选区引用/斜杠命令） | `message-input.tsx` · `edit-message-input.tsx` |
 | Orchestrator 调度卡 | `dispatch-plan-card.tsx` |
@@ -147,7 +147,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 ### L1 持久化（`src/db/`）
 | 文件 | 说明 |
 |---|---|
-| `schema.ts` | **9 张表**：`agents` · `conversations` · `messages` · `artifacts` · `workspaces` · `attachments` · `agent_runs` · `context_summaries` · `app_settings`（`specs/08`） |
+| `schema.ts` | **10 张表**：`agents`（含 `skill_ids`） · `conversations` · `messages` · `artifacts` · `workspaces` · `attachments` · `agent_runs` · `context_summaries` · `app_settings` · `skills`（Phase 2 方法论模块）（`specs/08`） |
 | `client.ts` | better-sqlite3 + Drizzle 实例 |
 | `bootstrap.ts` | 首次启动自动建表 + seed |
 | `builtin-agents.ts` · `seed.ts` | 5 个内置 Agent（Orchestrator / PM 小灰 / UI 设计师 / 前端工程师 / Reviewer） |

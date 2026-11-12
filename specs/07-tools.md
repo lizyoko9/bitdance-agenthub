@@ -79,6 +79,8 @@ export const toolRegistry = buildRegistry()
 | `fs_read` | 读 workspace 内文本文件 | 读文件系统 | 需要看用户项目代码的 agent |
 | `fs_write` | 写 workspace 内文本文件 | 写文件系统 | 需要生成 / 修改文件的 agent |
 | `bash` | 在 workspace 内跑 shell 命令 | 进程 / 文件系统 | 需要 git / 编译 / 测试的 agent |
+| `load_skill` | 按需加载已装备 Skill 的完整方法（渐进披露） | 读 DB | 自动可用（agent 选了 Skill 时；不占用户勾选），见 spec 13 |
+| `install_skill` | 从 GitHub 链接安装 Skill 到当前 agent | 出站 fetch + 写 DB + 审批门 | **opt-in 额外能力**，默认关闭、用户显式勾选，见 spec 16 + CLAUDE.md §5.5 |
 
 ### write_artifact
 
@@ -381,6 +383,26 @@ curl -s http://127.0.0.1:3000/health
 
 ---
 
+### load_skill
+
+**用途**：渐进披露的按需加载——当 agent 装备的 Skill 较长、未内联进 system prompt 时，agent 调 `load_skill({ skillId })` 取完整方法正文。
+
+**作用域（强约束）**：只能加载 agent 的**有效 Skill 集**（自选 `agent.skillIds` ∪ 公共池 `is_global_default`，见 spec 13 `resolveEffectiveSkills`）；集合之外的 id 一律拒绝（防模型传任意 id 越权读其它 Skill）。缺失 / 已停用返回 error。
+
+**装备**：不由用户勾选——agent 选了 Skill 时**自动可用**（custom 走 toolRegistry，codex 走 MCP bridge）。claude-code 不用本工具，改用 SDK 原生 `Skill`（见 spec 13/05）。
+
+### install_skill
+
+**用途**：从公开 GitHub 链接安装 Skill 到当前 agent（SKILL.md raw/blob、skill 目录 tree、或仓库枚举候选）。
+
+**装备**：**opt-in 额外能力**，默认不在任何工具预设，用户须在该 agent 上显式勾选；作为跨 adapter 的额外能力，SDK adapter 也通过 `toolNames` 保留（`filterSdkOptInTools`）。
+
+**安全**：出站 fetch 经 `skill-fetch.ts` 的 SSRF 防御（https + GitHub 白名单 + DNS 解析 IP 校验 + 逐跳重定向校验 + 大小/超时/类型限制 + 不透传内部 token）；解析丢弃 `allowed-tools`（不扩权）；安装走审批门（pending + 用户确认）才落库 `source='imported'` 并绑定。完整契约见 spec 16 + CLAUDE.md §5.5。
+
+**运行机制**：handler 注册 `PendingSkillInstall` → SSE `skill_install.pending` → `PendingSkillInstallsPanel` 批准/拒绝；批准 `pendingSkillInstalls.approve` 建 Skill + 绑定 agent。
+
+---
+
 ## 工具调用生命周期
 
 ```
@@ -510,7 +532,7 @@ AgentRunner 在构造 `AdapterInput.systemPrompt` 时会追加按可用工具生
 
 **副作用**：sandbox 模式 quota（`SANDBOX_TOTAL_BYTES` / `SANDBOX_TOTAL_FILES`）对 Claude Code agent 失效（SDK 自己写盘绕过 quota 检查）。Claude Code agent 实际场景都是 `workspace.mode === 'local'`（绑真实项目），quota 不适用，可接受。
 
-**AgentHub MCP 工具**：Claude Code adapter 通过 SDK in-process MCP server 暴露 `write_artifact` / `read_artifact` / `deploy_artifact` / `deploy_workspace` / `ask_user` / `report_task_result`。其中 `write_artifact` 的结果会被 adapter 翻译为 `artifact.create`，`deploy_artifact` / `deploy_workspace` 的结果会被翻译为 `deploy.status`。
+**AgentHub MCP 工具**：Claude Code adapter 通过 SDK in-process MCP server 暴露 `write_artifact` / `read_artifact` / `deploy_artifact` / `deploy_workspace` / `ask_user` / `report_task_result`，以及 opt-in 的 `install_skill`（仅当 agent 勾选时经 `filterAgentHubMcpToolsForRun` 暴露）。Skill 渐进披露走 SDK 原生 `Skill`（不暴露 `load_skill`）。其中 `write_artifact` 的结果会被 adapter 翻译为 `artifact.create`，`deploy_artifact` / `deploy_workspace` 的结果会被翻译为 `deploy.status`。
 
 ---
 
@@ -518,7 +540,7 @@ AgentRunner 在构造 `AdapterInput.systemPrompt` 时会追加按可用工具生
 
 `adapterName === 'codex'` 的 agent 不消费上面的「内置工具清单」。它通过 `@openai/codex-sdk` 暴露 Codex 自身的本地命令、文件变更、MCP、web search、todo/plan 等事件。
 
-AgentHub 额外给 Codex 注入一个 stdio MCP bridge，只暴露 allowlist：`write_artifact` / `read_artifact` / `deploy_artifact` / `deploy_workspace` / `ask_user` / `report_task_result`。bridge 通过受保护的内部 API 调用 `toolRegistry`，不会把 `bash` / `fs_write` 等 AgentHub 工具开放给 Codex。
+AgentHub 额外给 Codex 注入一个 stdio MCP bridge，只暴露 allowlist：`write_artifact` / `read_artifact` / `deploy_artifact` / `deploy_workspace` / `ask_user` / `report_task_result`，以及 `load_skill`（agent 选了 Skill 时自动可用）和 opt-in 的 `install_skill`（仅当 agent 勾选、经 `AGENTHUB_ENABLE_INSTALL_SKILL` env 标志时注册）。bridge 通过受保护的内部 API（`/api/internal/agenthub-tools` 的 `EXPOSED_TOOLS`）调用 `toolRegistry`，不会把 `bash` / `fs_write` 等 AgentHub 工具开放给 Codex。
 
 **审批策略**：当前 Codex TypeScript SDK 没有 Claude `canUseTool` 等价 hook。AgentHub 因此不在 Review 模式下开放自动写盘：
 

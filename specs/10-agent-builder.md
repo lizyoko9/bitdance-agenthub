@@ -2,19 +2,21 @@
 
 > 用户在前端通过表单创建 / 编辑 Agent，不需要改代码。本 spec 定义可配置字段、Provider 支持矩阵、API key 优先级、内置 vs 自建的差异。
 
-源文件：`src/components/create-agent-dialog.tsx`、`src/components/agent-create-wizard.tsx`、`src/shared/agent-builder-config.ts`、`src/server/agent-draft-service.ts`、`src/server/agent-service.ts`、`src/db/seed.ts`、`src/app/api/agents/`
+源文件：`src/app/agents/new/page.tsx`、`src/components/agent-studio.tsx`、`src/components/create-agent-dialog.tsx`、`src/components/agent-create-wizard.tsx`、`src/shared/agent-templates.ts`、`src/shared/agent-builder-config.ts`、`src/server/agent-draft-service.ts`、`src/server/agent-service.ts`、`src/db/seed.ts`、`src/app/api/agents/`
 
 ---
 
 ## 定位
 
-自建 Agent 默认 `adapterName='custom'`，也可以选择 `claude-code` 或 `codex` SDK adapter（详见 Spec 05）。新建入口统一为 Agent 列表顶部的「创建 Agent」按钮；点击后第一步选择「对话创建」或「详细配置」，编辑已有 Agent 时直接进入详细配置。用户配置：
+自建 Agent 默认 `adapterName='custom'`，也可以选择 `claude-code` 或 `codex` SDK adapter（详见 Spec 05）。新建入口统一为 Agent 列表顶部的「创建 Agent」按钮；点击后进入 `/agents/new` 的 Agent Studio 页面，用户可从模板市场创建，也可从零创建。编辑已有 Agent 时仍直接进入详细配置弹窗。用户配置：
 
 - 身份：name / avatar / description / capabilities
 - 行为：systemPrompt
 - 模型：custom 走 modelProvider + modelId；SDK adapter 走 modelId
 - 凭据：可选 apiKey / apiBaseUrl（per-agent override）
 - 能力：custom 走 toolNames（勾选）+ supportsVision；SDK adapter 使用各自内置工具集
+
+Agent Studio 的模板市场首版是静态蓝图：模板用于生成可编辑 `AgentConfigDraft`，不会新增模板数据库表，也不会保存用户密钥。Skills、RAG、MCP 在首版模板详情中作为专业能力和依赖预览展示；真正持久化与运行时接线在后续阶段单独实现。
 
 **自建不可成为 Orchestrator**：当前 service 把 `isOrchestrator` 写死为 `false`（`agent-service.ts:44`）。Orchestrator 只能通过 seed 数据预置（`src/db/seed.ts`）。UI 没有创建 Orchestrator 的入口。**TODO**：未来如要支持「自建 Orchestrator」，需要：
 1. CreateAgentDialog 加 `isOrchestrator` toggle
@@ -140,6 +142,40 @@ UI 当前允许勾选产物、附件和 workspace 相关常用工具。`plan_tas
 
 ---
 
+## Agent Studio / 模板市场
+
+源：`src/app/agents/new/page.tsx`、`src/components/agent-studio.tsx`、`src/shared/agent-templates.ts`
+
+`/agents/new` 是新建 Agent 的完整页面，首屏是模板市场，而不是「左侧模板列表 + 右侧详情」的配置页。市场页采用「左侧分类导航栏（带每类计数）+ 右侧主区」布局，吃掉超宽屏横向留白：主区顶部是 Hero 渐变横幅（标题 + 搜索 + 统计条：模板数 / 领域数 / 多模型适配），下方在「全部 + 无搜索」时按「精选推荐（spotlight 大卡 + 普通卡）+ 按分类分区网格」策展展示；有搜索或选中分类时退化为单一匹配网格。点击任意模板卡片后，进入统一的配置界面：左侧分区表单，右侧 sticky 实时预览卡。配置界面不保留模板列表侧栏。
+
+首屏提供两个入口：
+
+| 入口 | 行为 |
+|---|---|
+| 模板市场 | 分类栏 + Hero + 策展网格；卡片展示分类、风险等级、推荐模型和能力 mini-badge（Skills / RAG / MCP / 工具数量），featured 模板带「推荐 / 热门 / 新」策展徽章，hover 浮出适用场景；进入配置界面后右侧预览卡展示场景、Skills、RAG、MCP 与风险说明 |
+| 从零创建 | 左侧分类栏顶部的主按钮（移动端为分类条首位）；进入同一套配置界面（空白草稿），System Prompt 区提供「用对话生成草稿」内嵌 wizard 助手，生成后回填同一张表单 |
+
+模板字段除基础信息外，还含 `featured`（是否进精选）和 `badge`（`recommended` / `hot` / `new` 策展徽章）。首版内置模板来自 `AGENT_TEMPLATES` 静态配置，覆盖研发、审查、产品、数据、知识库、运维、写作等领域（全栈实现、代码审查、API 集成、测试、前端、安全审计、产品方案、需求分析、数据分析、SQL、知识库客服、运维排障、技术文档、翻译本地化等角色）。每个模板包含：
+
+- `name` / `avatar` / `description` / `category` / `tags`
+- `scenarios` / `capabilities`
+- `recommendedProvider` / `recommendedModelId`
+- `toolNames` / `supportsVision`
+- `skillHighlights` / `knowledgeNeeds` / `mcpNeeds`
+- `riskLevel` / `riskSummary`
+- `systemPrompt`
+
+配置界面（模板来源与从零创建共用）会维护一份草稿，用户可在保存前修改：
+
+- 名称、描述、能力标签
+- Adapter（custom / claude-code / codex）/ Provider / Model ID / 视觉开关
+- Base URL / API Key（per-agent override，校验对齐 CreateAgentDialog：codex 须 Responses 兼容、openai-compatible 须填 key/baseUrl）
+- AgentHub toolNames 和工具预设（SDK adapter 走内置工具集，隐藏勾选）。`install_skill` 是 **opt-in 额外能力**（出站安装 Skill，默认不在任何预设；custom 在工具清单里勾、SDK adapter 在「额外能力」开关里勾，跨 adapter 都通过 `toolNames` 保留，见 spec 07/16 + CLAUDE.md §5.5）
+- Skills（Phase 2）：多选可复用方法论模块（`agents.skill_ids`），对所有 adapter 生效，运行时注入 system prompt（Spec 13）。Skill 不授予工具权限，勾选后若缺少建议工具会给依赖提示。**创建（Agent Studio）与编辑（CreateAgentDialog）入口同步提供 Skill 选择**。
+- System Prompt
+
+模板来源时，右侧预览卡额外展示 Skills / RAG / MCP 依赖预览和风险说明（首版仅预览，不随模板保存）。保存统一走 `saveForm` → `POST /api/agents`，保存出来的是普通自建 Agent。由于首版不改 `agents` 表，模板来源和版本不会落库；后续模板持久化阶段再引入 `templateId` / `templateSnapshot`。
+
 ## 创建 / 编辑流程
 
 源：`create-agent-dialog.tsx` / `agent-create-wizard.tsx`（UI）+ `agent-draft-service.ts` / `agent-service.ts`（service）+ `app/api/agents/`（API）
@@ -150,26 +186,24 @@ UI 当前允许勾选产物、附件和 workspace 相关常用工具。`plan_tas
 [用户点 + 新建 Agent]
        │
        ▼
-CreateAgentDialog (open, agent=undefined)
+router.push('/agents/new')
        │
        ▼
-第一步：选择创建方式
-       ├─ 对话创建 → AgentCreateWizard
-       │             │ 输入意图 / 可选偏好
-       │             ▼
-       │       POST /api/agents/draft
-       │             │
-       │             ▼
-       │       createAgentConfigDraft: 生成 AgentConfigDraft（不落库）
-       │             │
-       │             ▼
-       │       Review：身份 / 模型 / 工具权限 / 假设 / System Prompt
-       │             ├─ 创建 → POST /api/agents
-       │             └─ 编辑详细配置 → 预填详细表单
+AgentStudio
+       ├─ 模板市场 → 选择模板 → createAgentDraftFromTemplate（静态蓝图，不落库）
+       │                         │
+       │                         ▼
+       │                  配置界面（左表单 + 右 sticky 预览）
+       │                  编辑：身份 / adapter / 模型 / Base URL / Key / 工具 / System Prompt
+       │                         │
+       │                         ▼
+       │                  saveForm → POST /api/agents
        │
-       └─ 详细配置 → 直接显示原表单
+       └─ 从零创建 → 同一套配置界面（空白草稿）
+                     │
+                     ├─（可选）「用对话生成草稿」内嵌 wizard → 回填表单
+                     └─ saveForm → POST /api/agents
        │
-       │ 填表 → submit
        ▼
 POST /api/agents { name, description, ..., modelProvider, modelId, apiKey?, apiBaseUrl? }
        │

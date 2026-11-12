@@ -251,6 +251,8 @@ function buildCodexMcpEnv(
     AGENTHUB_AGENT_ID: input.agentId,
     AGENTHUB_RUN_ID: input.runId,
     ...(allowedTools ? { AGENTHUB_ALLOWED_TOOLS: allowedTools } : {}),
+    // opt-in 额外能力：仅当该 agent 勾选 install_skill 时暴露给 Codex MCP bridge。
+    ...(input.toolNames.includes('install_skill') ? { AGENTHUB_ENABLE_INSTALL_SKILL: '1' } : {}),
   }
 }
 

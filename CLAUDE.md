@@ -183,6 +183,20 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - 桌面版（Electron，详见 Spec 12）也用这套机制；只是 DB 文件位置改为 `app.getPath('userData')`
 - 缺失 key 时，由 adapter 在 `buildClient()` / SDK 内抛错（不要在启动时拒绝服务，因为用户可能只用其中某些 provider）
 
+### 5.5 外部 Skill 安装信任模型（`install_skill`）
+
+`install_skill` 工具让**服务端按 LLM 选定的 URL 发起出站请求**拉取 GitHub 上的 `SKILL.md` 安装为 Skill。这是项目里唯一的 LLM 驱动出站网络面，存在 SSRF 风险（模型可能被提示注入诱导访问内网 / 云元数据 / 本机服务）。**审批门只能防「装坏内容」，防不住请求本身**，故 SSRF 必须在 fetch 层拦死。约束（完整设计见 `specs/16-skill-install.md`，单一数据源 `src/server/skill-fetch.ts`）：
+
+- **opt-in 两道**：① 工具默认不在任何工具预设，用户须在该 agent 上显式勾选（作为 opt-in 额外能力，SDK adapter 也通过 `toolNames` 保留）；② 每次安装都过审批门（复用 `fs_write` 的 pending 机制），用户看到来源 URL + 解析出的 name/description/正文后才落库 + 绑定。
+- **fetch 层 SSRF 防御**（单一数据源 `skill-fetch.ts`，新增/放宽须在 PR 说明，等同命令黑名单的契约地位）：仅 `https` + **GitHub 主机白名单**（`raw.githubusercontent.com` / `github.com` / `gist*` / `api.github.com`）+ **DNS 解析后校验 IP**（拦回环 / 链路本地 / 私有 / 元数据 169.254.169.254 / CGNAT / IPv6 映射）+ **逐跳重定向重校验** + ≤256KB + ≤10s + content-type 白名单 + GET 无凭据、**不透传 AgentHub 内部 token**。
+- **不扩权**（铁律）：解析只取 `name/description/instruction`，丢弃 frontmatter 的 `allowed-tools` 等；安装的 Skill 仅注入文本，永不改变 agent 的工具权限。
+- **存储**：Skill 统一存 DB（`skills` 表，`source='imported'` + `source_uri`），**不**落 `.skills` 文件夹（与 Claude Code 差异）；claude-code 运行时由 Skill 渐进披露逻辑物化临时 `SKILL.md`（见 spec 13/05）。
+- 失败 / 拒绝 / run 中止均隔离，不崩 run。
+
+**Skills 市场安装 vs LLM 会话安装（Phase 2E）**：Skills 市场页（`src/app/skills`）的「安装」按钮从**内置精选目录**（`src/shared/skill-catalog.ts`）拉 GitHub `SKILL.md`，走 `POST /api/skills/install-from-catalog`。它与 `install_skill` 的关键区别：出站请求由**用户点击**发起、URL 来自代码内置的可信 manifest（非 LLM 选定），所以**用户点击即授权、不走 LLM 审批门**。但**两者 fetch 层防御完全相同**——市场安装同样强制过 `skill-fetch.ts` 的主机白名单 + IP 校验（防精选目录被篡改指向内网），解析同样**只取 name/description/instruction、丢 allowed-tools、不扩权**。**公共池**：市场/库可把任一 Skill 标为「公共」（`skills.is_global_default`），公共 Skill 自动挂给所有 Agent（运行时有效 Skill = 公共池 ∪ `agent.skill_ids`），仍走渐进披露、仍不扩权。
+
+**SkillsMP 在线注册表（Phase 2E+）**：市场页「在线市场」tab 通过服务端代理 `GET /api/skills/registry`（`src/server/skill-registry.ts`）查 SkillsMP（`https://skillsmp.com/api/v1/skills/search`，聚合公开 GitHub SKILL.md 的社区市场）。信任模型：SkillsMP 的**搜索 JSON 是代码内置的可信第一方端点**（直接 server-side 调用、zod 校验返回体），但其返回的 **`githubUrl` 是不可信数据**——安装时仍复用 `installCatalogSkill` 强制过 `skill-fetch` 白名单，故注册表被篡改也 SSRF 不了本机（防御纵深）。安装语义同市场安装（用户点击即授权、不走审批门、不扩权）。
+
 ---
 
 ## 6. AI 协作规则（核心）
@@ -299,6 +313,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `13-conversation-context.md` — 跨 run 对话历史序列化（MessagePart → OpenAI ChatMessage、pinned 注入、agent 视角）
 - `14-mobile-remote.md` — 移动端伴随 App（Capacitor / Tailscale / 远程审批）
 - `15-external-mcp.md` — 外部 MCP 工具接入（设计提案,未实现;统一三 adapter 接入用户配置的 MCP server）
+- `16-skill-install.md` — 会话内安装 Skill `install_skill`（设计提案,未实现;LLM 选 URL 的出站 fetch SSRF 信任模型 + 审批门,Phase 2 完善 2D）
 
 ### `skills/`（可复用开发任务模板）
 

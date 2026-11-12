@@ -238,6 +238,33 @@ registerTool(
   async (args) => callAgentHubTool('report_task_result', args),
 )
 
+registerTool(
+  'load_skill',
+  {
+    description:
+      'Load the full instructions of a Skill already equipped on this agent. Only skillIds listed in the injected Skills catalog can be loaded; use this to fetch a long method that was not inlined.',
+    inputSchema: {
+      skillId: z.string(),
+    },
+  },
+  async (args) => callAgentHubTool('load_skill', args),
+)
+
+// install_skill 是 opt-in 额外能力：仅当该 agent 勾选（env 标志）时才暴露给 Codex。
+if (process.env.AGENTHUB_ENABLE_INSTALL_SKILL === '1') {
+  registerTool(
+    'install_skill',
+    {
+      description:
+        'Install a Skill into the current agent from a public GitHub link (requires user approval). GitHub only: SKILL.md raw/blob link, a skill directory tree link, or a repo link (lists SKILL.md candidates to pick from).',
+      inputSchema: {
+        url: z.string(),
+      },
+    },
+    async (args) => callAgentHubTool('install_skill', args),
+  )
+}
+
 async function callAgentHubTool(toolName, args) {
   const response = await fetch(`${baseUrl}/api/internal/agenthub-tools`, {
     method: 'POST',

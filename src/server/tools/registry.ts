@@ -5,6 +5,8 @@ import { deployWorkspaceTool } from './deploy-workspace'
 import { fsListTool } from './fs-list'
 import { fsReadTool } from './fs-read'
 import { fsWriteTool } from './fs-write'
+import { installSkillTool } from './install-skill'
+import { loadSkillTool } from './load-skill'
 import { planTasksTool } from './plan-tasks'
 import { readArtifactTool } from './read-artifact'
 import { readAttachmentTool } from './read-attachment'
@@ -73,6 +75,8 @@ function buildRegistry(): ToolRegistry {
   reg.register(fsWriteTool)
   reg.register(bashTool)
   reg.register(askUserTool)
+  reg.register(loadSkillTool)
+  reg.register(installSkillTool)
   return reg
 }
 

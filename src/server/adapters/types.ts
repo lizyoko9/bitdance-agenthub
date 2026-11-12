@@ -63,6 +63,14 @@ export interface AdapterInput {
     /** 该 agent 的 model 是否支持视觉（来自 agent.supportsVision） */
     supportsVision?: boolean
   }
+
+  /**
+   * 解析后的选用 Skill（仅 ClaudeCodeAdapter 使用）：adapter 把它们物化成
+   * workspace `.claude/skills/<dir>/SKILL.md`，交给 SDK 原生渐进披露（`options.skills` + `Skill` 工具）。
+   * custom / codex 的 Skill 走 systemPrompt 文本注入（catalog + 内联），不用此字段。
+   * 详见 specs/13 + design「2C per-adapter 策略」。
+   */
+  skills?: { name: string; description: string; instruction: string }[]
 }
 
 export interface AdapterAttachment {

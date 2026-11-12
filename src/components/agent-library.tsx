@@ -1,6 +1,7 @@
 'use client'
 
 import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
@@ -25,6 +26,7 @@ import { useAgentList, useAppStore } from '@/stores/app-store'
  * 顶部入口创建新的，自建项 hover 显示编辑 / 删除。
  */
 export function AgentLibrary() {
+  const router = useRouter()
   const agents = useAgentList()
   const removeAgent = useAppStore((s) => s.removeAgent)
 
@@ -36,8 +38,7 @@ export function AgentLibrary() {
   const deleteTarget = deleteTargetId ? agents.find((a) => a.id === deleteTargetId) : null
 
   const openCreate = () => {
-    setEditingAgent(null)
-    setFormOpen(true)
+    router.push('/agents/new')
   }
   const openEdit = (agent: AgentRow) => {
     setEditingAgent(agent)

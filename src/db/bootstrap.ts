@@ -19,6 +19,7 @@
 import type Database from 'better-sqlite3'
 
 import { BUILTIN_AGENTS, UI_DESIGNER_ARTIFACT_PROMPT_HINT } from './builtin-agents'
+import { BUILTIN_SKILLS } from './builtin-skills'
 
 const FRONTEND_DEPLOYMENT_PROMPT_HINT =
   'deploy_artifact / deploy_workspace 返回的 previewPath 是当前 AgentHub 实例下的相对路径，不要在文字总结里把它改写成公网域名或自造完整 URL；让用户点击部署卡片按钮，或原样引用 previewPath。'
@@ -165,6 +166,23 @@ const DDL: string[] = [
     deployment_public_base_url TEXT,
     updated_at INTEGER NOT NULL
   )`,
+
+  // ─── skills (可复用方法论模块) ──────────────────
+  `CREATE TABLE IF NOT EXISTS skills (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL,
+    instruction TEXT NOT NULL,
+    required_tool_names TEXT NOT NULL DEFAULT '[]',
+    source TEXT NOT NULL DEFAULT 'user',
+    source_uri TEXT,
+    is_global_default INTEGER NOT NULL DEFAULT 0,
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0
+  )`,
 ]
 
 /** 建表 / 建索引（幂等）。 */
@@ -177,6 +195,13 @@ function ensureSchema(sqlite: Database.Database): void {
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN deployment_publish_enabled INTEGER NOT NULL DEFAULT 0`)
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN deployment_publish_dir TEXT`)
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN deployment_public_base_url TEXT`)
+  safeAlter(sqlite, `ALTER TABLE agents ADD COLUMN skill_ids TEXT NOT NULL DEFAULT '[]'`)
+  safeAlter(sqlite, `ALTER TABLE skills ADD COLUMN source TEXT NOT NULL DEFAULT 'user'`)
+  safeAlter(sqlite, `ALTER TABLE skills ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`)
+  safeAlter(sqlite, `ALTER TABLE skills ADD COLUMN source_uri TEXT`)
+  safeAlter(sqlite, `ALTER TABLE skills ADD COLUMN is_global_default INTEGER NOT NULL DEFAULT 0`)
+  // 已存在的内置 skill（Phase 2 早期 seed，无 source 列）回填为 builtin，避免被默认 'user' 误标。
+  sqlite.exec(`UPDATE skills SET source = 'builtin' WHERE is_builtin = 1 AND source != 'builtin'`)
 }
 
 function safeAlter(sqlite: Database.Database, stmt: string): void {
@@ -231,6 +256,42 @@ function ensureBuiltinAgents(sqlite: Database.Database): void {
   })
 
   tx(BUILTIN_AGENTS)
+}
+
+/** 已有任意 builtin skill 就跳过；否则一次插入全部内置 Skill（幂等，同 ensureBuiltinAgents）。 */
+function ensureBuiltinSkills(sqlite: Database.Database): void {
+  const row = sqlite.prepare('SELECT 1 AS one FROM skills WHERE is_builtin = 1 LIMIT 1').get()
+  if (row) return
+
+  const insert = sqlite.prepare(`
+    INSERT INTO skills (
+      id, name, description, category, instruction, required_tool_names,
+      source, is_builtin, enabled, created_at, updated_at
+    ) VALUES (
+      @id, @name, @description, @category, @instruction, @required_tool_names,
+      @source, @is_builtin, @enabled, @created_at, @updated_at
+    )
+  `)
+
+  const tx = sqlite.transaction((skills: typeof BUILTIN_SKILLS) => {
+    for (const s of skills) {
+      insert.run({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        category: s.category,
+        instruction: s.instruction,
+        required_tool_names: JSON.stringify(s.requiredToolNames ?? []),
+        source: 'builtin',
+        is_builtin: s.isBuiltin ? 1 : 0,
+        enabled: s.enabled === false ? 0 : 1,
+        created_at: s.createdAt,
+        updated_at: s.updatedAt ?? s.createdAt,
+      })
+    }
+  })
+
+  tx(BUILTIN_SKILLS)
 }
 
 function upgradeBuiltinAgents(sqlite: Database.Database): void {
@@ -304,4 +365,5 @@ export function bootstrapDatabase(sqlite: Database.Database): void {
   ensureSchema(sqlite)
   ensureBuiltinAgents(sqlite)
   upgradeBuiltinAgents(sqlite)
+  ensureBuiltinSkills(sqlite)
 }
