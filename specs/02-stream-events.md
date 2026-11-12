@@ -61,6 +61,10 @@ type StreamEvent = BaseEvent & (
   | { type: 'fs_write.pending',  pendingWrite: PendingWrite }       // agent 调 fs_write，等用户审批
   | { type: 'fs_write.resolved', pendingId: string, applied: boolean } // approve / reject / run abort
 
+  // —— Skill 安装审批（详见 Spec 16） ——
+  | { type: 'skill_install.pending', pendingInstall: PendingSkillInstall }
+  | { type: 'skill_install.resolved', pendingId: string, installed: boolean, skillId?: string }
+
   // —— Agent bash 关键命令审批（详见 Spec 07） ——
   | { type: 'bash_command.pending',  pendingCommand: PendingBashCommand }
   | { type: 'bash_command.resolved', pendingId: string, approved: boolean }
@@ -282,7 +286,7 @@ data: {"type":"run.end",...}\n\n
 1. 浏览器自动重连时带 `Last-Event-ID` 头；客户端手动重建 EventSource（readyState=CLOSED 时退避重试）时改带 `?lastEventId=` query，头优先
 2. 服务端在同一同步块内「补发缺口 + 订阅新事件」，不漏不重
 3. 补不上（bootId 不同 = 进程重启、seq 早于缓冲最旧一条、id 非法）时推控制消息 `{"type":"resync"}`
-4. 客户端收到 `resync`：`resetForStreamResync()` 丢弃非当前会话的消息缓存与「运行中」run；重拉会话列表、当前会话消息快照与各类 pending；期间到达的事件排队
+4. 客户端收到 `resync`：`resetForStreamResync()` 丢弃非当前会话的消息缓存、Skill 安装审批缓存与「运行中」run；重拉会话列表、当前会话消息快照与各类 pending（文件写入、bash、提问、计划、Skill 安装）；期间到达的事件排队
 5. `GET /api/conversations/[id]/messages` 返回 `{ messages, eventId }`，`eventId` 为快照对应的事件游标；快照落地后，排队事件中 seq ≤ 游标的**消息模型事件**（`message.*` / `part.*` / `tool.*`）丢弃，其余按序应用（`src/lib/stream-resync.ts`）
 
 已知边界：`consumeStream` 先 `await persistEvent` 再 `publish`，两者之间隔一个微任务；若快照读恰好落在这个间隙，该事件会被重复应用一次（仅影响前端显示，DB 正确，刷新即恢复）。

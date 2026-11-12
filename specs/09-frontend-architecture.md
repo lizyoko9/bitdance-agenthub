@@ -112,7 +112,7 @@ interface AppState {
 
 **bash 审批卡片**：`PendingBashCommandsPanel` 渲染当前会话 `pendingBashCommandsByConv`。卡片显示发起 Agent、命令、cwd 和审批原因，用户点击执行 / 拒绝后调用 `POST /api/conversations/:id/pending-bash-commands/:commandId`，最终通过 `bash_command.resolved` 清理 UI。
 
-**Skill 安装审批卡片**：`PendingSkillInstallsPanel` 渲染当前会话 `pendingSkillInstallsByConv`（`install_skill` 会话安装）。卡片显示发起 Agent、来源 URL（重定向后的最终地址）、解析出的 name/description + 可展开正文预览，用户点击安装 / 拒绝后调用 `POST /api/conversations/:id/pending-skill-installs/:piId`，最终通过 `skill_install.resolved` 清理 UI。
+**Skill 安装审批卡片**：`PendingSkillInstallsPanel` 渲染当前会话 `pendingSkillInstallsByConv`（`install_skill` 会话安装）。卡片显示发起 Agent、来源 URL（重定向后的最终地址）、规范化后的 name/description + 可展开完整正文预览，用户点击安装 / 拒绝后调用 `POST /api/conversations/:id/pending-skill-installs/:piId`，最终通过 `skill_install.resolved` 清理 UI（中止也发送）；`run.end` 清理该 run 的残留审批，保留并行 run 的卡片。SSE `resync` 重拉当前会话的 Skill 审批列表并清除后台会话缓存，避免漏卡或残留卡。
 
 **部署候选卡片**：`DeployCandidatesPart` 渲染 `deploy_candidates` message part。卡片列出当前会话多个 `web_app` 候选，每项显示标题、版本、创建 Agent、时间与 artifact id。点击候选的部署按钮调用 `POST /api/conversations/:id/deploy`，成功后把返回的 system message upsert 到 store；不通过 SSE，也不启动 AgentRun。
 
@@ -243,6 +243,7 @@ app/page.tsx
 **独立全页路由**（不在 `app/page.tsx` 主工作台树内，各自 `src/app/<route>/page.tsx`）：
 - `/agents/new` → `<AgentStudio>`：Agent 模板市场 + 从零创建 + 配置屏。
 - `/skills` → `<SkillMarketplace>`：Skills 市场卡片网格（分类栏 + 搜索 + 排序 + 精选目录安装 + 公共开关 + 「被 N 个 Agent 使用」）。侧栏 Skills 库的「打开市场」跳到这里。含「在线市场」tab：经 `GET /api/skills/registry`（服务端代理 SkillsMP）搜 200 万+ 社区 skill——空/短搜索默认展示热门榜（种子词 + star 排序），卡片显示 star/作者；点卡片弹详情面板（`GET /api/skills/preview` 拉 SKILL.md 全文用 `<Markdown>` 渲染 + 安装 + GitHub），安装复用 skill-fetch。
+- 市场「已安装」判定使用包含 owner / repo / ref / 完整文件路径的 GitHub 资源键；raw / blob / tree 指向同一 `SKILL.md` 时等价，不同仓库或路径的同名 Skill 仍可独立安装。
 
 **组件原则**：
 - 组件文件名 `PascalCase.tsx`（CLAUDE.md §4.1），一个文件一个主组件 + 几个内联辅助

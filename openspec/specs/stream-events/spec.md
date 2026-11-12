@@ -31,6 +31,11 @@ The SSE endpoint SHALL tag every StreamEvent with a monotonic `id` (`<bootId>-<s
 - **WHEN** an adapter emits `part.delta`
 - **THEN** AgentRunner coalesces DB writes per 100ms window and flushes before any message snapshot read and when the stream ends.
 
+#### Scenario: A skill installation approval event is lost
+- **WHEN** the replay buffer cannot recover `skill_install.pending` or `skill_install.resolved`
+- **THEN** the client refetches the active conversation's pending skill installs during snapshot recovery
+- **AND** removes cached skill approvals for inactive conversations.
+
 ### Requirement: Message streaming SHALL be bracketed
 
 Each agent message MUST begin with `message.start` and finish with `message.end`, with part and tool events associated to the message id between those boundaries.
