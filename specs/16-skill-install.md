@@ -114,8 +114,11 @@
 仿 `fs_write` 的 `pendingWrites`：
 - `install_skill` fetch+解析后，注册一条「待安装 skill」到 `pendingSkillInstalls`（内存 store，按 conversationId 分桶），经 EventBus 推 SSE 给前端，**工具阻塞**等待用户决定（带 AbortSignal）。
 - 审批卡（新 UI 面板，仿 `PendingWritesPanel`）展示：**最终 fetch 的 URL**（经重定向后的真实地址）、解析出的 name / description / instruction 预览（可滚动）、目标 agent 名、「这是导入的外部内容，将注入该 Agent 上下文」提示。
-- **批准** → `createSkill({ source:'imported', sourceUri })` + 把 skillId 追加进 `agent.skillIds` → 工具返回 `{ installed:true, skillId, name }`。
+- 发布审批前，市场安装与会话安装共用名称 / 描述规范化（截断至 64 / 280 字）及完整正文校验；正文不截断，超限时在审批前明确报错。
+- **批准** → 先同步抢占待审批项，再用单个同步数据库事务创建 imported Skill 并追加到 agent 最新的 `skillIds` → 工具返回 `{ installed:true, skillId, name }`。Agent 不存在或绑定失败时整个事务回滚。
 - **拒绝 / 超时 / run 中止** → 不落库、不绑定，工具返回 `{ installed:false, reason }`。
+- 一个待审批项仅接受一个终态决定；重复批准或已被批准抢占后的拒绝 / 取消不再改变决定。不同审批并发绑定同一 Agent 时保留所有成功安装的 Skill。
+- 所有结束路径（含 run 中止）发布 `skill_install.resolved`，前端清除对应卡片；断线缺口通过 pending 列表恢复，`run.end` 也移除该 run 的残留审批。
 - 审批粒度：**每次安装一审**（不做「本会话信任此源免审」，因为每个链接内容不同）。
 
 ---
