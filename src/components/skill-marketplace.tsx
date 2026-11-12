@@ -49,6 +49,7 @@ import {
 import { cn } from '@/lib/utils'
 import { estimateTokens } from '@/shared/model-registry'
 import { SKILL_CATALOG, type CatalogSkill } from '@/shared/skill-catalog'
+import { githubSkillKey } from '@/shared/skill-source'
 
 const SOURCE_BADGE: Record<SkillRow['source'], { label: string; className: string }> = {
   builtin: { label: '内置', className: 'bg-muted text-muted-foreground' },
@@ -70,17 +71,6 @@ const ALL = '__all__'
 // 浏览热门：SkillsMP 搜索 API 强制要 q（空词 400），用一个宽泛种子词按 star 排出「热门榜」。
 // 语义贴合「Agent Skills」市场；用户输入 ≥2 字才切成真实搜索。
 const BROWSE_SEED = 'agent'
-
-/**
- * GitHub skill 归一化键：`<folder>/skill.md`（小写），用于判断精选/在线条目是否已安装。
- * 兼容 raw/blob（末段是 SKILL.md，取父目录）与 tree（末段是目录名，补 skill.md）三种形态。
- */
-function githubSkillKey(url: string): string {
-  const segs = url.split('?')[0].split('#')[0].split('/').filter(Boolean)
-  const last = (segs[segs.length - 1] ?? '').toLowerCase()
-  if (last === 'skill.md') return `${(segs[segs.length - 2] ?? '').toLowerCase()}/skill.md`
-  return `${last}/skill.md`
-}
 
 export function SkillMarketplace() {
   const router = useRouter()
