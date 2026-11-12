@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 
 
@@ -31,7 +32,7 @@ def directory_hashes(root):
 def checked_source(source):
     source = Path(source).resolve(strict=True)
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
-    dirty = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=source, text=True)
+    dirty = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=source, text=True)
     if revision != SOURCE_REVISION or dirty:
         raise ValueError('TraceTrial checkout must match the unmodified approved revision')
     return source
@@ -53,9 +54,9 @@ def docker_environment():
     return {name: os.environ[name] for name in allowed if name in os.environ}
 
 
-def docker(*arguments, environment=None, timeout=120, check=True):
+def docker(*arguments, environment=None, timeout=120, check=True, input_text=None):
     result = subprocess.run(['docker', *map(str, arguments)], env=environment or docker_environment(),
-                            capture_output=True, text=True, timeout=timeout)
+                            capture_output=True, text=True, timeout=timeout, input=input_text)
     if check and result.returncode:
         # Docker never receives credentials in argv, but avoid dumping its arbitrary stderr.
         raise RuntimeError(f'Docker {arguments[0]} failed (exit {result.returncode}); retained lifecycle logs describe the stage')
@@ -86,6 +87,7 @@ def prepare_build(source, output):
 
 def build_image(context, image, proxy):
     manifest = json.loads((Path(context) / 'build-manifest.json').read_text())
+    verify_build_files(context, manifest)
     command = ['docker', 'build', '--network=default', '--build-arg', f'HTTP_PROXY={proxy}',
         '--build-arg', f'HTTPS_PROXY={proxy}', '--build-arg', f'ACTOR_UID={os.getuid()}',
         '--build-arg', f'ACTOR_GID={os.getgid()}', '--tag', image, str(context)]
@@ -97,6 +99,27 @@ def build_image(context, image, proxy):
     inspection = json.loads(docker('image', 'inspect', image).stdout)[0]
     write_json(Path(context) / 'image.json', {'id': inspection['Id'], 'architecture': inspection['Architecture'],
         'os': inspection['Os'], 'runtime': manifest['runtime'], 'upstream': SOURCE_REVISION})
+
+
+def verify_build_files(context, manifest):
+    for name, digest in manifest['buildFiles'].items():
+        if hashlib.sha256((Path(context)/name).read_bytes()).hexdigest() != digest:
+            raise ValueError(f'Build context changed after preparation: {name}')
+
+
+def verify_runtime_sources(context):
+    with tarfile.open(Path(context)/'runtime.tar.gz', 'r:gz') as archive:
+        manifest = json.loads(archive.extractfile('runtime-source.json').read())
+    for name, digest in manifest['files'].items():
+        contents = (ROOT/name).read_bytes()
+        if name == 'package.json':
+            package = json.loads(contents)
+            package['type'] = 'module'
+            contents = (json.dumps(package, indent=2)+'\n').encode()
+        if hashlib.sha256(contents).hexdigest() != digest:
+            raise ValueError(f'Runtime source differs from committed archive: {name}')
+    if hashlib.sha256(Path(__file__).with_name('container_worker.py').read_bytes()).hexdigest() != hashlib.sha256((Path(context)/'container_worker.py').read_bytes()).hexdigest():
+        raise ValueError('Container worker differs from committed build context')
 
 
 def actor_request(task):
@@ -121,10 +144,10 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy):
         raise RuntimeError('The previously authorized OpenAI credential is unavailable')
     context = Path(context).resolve(strict=True)
     build = json.loads((context / 'build-manifest.json').read_text())
+    verify_build_files(context, build)
+    verify_runtime_sources(context)
     pinned_image = json.loads((context / 'image.json').read_text())
     current_revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    if build['runtime']['agenthubCommit'] != current_revision:
-        raise ValueError('Runtime archive must have been prepared from the current committed implementation')
     inspection = json.loads(docker('image', 'inspect', image).stdout)[0]
     if inspection['Id'] != pinned_image['id']:
         raise ValueError('Runtime image differs from the retained build image ID')
@@ -150,29 +173,30 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy):
         'maxTotalRequestBytes': 2097152, 'maxCompletionTokens': 8192, 'timeoutSeconds': 120,
         'sdkRetries': 0, 'redirects': 'error', 'group': 'single', 'networkMode': 'bridge',
         'networkLimitation': 'Task forbids network access; OS bridge matches the pinned official container runner',
-        'credentialStorage': 'recorder memory; actor child receives placeholder only'}
+        'credentialStorage': 'stdin to root recorder memory; unprivileged actor child receives placeholder only'}
     write_json(layout.artifacts_dir / 'protocol.json', {'taskId': TASK_ID, 'upstream': SOURCE_REVISION,
-        'agenthubCommit': current_revision, 'runtime': build, 'image': pinned_image,
+        'agenthubCommit': build['runtime']['agenthubCommit'], 'driverCommit': current_revision,
+        'runtime': build, 'image': pinned_image,
         'actor': settings, 'executionAdapter': 'project-local AgentHub; official scorer unchanged',
         'sourceTaskHashesBefore': hashes_before, 'priceEstimateUsd': 0.6, 'hardDollarCap': False})
     failure = None
     try:
         created = docker('create', '--network=bridge', '--cpus=2', '--memory=4g', '--pids-limit=512',
-            '--mount', f'type=bind,source={layout.workspace_dir},target=/workspace', image)
+            '--mount', f'type=bind,source={layout.workspace_dir},target=/workspace', inspection['Id'])
         container_id = created.stdout.strip()
         lifecycle.append({'stage': 'created', 'containerId': container_id, 'at': time.time()})
         docker('start', container_id)
         docker('cp', request_file, container_id + ':/state/request.json')
-        # Name-only --env keeps the credential out of both argv and retained request files.
+        # The privileged recorder receives the key over stdin; tools run as the unprivileged image user.
         environment = docker_environment()
-        environment['OPENAI_API_KEY'] = key
         marker = layout.artifacts_dir / 'actor-started.json'
         with marker.open('x') as stream:
             json.dump({'at': time.time(), 'containerId': container_id, 'automaticRerun': False}, stream)
         lifecycle.append({'stage': 'actor_started', 'at': time.time()})
-        result = docker('exec', '--env', 'OPENAI_API_KEY', container_id, 'python3',
+        result = docker('exec', '--interactive', '--user=0', '--env', f'ACTOR_UID={os.getuid()}',
+            '--env', f'ACTOR_GID={os.getgid()}', container_id, 'python3',
             '/opt/agenthub-eval/container_worker.py', '/state/request.json', '/state', actor_proxy,
-            environment=environment, timeout=155, check=False)
+            environment=environment, input_text=key, timeout=155, check=False)
         (native / 'worker.log').write_text((result.stdout + result.stderr).replace(key, '[REDACTED]'))
         lifecycle.append({'stage': 'actor_exited', 'exitCode': result.returncode, 'at': time.time()})
     except Exception as exception:

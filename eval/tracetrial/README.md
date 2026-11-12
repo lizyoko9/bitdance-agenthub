@@ -33,7 +33,40 @@ E8 给原生执行工具一个输出成功文本、实际非零退出的命令�
 
 judge 的官方 JSON 纠正追问消耗同一个十请求额度。达到任何请求、字节或时间限制后不得继续发送；若评分未完成，保留部分诊断并明确标记，不能补出完整分数。字节和 token 额度不是硬美元费用上限；缺失的 usage 或计费字段保持未知。
 
-CLI 请求沿用 Terminal-Bench 的 validated schema，字段为 `taskId`、原始 `instruction`、`cwd`、`group`、`modelId`、`timeoutMs`、`maxTurns`、`requestLimits`、`outputDir`，新增可选 `maxToolCalls`。首轮必须显式设置 `maxToolCalls=6` 和表中 actor 参数，不能沿用 Terminal-Bench 历史 smoke 的默认请求预算。`outputDir` 必须与任务 cwd 互不包含。完整宿主启动命令在 driver CLI 固定并完成无模型验证后补充。
+CLI 请求沿用 Terminal-Bench 的 validated schema，字段为 `taskId`、原始 `instruction`、`cwd`、`group`、`modelId`、`timeoutMs`、`maxTurns`、`requestLimits`、`outputDir`，新增可选 `maxToolCalls`。首轮必须显式设置 `maxToolCalls=6` 和表中 actor 参数，不能沿用 Terminal-Bench 历史 smoke 的默认请求预算。`outputDir` 必须与任务 cwd 互不包含。
+
+## 宿主运行
+
+先将官方仓库 checkout 到上面固定的 revision，安装至独立 Python 3.13 环境；该版本包无第三方 Python 依赖。driver 会验证 git 工作区、实际导入的两个 Python 包与源码哈希，拒绝额外未跟踪输入。项目必须先完成正常 pnpm 安装与代码提交；构建前不需要模型 key。
+
+```sh
+uv venv --python 3.13 /private/tmp/agenthub-tracetrial-venv
+uv pip install --python /private/tmp/agenthub-tracetrial-venv/bin/python /private/tmp/agenthub-tracetrial-source
+```
+
+以下命令在项目根目录运行。`TRACETRIAL_ARTIFACTS` 应位于 Docker VM 可挂载的用户目录；`OPENAI_API_KEY` 仅在调用 `run` 前由已授权的进程环境提供，不写入文件。代理地址是此次本机环境选择，可通过两个 proxy 参数显式替换。
+
+```sh
+export TRACETRIAL_ARTIFACTS="$PWD/.agenthub-data/tracetrial-eval/fresh-e8"
+export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
+/private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.run_trial prepare-build \
+  --source /private/tmp/agenthub-tracetrial-source --context "$TRACETRIAL_ARTIFACTS/build"
+/private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.run_trial build \
+  --source /private/tmp/agenthub-tracetrial-source --context "$TRACETRIAL_ARTIFACTS/build"
+/private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.run_trial run \
+  --source /private/tmp/agenthub-tracetrial-source --context "$TRACETRIAL_ARTIFACTS/build" \
+  --out "$TRACETRIAL_ARTIFACTS/trial"
+```
+
+`prepare-build` 打包白名单源码及四个官方 recorder 文件；`build` 安装 Linux Node 24.13.1、pnpm 10.29.3 和原 lockfile，运行无模型 import / SQLite / 非 root profile 探针。`run` 只启动一个 actor，保存证据并销毁容器，再对保留结果评分。actor、评分 sidecar 和 run 目录均拒绝复用；失败时不自动创建新 trial。运行包 commit 与宿主 driver commit 分别记录，所有实际容器源码与构建文件在执行前重新核对哈希，镜像使用不可变 ID。
+
+离线验证：
+
+```sh
+/private/tmp/agenthub-tracetrial-venv/bin/python -m unittest \
+  eval.tracetrial.test_container_worker eval.tracetrial.test_run_trial \
+  eval.tracetrial.test_trace_adapter eval.tracetrial.test_judge eval.tracetrial.test_score_trial
+```
 
 `createEvalToolPolicy()` 只在评测显式配置时安装。一个 profile 只创建一次闭包，所有 run 共用工具计数；它在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。第七次调用不发布可执行事件、不执行工具，保留可用 usage 后记录 `budget_exhausted`。普通应用和原 Terminal-Bench 入口省略此设置时不增加工具限制；原有 Workspace、审批和命令安全检查继续生效。
 
@@ -55,7 +88,7 @@ AgentHub Bash 当前可能同时给出非零 `exitCode` 与 `ok=true` / `isError
 - actor 与 judge 各自的请求记录、可用 usage、实际限制和终止原因。
 - 官方规则输出、两层原始及 effective 分数、attribution，以及独立的接入或 judge 失败。
 
-TraceTrial manifest 明确写入 `benchmark=tracetrial` 与固定 `sourceRevision`；不使用 Harbor 判分表述。已知凭据在记录时脱敏，actor/judge key 不写入请求 JSON 或 model TOML。host-side 可信规则 verifier 使用不含两类 key 的最小环境。key 通过进程环境使用，并不等于与该进程派生的工具子进程实现了秘密隔离。
+TraceTrial manifest 明确写入 `benchmark=tracetrial` 与固定 `sourceRevision`；不使用 Harbor 判分表述。actor/judge key 不写入请求 JSON、model TOML、命令参数或构建层。actor key 经 Docker stdin 管道交给 root recorder；实际 Node 与工具以非 root UID/GID 运行，环境中只有 loopback recorder 的 placeholder key。host-side 可信规则 verifier 使用不含两类 key 的最小环境；judge key 只在父进程内存与短期 HTTP worker 的 stdin 管道中传递。
 
 ## 网络与结论边界
 

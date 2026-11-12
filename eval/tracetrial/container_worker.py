@@ -65,7 +65,9 @@ def run_worker(request_path, state_dir, proxy):
     from tracetrial_bench.provider_request_recorder import ProviderRequestRecorderProxy
 
     state = Path(state_dir)
-    key = os.environ.pop('OPENAI_API_KEY', '').strip()
+    if os.geteuid() != 0:
+        raise RuntimeError('Recorder supervisor requires root; actor child is explicitly unprivileged')
+    key = sys.stdin.read(8192).strip()
     if not key:
         raise RuntimeError('approved OpenAI credential is missing')
     state.mkdir(parents=True, exist_ok=True)
@@ -87,7 +89,8 @@ def run_worker(request_path, state_dir, proxy):
         with (state / 'cli.log').open('wb') as log:
             child = subprocess.Popen(['node', '--import', 'tsx', 'eval/tracetrial/run-agenthub.ts',
                 '--request', str(request_path)], cwd='/installed-agent/agenthub', env=environment,
-                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+                user=int(os.environ['ACTOR_UID']), group=int(os.environ['ACTOR_GID']), extra_groups=[])
             try:
                 code = child.wait(timeout=max(0.01, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from tracetrial_bench.task_resolver import resolve_task
 
-from .run_trial import actor_request, checked_source, directory_hashes, docker_environment, TASK_ID
+from .run_trial import actor_request, checked_source, directory_hashes, docker_environment, verify_build_files, TASK_ID
 
 
 class DriverContractTests(unittest.TestCase):
@@ -41,6 +41,16 @@ class DriverContractTests(unittest.TestCase):
             self.assertEqual(directory_hashes(root), before)
             (root/'input').write_text('changed')
             self.assertNotEqual(directory_hashes(root), before)
+
+    def test_changed_build_input_is_rejected_before_docker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root/'runtime.tar.gz').write_bytes(b'original')
+            manifest = {'buildFiles': directory_hashes(root)}
+            verify_build_files(root, manifest)
+            (root/'runtime.tar.gz').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'Build context changed'):
+                verify_build_files(root, manifest)
 
 
 if __name__ == '__main__':
