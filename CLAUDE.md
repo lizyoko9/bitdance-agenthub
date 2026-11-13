@@ -289,7 +289,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `specs/terminal-bench-evaluation/spec.md` — 容器内公开任务评测、请求限额、运行记录与官方 verifier 边界
 - `specs/tracetrial-evaluation/spec.md` — 固定机制题的真实 AgentHub 执行、原生证据转换、独立 actor/judge 预算与官方双层评分
 - `specs/orchestrator/spec.md` — Orchestrator 逐完成调度、取消排空与重叠写冲突
-- `specs/tools/spec.md` — 工具系统与审批；已取得结果的执行错误与 Bash 状态传播
+- `specs/tools/spec.md` — 工具系统与审批；已取得结果的执行错误、Bash 状态传播与显式失败原因
 - `specs/persistence/spec.md` — SQLite/Drizzle 持久化
 - `specs/frontend/spec.md` — 前端状态与渲染
 - `specs/agent-builder/spec.md` — Agent 创建/编辑

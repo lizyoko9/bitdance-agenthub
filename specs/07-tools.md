@@ -381,7 +381,11 @@ curl -s http://127.0.0.1:3000/health
 
 **工具 description 按平台变体**（详见 Spec 11 「工具描述按平台变体」节）：description 字段在模块加载时根据 `currentPlatform()` 拼接，POSIX 展示用户 login shell 回退策略、POSIX 命令示例与 POSIX 黑名单文案，Windows 展示 PowerShell 示例与 Windows 黑名单文案。这是 LLM 选择命令语法的关键提示。
 
-**返回**：`{ cwd, command, exitCode, output, truncated, timedOut, aborted, signal, status, isError }`。`status` 为 `completed` 或 `failed`；非零或未知退出码、信号终止、超时或中止均为失败。完整结果放在 `{ ok: true, value, isError }` 中，`ok` 表示成功取得结果；wrapper、value 和命令证据中的错误分类必须一致。模型继续获得输出与退出码，命令失败不直接终止整个 AgentRun。已中止的调用不再创建进程；error/close 竞争只能产生一条命令证据与一个结果。进程无法启动时保留 `{ ok: false, error }`。
+**返回**：`{ cwd, command, exitCode, output, truncated, timedOut, aborted, signal, status, isError, failure? }`。`status` 为 `completed` 或 `failed`；非零或未知退出码、信号终止、超时或中止均为失败。完整结果放在 `{ ok: true, value, isError }` 中，`ok` 表示成功取得结果；wrapper、value 和命令证据中的错误分类必须一致。模型继续获得输出与退出码，命令失败不直接终止整个 AgentRun。已中止的调用不再创建进程；error/close 竞争只能产生一条命令证据与一个结果。进程无法启动时保留 `{ ok: false, error }`。
+
+失败时额外返回 `failure: { kind, message }`，成功时完全省略。`kind` 按 `timeout > aborted > signal > nonzero_exit > unknown_exit` 决定；`message` 自动陈述已有进程事实，并由模型结果、命令 evidence 的 `error` 和 supervisor 错误诊断共用。解释单独存放，不能追加到或改写 `output`。历史结果没有 failure 时，supervisor 保留原有诊断 fallback。
+
+`exitCode` 保留整数/null：0 是正常成功退出，非零码按本工具执行策略标为失败，具体业务原因仍由该程序定义；null 表示没有观察到退出码。超时、中止或信号可以使 exitCode=0 仍归为失败，输出文本不覆盖这些元数据。分类只描述命令执行，不自动宣告整个任务失败。
 
 ---
 
