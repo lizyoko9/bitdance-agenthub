@@ -1,3 +1,4 @@
+import io
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,64 @@ from .run_trial import actor_request, checked_source, directory_hashes, docker_e
 
 
 class DriverContractTests(unittest.TestCase):
+    def test_preflight_admits_only_three_pinned_tasks_without_a_key_or_docker(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:
+            for task_id in driver.APPROVED_TASK_IDS:
+                report = driver.preflight_task(Path('/private/tmp/agenthub-tracetrial-source'), task_id)
+                self.assertEqual(report['taskId'], task_id)
+                self.assertEqual(report['status'], 'supported')
+                self.assertIsNone(report['score'])
+                self.assertEqual(report['modelCalls'], 0)
+            docker.assert_not_called()
+
+    def test_unapproved_or_path_task_ids_return_unsupported_before_resolving_a_task(self):
+        with patch.object(driver, 'checked_source', return_value=Path('/fixture-source')), \
+             patch.object(driver, 'check_installed_benchmark'), \
+             patch('tracetrial_bench.task_resolver.resolve_task') as resolve:
+            for task_id in ('../private', '/private/task', 'a\\b', 'E7-build-stale-artifact-001', ''):
+                with self.subTest(task=task_id):
+                    report = driver.preflight_task(Path('/fixture-source'), task_id)
+                    self.assertEqual(report['status'], 'unsupported')
+                    self.assertIsNone(report['score'])
+                    self.assertTrue(report['reasons'])
+            resolve.assert_not_called()
+
+    def test_unsupported_run_has_no_output_or_container_side_effects_and_needs_no_key(self):
+        report = {'status': 'unsupported', 'score': None, 'reasons': ['fixture missing capability']}
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {}, clear=True), \
+             patch.object(driver, 'resolve_trial_task', return_value=(None, report, None)), \
+             patch.object(driver, 'docker') as docker, patch.object(driver, 'verify_build_files') as verify:
+            output = Path(folder)/'not-created'
+            result = driver.run_trial(source=Path('/unused'), output=output, context=Path('/unused'),
+                                      image='unused', actor_proxy='', judge_proxy='')
+            self.assertEqual(result, report)
+            self.assertFalse(output.exists())
+            docker.assert_not_called()
+            verify.assert_not_called()
+
+    def test_preflight_cli_needs_only_source_and_optional_task(self):
+        report = {'status': 'supported', 'score': None}
+        with patch.object(driver.sys, 'argv', ['run_trial.py', 'preflight', '--source', '/fixture-source']), \
+             patch.object(driver, 'preflight_task', return_value=report) as preflight, \
+             patch.object(driver.sys, 'stdout', new_callable=io.StringIO) as output:
+            driver.main()
+            preflight.assert_called_once_with(Path('/fixture-source'), TASK_ID)
+            self.assertEqual(json.loads(output.getvalue()), report)
+
+    def test_existing_or_symlink_run_directory_is_rejected_before_key_or_docker(self):
+        task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'))
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {}, clear=True), \
+             patch.object(driver, 'resolve_trial_task', return_value=(task, report, request)), \
+             patch.object(driver, 'docker') as docker:
+            link = Path(folder)/'dangling'
+            link.symlink_to(Path(folder)/'new-target')
+            for output in (Path(folder), link):
+                with self.subTest(output=output), self.assertRaises(FileExistsError):
+                    driver.run_trial(source=Path('/unused'), output=output, context=Path('/unused'),
+                                     image='unused', actor_proxy='', judge_proxy='')
+            self.assertFalse((Path(folder)/'new-target').exists())
+            docker.assert_not_called()
+
     def test_public_actor_request_contains_no_private_grading_inputs(self):
         source = checked_source(Path('/private/tmp/agenthub-tracetrial-source'))
         task = resolve_task(source / 'Task' / TASK_ID)

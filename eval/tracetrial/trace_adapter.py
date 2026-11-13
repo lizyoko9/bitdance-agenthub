@@ -134,6 +134,9 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                  native_run_id=identifier)
         elif kind == "tool.call":
             identifier = _identifier(event, "callId")
+            message = messages.get(_identifier(event, "messageId"))
+            if message is None or message["closed"]:
+                diagnostics.append(f"Native tool call has no open message at line {line}")
             if identifier is None or identifier in calls:
                 diagnostics.append(f"Missing or duplicate native tool call ID at line {line}")
             else:
@@ -141,6 +144,9 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
             emit("native_event", line, event)
         elif kind == "tool.result":
             identifier = _identifier(event, "callId")
+            message = messages.get(_identifier(event, "messageId"))
+            if message is None or message["closed"]:
+                diagnostics.append(f"Native tool result has no open message at line {line}")
             if identifier not in calls or identifier in completed_calls:
                 diagnostics.append(f"Unmatched or duplicate native tool result at line {line}")
                 emit("native_event", line, event)
@@ -165,7 +171,7 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
             if identifier is None or identifier in messages:
                 diagnostics.append(f"Missing or duplicate message.start at line {line}")
             else:
-                messages[identifier] = {"parts": {}, "lines": [line], "closed": False}
+                messages[identifier] = {"parts": {}, "part_states": {}, "lines": [line], "closed": False}
             emit("native_event", line, event)
         elif kind in {"part.start", "part.delta", "part.end"}:
             message = messages.get(_identifier(event, "messageId"))
@@ -173,15 +179,35 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                 diagnostics.append(f"Unmatched native message part at line {line}")
             else:
                 index = event.get("partIndex")
-                if not isinstance(index, int) or isinstance(index, bool):
+                valid_index = isinstance(index, int) and not isinstance(index, bool) and index >= 0
+                if not valid_index:
                     diagnostics.append(f"Invalid native part index at line {line}")
-                elif kind == "part.start" and isinstance(event.get("part"), dict) and event["part"].get("type") == "text":
+                else:
+                    state = message["part_states"].get(index)
+                    if kind == "part.start":
+                        part = event.get("part")
+                        if state is not None:
+                            diagnostics.append(f"Duplicate native part.start at line {line}")
+                        elif not isinstance(part, dict) or not isinstance(part.get("type"), str):
+                            diagnostics.append(f"Invalid native part.start at line {line}")
+                        else:
+                            message["part_states"][index] = {
+                                "streaming": part["type"] in {"text", "thinking", "code"}, "closed": False}
+                    elif state is None:
+                        diagnostics.append(f"Native part event has no matching start at line {line}")
+                    elif kind == "part.end":
+                        if state["closed"]:
+                            diagnostics.append(f"Duplicate native part.end at line {line}")
+                        state["closed"] = True
+                    elif state["closed"] and state["streaming"]:
+                        diagnostics.append(f"Native streaming part delta follows its end at line {line}")
+                if valid_index and kind == "part.start" and isinstance(event.get("part"), dict) and event["part"].get("type") == "text":
                     content = event["part"].get("content")
                     if index in message["parts"] or not isinstance(content, str):
                         diagnostics.append(f"Invalid or duplicate native text part.start at line {line}")
                     else:
                         message["parts"][index] = content
-                elif kind == "part.delta" and isinstance(event.get("delta"), dict) and event["delta"].get("type") == "text.append":
+                elif valid_index and kind == "part.delta" and isinstance(event.get("delta"), dict) and event["delta"].get("type") == "text.append":
                     if index not in message["parts"]:
                         diagnostics.append(f"Text delta without native text part.start at line {line}")
                     text = event["delta"].get("text")
@@ -197,6 +223,8 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                 diagnostics.append(f"Unmatched or duplicate native message.end at line {line}")
                 emit("native_event", line, event)
             else:
+                if any(part["streaming"] and not part["closed"] for part in message["part_states"].values()):
+                    diagnostics.append(f"Native message closes with an open streaming part at line {line}")
                 message["closed"] = True
                 content = "".join(text for _, text in sorted(message["parts"].items()))
                 if content:
@@ -208,6 +236,8 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                     emit("native_event", line, event)
         elif kind == "run.end":
             identifier = _identifier(event, "runId")
+            if event.get("status") == "complete" and event.get("error"):
+                diagnostics.append(f"Native complete run carries an error at line {line}")
             if identifier not in started_runs or identifier in ended_runs:
                 diagnostics.append(f"Unmatched or duplicate native run.end at line {line}")
             if identifier is not None:
@@ -234,6 +264,10 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
         diagnostics.append("Native result does not confirm allRunsSettled")
     if result.get("rootRunIds") != [root_id]:
         diagnostics.append("Native result rootRunIds do not match the event root")
+    if result.get("runStatus") == "complete" and (
+            result.get("terminationReason") != "completed" or result.get("budgetExhausted") is True
+            or result.get("error") or result.get("timedOut") is True):
+        diagnostics.append("Native result completion contradicts its termination evidence")
     result_runs = result.get("runs")
     if not isinstance(result_runs, list) or any(not isinstance(run, dict) for run in result_runs):
         diagnostics.append("Native result runs is not a list of run objects")
@@ -243,13 +277,18 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
             diagnostics.append("Native result run statuses do not match the events")
     if not writer.events or writer.events[0]["event_type"] != "run_started" or writer.events[-1]["event_type"] != "run_finished":
         diagnostics.append("Canonical actor lifecycle lacks native start/end boundaries")
-    writer.close()
-
     native_complete = len(root_ends) == 1 and root_ends[0].get("status") == "complete"
     exit_code = actor_metadata.get("exit_code")
     timed_out = actor_metadata.get("timed_out") is True or result.get("timedOut") is True
     finished = (not diagnostics and native_complete and result.get("runStatus") == "complete"
-                and exit_code == 0 and not timed_out)
+                and type(exit_code) is int and exit_code == 0 and not timed_out
+                and result.get("terminationReason") == "completed" and not result.get("error")
+                and result.get("budgetExhausted") is not True)
+    # A native end alone cannot establish completeness before all evidence is validated.
+    for event in writer.events:
+        if event["event_type"] == "run_finished":
+            event["trace_complete"] = finished
+    writer.close()
     end_ms = root_ends[-1].get("timestamp") if root_ends else None
     duration_ms = end_ms - start_ms if _timestamp(end_ms) and _timestamp(start_ms) else None
     summary = build_summary(

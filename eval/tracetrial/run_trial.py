@@ -13,6 +13,9 @@ import tarfile
 import time
 import uuid
 
+from .container_worker import APPROVED_TASK_IDS
+from .task_admission import actor_request, actor_settings, admit_task, unsupported
+
 
 SOURCE_REVISION = '98a381307184fa4212db3466b21b4c92a031940b'
 TASK_ID = 'E8-exit-code-masked-by-output-001'
@@ -22,7 +25,7 @@ RECORDER_FILES = ('tracetrial_bench/__init__.py', 'tracetrial_bench/provider_req
 ROOT = Path(__file__).resolve().parents[2]
 REFRESH_CONTROLLER_FILES = ('eval/tracetrial/run_trial.py', 'eval/tracetrial/Dockerfile.refresh',
     'eval/tracetrial/refresh-runtime.py', 'eval/tracetrial/container_worker.py',
-    'eval/terminalbench/prepare-runtime.py')
+    'eval/tracetrial/task_admission.py', 'eval/terminalbench/prepare-runtime.py')
 
 
 def write_json(path, payload):
@@ -277,23 +280,39 @@ def verify_runtime_sources(context):
             raise ValueError('Refresh controller source differs from committed build context')
 
 
-def actor_request(task):
-    return {'taskId': task.task_id, 'instruction': task.prompt, 'cwd': '/workspace', 'group': 'single',
-        'modelId': MODEL, 'timeoutMs': 120000, 'maxTurns': 32, 'maxToolCalls': 6,
-        'requestLimits': {'maxRequests': 16, 'maxRequestBytes': 262144,
-            'maxTotalRequestBytes': 2097152, 'maxCompletionTokens': 8192}, 'outputDir': '/state/trial'}
-
-
-def run_trial(*, source, output, context, image, actor_proxy, judge_proxy):
+def resolve_trial_task(source, task_id=TASK_ID):
     from tracetrial_bench.task_resolver import resolve_task
+
+    source = checked_source(source)
+    check_installed_benchmark(source)
+    if not isinstance(task_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', task_id):
+        return None, unsupported(task_id, ['invalid task id; task paths are not accepted']), None
+    if task_id not in APPROVED_TASK_IDS:
+        return None, unsupported(task_id, ['task is outside the approved explicit allowlist']), None
+    task = resolve_task(source / 'Task' / task_id)
+    report, request = admit_task(task)
+    report.update(sourceRevision=SOURCE_REVISION, sourceTaskHashes=directory_hashes(task.task_dir))
+    return task, report, request
+
+
+def preflight_task(source, task_id=TASK_ID):
+    return resolve_trial_task(source, task_id)[1]
+
+
+def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_id=TASK_ID):
     from tracetrial_bench.runner_policy import resolve_harness_invocation
     from tracetrial_bench.workspace import (prepare_run_dir, snapshot_workspace, persist_scoring_inputs,
         validate_workspace_for_host_verifier, write_workspace_diff)
     from .trace_adapter import normalize_agenthub_trace, emit_execution_evidence
     from .score_trial import score_retained_trial
 
-    source = checked_source(source)
-    check_installed_benchmark(source)
+    task, admission, request = resolve_trial_task(source, task_id)
+    if admission['status'] != 'supported':
+        return admission
+    output = Path(output)
+    if output.exists() or output.is_symlink():
+        raise FileExistsError('Trial output directory already exists; refusing to reuse it')
+    output = output.resolve()
     key = os.environ.get('OPENAI_API_KEY', '').strip()
     if not key:
         raise RuntimeError('The previously authorized OpenAI credential is unavailable')
@@ -306,34 +325,28 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy):
     inspection = json.loads(docker('image', 'inspect', image).stdout)[0]
     if inspection['Id'] != pinned_image['id']:
         raise ValueError('Runtime image differs from the retained build image ID')
-    task = resolve_task(source / 'Task' / TASK_ID)
-    if (task.max_turns, task.max_tool_calls, task.max_wall_time_sec) != (1, 6, 120):
-        raise ValueError('Task budgets differ from the approved fixed task')
     hashes_before = directory_hashes(task.task_dir)
-    layout = prepare_run_dir(task, Path(output).resolve())
+    if hashes_before != admission['sourceTaskHashes']:
+        raise ValueError('Task inputs changed after no-model admission')
+    layout = prepare_run_dir(task, output)
     snapshot_workspace(layout.workspace_dir, layout.baseline_dir)
     persist_scoring_inputs(task, layout)
-    request = actor_request(task)
     request_file = layout.agent_dir / 'request.json'
     write_json(request_file, request)
-    invocation = resolve_harness_invocation(harness='agenthub', requested_timeout=120,
+    invocation = resolve_harness_invocation(harness='agenthub', requested_timeout=request['timeoutMs'] // 1000,
         task_max_wall_time_sec=task.max_wall_time_sec, task_max_turns=task.max_turns,
         requested_extra_args={}, strict=True)
     lifecycle = []
     container_id = None
     native = layout.agent_dir / 'native'
     native.mkdir()
-    settings = {'model': MODEL, 'reasoningEffort': 'none', 'userTurns': 1, 'maxTurns': 32,
-        'maxToolCalls': 6, 'maxRequests': 16, 'maxRequestBytes': 262144,
-        'maxTotalRequestBytes': 2097152, 'maxCompletionTokens': 8192, 'timeoutSeconds': 120,
-        'sdkRetries': 0, 'redirects': 'error', 'group': 'single', 'networkMode': 'bridge',
-        'networkLimitation': 'Task forbids network access; OS bridge matches the pinned official container runner',
-        'credentialStorage': 'stdin to root recorder memory; unprivileged actor child receives placeholder only'}
-    write_json(layout.artifacts_dir / 'protocol.json', {'taskId': TASK_ID, 'upstream': SOURCE_REVISION,
+    settings = actor_settings(request, task, admission['declaredRuntime'])
+    write_json(layout.artifacts_dir / 'admission.json', admission)
+    write_json(layout.artifacts_dir / 'protocol.json', {'taskId': task.task_id, 'upstream': SOURCE_REVISION,
         'agenthubCommit': build['runtime']['agenthubCommit'], 'driverCommit': current_revision,
         'runtime': build, 'image': pinned_image,
         'actor': settings, 'executionAdapter': 'project-local AgentHub; official scorer unchanged',
-        'sourceTaskHashesBefore': hashes_before, 'priceEstimateUsd': 0.6, 'hardDollarCap': False})
+        'sourceTaskHashesBefore': hashes_before, 'priceEstimateUsd': None, 'hardDollarCap': False})
     failure = None
     try:
         created = docker('create', '--network=bridge', '--cpus=2', '--memory=4g', '--pids-limit=512',
@@ -351,7 +364,7 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy):
         result = docker('exec', '--interactive', '--user=0', '--env', f'ACTOR_UID={os.getuid()}',
             '--env', f'ACTOR_GID={os.getgid()}', container_id, 'python3',
             '/opt/agenthub-eval/container_worker.py', '/state/request.json', '/state', actor_proxy,
-            environment=environment, input_text=key, timeout=155, check=False)
+            environment=environment, input_text=key, timeout=request['timeoutMs'] / 1000 + 35, check=False)
         (native / 'worker.log').write_text((result.stdout + result.stderr).replace(key, '[REDACTED]'))
         lifecycle.append({'stage': 'actor_exited', 'exitCode': result.returncode, 'at': time.time()})
     except Exception as exception:
@@ -388,16 +401,17 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy):
         raise RuntimeError('Native trace admission failed; actor retained and not rerun')
     scores = score_retained_trial(task=task, layout=layout, trace_summary=trace,
         actor_settings=settings, judge_key=key, judge_proxy=judge_proxy, invocation_report=invocation.report)
-    write_json(layout.artifacts_dir / 'result.json', {'taskId': TASK_ID, 'actor': metadata,
+    write_json(layout.artifacts_dir / 'result.json', {'taskId': task.task_id, 'actor': metadata,
         'trace': trace, 'scoring': scores})
-    return {'runDir': str(layout.run_dir), 'actor': metadata, 'scoringStatus': scores['scoringStatus']}
+    return {'taskId': task.task_id, 'runDir': str(layout.run_dir), 'actor': metadata, 'scoringStatus': scores['scoringStatus']}
 
 
 def main():
-    parser = argparse.ArgumentParser(description='One fixed, bounded AgentHub TraceTrial E8 experiment')
-    parser.add_argument('action', choices=['prepare-build', 'build', 'run'])
+    parser = argparse.ArgumentParser(description='One bounded trial from the approved AgentHub TraceTrial task allowlist')
+    parser.add_argument('action', choices=['preflight', 'prepare-build', 'build', 'run'])
     parser.add_argument('--source', type=Path, required=True)
-    parser.add_argument('--context', type=Path, required=True)
+    parser.add_argument('--context', type=Path)
+    parser.add_argument('--task', default=TASK_ID)
     parser.add_argument('--image', default='agenthub/tracetrial:e8-local')
     parser.add_argument('--reuse-image', help='prepare-build only: exact locally available baseline RepoDigest')
     parser.add_argument('--out', type=Path)
@@ -406,7 +420,11 @@ def main():
     args = parser.parse_args()
     if args.reuse_image and args.action != 'prepare-build':
         parser.error('--reuse-image is only accepted by prepare-build')
-    if args.action == 'prepare-build':
+    if args.action != 'preflight' and args.context is None:
+        parser.error('--context is required for build and run actions')
+    if args.action == 'preflight':
+        result = preflight_task(args.source, args.task)
+    elif args.action == 'prepare-build':
         result = {'context': str(prepare_build(args.source, args.context, reuse_image=args.reuse_image))}
     elif args.action == 'build':
         checked_source(args.source)
@@ -416,7 +434,7 @@ def main():
         if args.out is None:
             parser.error('--out is required for run')
         result = run_trial(source=args.source, output=args.out, context=args.context, image=args.image,
-            actor_proxy=args.actor_proxy, judge_proxy=args.judge_proxy)
+            actor_proxy=args.actor_proxy, judge_proxy=args.judge_proxy, task_id=args.task)
     print(json.dumps(result, indent=2))
 
 
