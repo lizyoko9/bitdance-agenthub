@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import uuid
 
 
 SOURCE_REVISION = '98a381307184fa4212db3466b21b4c92a031940b'
@@ -152,15 +153,12 @@ def prepare_build(source, output, reuse_image=None):
 def build_image(context, image, proxy):
     manifest = json.loads((Path(context) / 'build-manifest.json').read_text())
     verify_build_files(context, manifest)
-    reuse_arguments = []
     if manifest.get('baseImage'):
-        base = manifest['baseImage']
-        if inspect_reuse_image(base['reference'])['Id'] != base['id']:
-            raise ValueError('Local reuse image differs from the prepared immutable image ID')
-        reuse_arguments = ['--pull=false', '--build-arg', 'BASE_IMAGE=' + base['reference']]
+        write_json(Path(context) / 'image.json', assemble_reused_image(Path(context), image, manifest))
+        return
     command = ['docker', 'build', '--network=default', '--build-arg', f'HTTP_PROXY={proxy}',
         '--build-arg', f'HTTPS_PROXY={proxy}', '--build-arg', f'ACTOR_UID={os.getuid()}',
-        '--build-arg', f'ACTOR_GID={os.getgid()}', *reuse_arguments, '--tag', image, str(context)]
+        '--build-arg', f'ACTOR_GID={os.getgid()}', '--tag', image, str(context)]
     with (Path(context) / 'build.log').open('w') as stream:
         result = subprocess.run(command, env=docker_environment(), stdout=stream,
             stderr=subprocess.STDOUT, timeout=2400)
@@ -170,6 +168,88 @@ def build_image(context, image, proxy):
     write_json(Path(context) / 'image.json', {'id': inspection['Id'], 'architecture': inspection['Architecture'],
         'os': inspection['Os'], 'runtime': manifest['runtime'], 'upstream': SOURCE_REVISION,
         **({'baseImage': manifest['baseImage']} if manifest.get('baseImage') else {})})
+
+
+def assemble_reused_image(context, image, manifest):
+    base = manifest['baseImage']
+    required = {'Dockerfile', 'runtime.tar.gz', 'baseline-runtime-source.json', 'refresh-runtime.py',
+                'container_worker.py', *('recorder/' + name for name in RECORDER_FILES)}
+    if not required <= manifest['buildFiles'].keys():
+        raise ValueError('Local runtime assembly is missing verified build inputs')
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', base.get('id', '')):
+        raise ValueError('Reuse requires the prepared immutable local image ID')
+    uid, gid = manifest['actorUid'], manifest['actorGid']
+    if type(uid) is not int or uid <= 0 or type(gid) is not int or gid < 0:
+        raise ValueError('Local runtime assembly requires a non-root actor UID and valid GID')
+    for name, digest in manifest.get('controllerFiles', {}).items():
+        if name not in REFRESH_CONTROLLER_FILES or hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != digest:
+            raise ValueError('Refresh controller source differs from committed build context')
+    steps = []
+    container = 'agenthub-refresh-' + uuid.uuid4().hex
+    create_attempted = False
+    assembled = False
+
+    def step(*arguments, check=True):
+        entry = {'argv': ['docker', *map(str, arguments)], 'exitCode': None}
+        steps.append(entry)
+        try:
+            result = docker(*arguments, check=False)
+            entry['exitCode'] = result.returncode
+        except Exception as error:
+            entry['errorType'] = type(error).__name__
+            raise
+        if check and result.returncode:
+            raise RuntimeError(f'Local runtime assembly failed at {arguments[0]} (exit {result.returncode})')
+        return result
+
+    try:
+        inspection = json.loads(step('image', 'inspect', base['id']).stdout)[0]
+        if inspection['Id'] != base['id'] or inspection.get('Os') != 'linux':
+            raise ValueError('Local reuse image differs from the prepared immutable Linux image ID')
+        if inspection.get('Architecture') != base['architecture']:
+            raise ValueError('Local reuse image architecture differs from the prepared image')
+        create_attempted = True
+        step('create', '--pull=never', '--network=none', '--name', container, base['id'], 'sleep', 'infinity')
+        for source, target in (
+            ('runtime.tar.gz', '/tmp/agenthub-runtime.tar.gz'),
+            ('baseline-runtime-source.json', '/opt/agenthub-eval/baseline-runtime-source.json'),
+            ('refresh-runtime.py', '/opt/agenthub-eval/refresh-runtime.py'),
+            ('container_worker.py', '/opt/agenthub-eval/container_worker.py'),
+        ):
+            step('cp', context/source, container + ':' + target)
+        step('cp', str(context/'recorder') + '/.', container + ':/opt/recorder')
+        step('start', container)
+        step('exec', '--user=0', container, 'python3', '/opt/agenthub-eval/refresh-runtime.py',
+             '/tmp/agenthub-runtime.tar.gz', '/installed-agent/agenthub', '/opt/agenthub-eval/baseline-runtime-source.json')
+        step('exec', '--user=0', container, 'rm', '/tmp/agenthub-runtime.tar.gz')
+        step('exec', '--user=0', container, 'sh', '-c',
+             f'chmod a+rx /installed-agent && mkdir -p /state/home && chown {uid}:{gid} /state /state/home')
+        probe = '''const fs=await import("node:fs"); if(process.getuid()===0||Object.entries(process.env).some(([k,v])=>v&&/(?:API_KEY|AUTH_TOKEN|SECRET|PASSWORD)$/.test(k))) throw Error("Expected unprivileged no-key probe"); const {default:Database}=await import("better-sqlite3"); const db=new Database(":memory:"); db.prepare("select 1").get(); db.close(); const m=await import("./eval/tracetrial/run-agenthub.ts"); if(typeof m.runTraceTrial!=="function") throw Error("TraceTrial entry missing"); const d=fs.mkdtempSync("/state/probe-"); try { const {createIsolatedProfile}=await import("./eval/terminalbench/profile.ts"); const p=await createIsolatedProfile({outputDir:d,group:"single",modelId:"gpt-6-luna"},()=>{},{benchmark:"tracetrial"}); p.close(); } finally {fs.rmSync(d,{recursive:true,force:true});} console.log(JSON.stringify({uid:process.getuid(),node:process.version,arch:process.arch,sqlite:"ok",profile:"ok",modelCalls:0}));'''
+        report = json.loads(step('exec', '--user', f'{uid}:{gid}', '--workdir', '/installed-agent/agenthub', container,
+             'node', '--import', 'tsx', '--input-type=module', '-e', probe).stdout)
+        if report.get('uid') != uid or report.get('sqlite') != 'ok' or report.get('profile') != 'ok' or report.get('modelCalls') != 0:
+            raise ValueError('Non-root no-key runtime probes did not report complete success')
+        probes = {name: report[name] for name in ('uid', 'node', 'arch', 'sqlite', 'profile', 'modelCalls')}
+        step('commit', '--change', f'USER {uid}:{gid}', '--change', 'WORKDIR /installed-agent/agenthub',
+             '--change', 'CMD ["sleep", "infinity"]', container, image)
+        inspection = json.loads(step('image', 'inspect', image).stdout)[0]
+        if inspection.get('Config', {}).get('User') != f'{uid}:{gid}' or inspection.get('Os') != 'linux':
+            raise ValueError('Assembled runtime must retain the non-root Linux actor configuration')
+        assembled = True
+    finally:
+        try:
+            if create_attempted:
+                removed = step('rm', '--force', container, check=False)
+                if assembled and removed.returncode:
+                    raise RuntimeError('Local runtime assembly container cleanup failed')
+        finally:
+            write_json(context/'assembly-log.json', steps)
+    return {'id': inspection['Id'], 'architecture': inspection['Architecture'], 'os': inspection['Os'],
+        'runtime': manifest['runtime'], 'upstream': SOURCE_REVISION, 'baseImage': base,
+        'buildMethod': 'offline local container refresh and commit', 'network': 'none',
+        'dependenciesReinstalled': False, 'modelCalls': 0, 'probes': probes, 'assemblyLog': 'assembly-log.json',
+        'dockerfileSha256': manifest['buildFiles']['Dockerfile'],
+        'assemblyControllerSha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
 
 
 def verify_build_files(context, manifest):

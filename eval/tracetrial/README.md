@@ -64,7 +64,7 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 
 `prepare-build` 打包白名单源码及四个官方 recorder 文件；`build` 安装 Linux Node 24.13.1、pnpm 10.29.3 和原 lockfile，运行无模型 import / SQLite / 非 root profile 探针。`run` 只启动一个 actor，保存证据并销毁容器，再对保留结果评分。actor、评分 sidecar 和 run 目录均拒绝复用；失败时不自动创建新 trial。运行包 commit 与宿主 driver commit 分别记录，所有实际容器源码与构建文件在执行前重新核对哈希，镜像使用不可变 ID。
 
-当本地已有本入口构建的依赖镜像，`prepare-build` 可增加 `--reuse-image <repository@sha256:digest>`。该路径要求运行源码与 controller 已提交，核验本地固定镜像及原 runtime manifest，并验证 Node/pnpm、package/lockfile/workspace/SQLite 构建脚本完全一致。随后仅更新白名单源码，保留原 `node_modules`；所有刷新与无模型探针的 Docker RUN 使用 `--network=none`。依赖输入变化时拒绝刷新，改用正常 clean build。基线 image ID、依赖哈希与新的 runtime/image 来源均留档；默认不传此参数仍执行完整安装。
+当本地已有本入口构建的依赖镜像，`prepare-build` 可增加 `--reuse-image <repository@sha256:digest>`。该路径要求运行源码与 controller 已提交，核验本地固定镜像及原 runtime manifest，并验证 Node/pnpm、package/lockfile/workspace/SQLite 构建脚本完全一致。随后在仅使用本地固定 image ID、`network=none` 的临时容器中更新白名单源码并运行非 root 无凭据探针，保留原 `node_modules`，再本地 commit 镜像；不经 BuildKit 查询远端 metadata。等价 Dockerfile 仍留档，实际命令与清理结果写入 `assembly-log.json`。依赖输入变化时拒绝刷新，改用正常 clean build。基线 image ID、依赖哈希与新的 runtime/image 来源均留档；默认不传此参数仍执行完整安装。
 
 离线验证：
 
