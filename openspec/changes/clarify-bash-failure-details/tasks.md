@@ -12,4 +12,4 @@
 
 ## 3. Handoff
 
-- [ ] 3.1 Separately commit contract and implementation, merge locally, and show a concrete result example and verification scope.
+- [x] 3.1 Separately commit contract and implementation, merge locally, and show a concrete result example and verification scope.
