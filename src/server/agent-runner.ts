@@ -31,10 +31,8 @@ import {
 import { buildHistoryFor } from './conversation-context'
 import {
   clearFileWrites,
-  detectWaveConflicts,
   getFileWrites,
   type FileWriteConflict,
-  type RunFileWrites,
 } from './dispatch-file-writes'
 import {
   clearRunToolEvidence,
@@ -55,6 +53,8 @@ import {
   type ReplanConflictView,
   type ReplanTaskView,
 } from './dispatch-plan'
+import { runDispatchDag } from './dispatch-dag-scheduler'
+import { detectOverlapConflicts, type TaskExecutionWrites } from './dispatch-overlap-conflicts'
 import { evidenceGatesEnabled } from './eval-flags'
 import { eventBus } from './event-bus'
 import { newArtifactId, newRunId } from './ids'
@@ -234,12 +234,13 @@ export const AgentRunner = {
     const runId = newRunId()
     const controller = new AbortController()
 
+    const onParentAbort = () => controller.abort()
     // 级联：父 run abort 时子 run 也 abort
     if (args.parentSignal) {
       if (args.parentSignal.aborted) {
         controller.abort()
       } else {
-        args.parentSignal.addEventListener('abort', () => controller.abort(), { once: true })
+        args.parentSignal.addEventListener('abort', onParentAbort, { once: true })
       }
     }
 
@@ -247,6 +248,7 @@ export const AgentRunner = {
 
     const promise = executeRun(runId, controller.signal, args).finally(() => {
       activeRuns.delete(runId)
+      args.parentSignal?.removeEventListener('abort', onParentAbort)
     })
 
     promise.catch((err) => {
@@ -333,7 +335,8 @@ async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Pr
     return await finalizeOk(runId, args, result)
   } catch (err) {
     if (signal.aborted) {
-      return finalize(runId, args, 'aborted', emptyRunExecutionResult())
+      const conflictError = err instanceof Error && hasDispatchConflictDetails(err) ? err.message : undefined
+      return finalize(runId, args, 'aborted', emptyRunExecutionResult(), conflictError)
     }
     const msg = err instanceof Error ? err.message : String(err)
     return finalize(runId, args, 'failed', emptyRunExecutionResult(), msg)
@@ -735,92 +738,100 @@ interface DagContext {
   externalPlanItems?: readonly DispatchPlanItem[]
 }
 
+interface ChildDagContext extends DagContext {
+  taskStarted(taskId: string): void
+  taskFinished(taskId: string): void
+  trackRun(taskId: string, runId: string, promise: Promise<RunResult>): void
+  drainTask(taskId: string): Promise<void>
+  taskFailed(error: unknown): void
+}
+
 async function executeDag(
   plan: DispatchPlanItem[],
   ctx: DagContext,
 ): Promise<{ results: Map<string, DispatchTaskResult>; conflicts: FileWriteConflict[] }> {
-  const currentTaskIds = new Set(plan.map((t) => t.id))
-  const results = new Map<string, DispatchTaskResult>(
-    [...(ctx.seedResults ?? new Map<string, DispatchTaskResult>())].filter(
-      ([taskId]) => !currentTaskIds.has(taskId),
-    ),
-  )
-  const remaining = new Set(plan.map((t) => t.id))
-  const conflicts: FileWriteConflict[] = []
   const planContext = mergeExternalPlanItems(ctx.externalPlanItems ?? [], plan)
-
-  while (remaining.size > 0) {
-    if (ctx.signal.aborted) {
-      markRemainingTasksAborted(plan, remaining, results, ctx)
-      throw new Error('Orchestrator run aborted')
-    }
-
-    for (const task of plan) {
-      if (!remaining.has(task.id)) continue
-      const blockers = (task.dependsOn ?? []).flatMap((dep) => {
-        const result = results.get(dep)
-        return result && result.status !== 'complete' ? [{ taskId: dep, result }] : []
-      })
-      if (blockers.length === 0) continue
-
-      const result = skippedTaskResult(task, blockers)
-      results.set(task.id, result)
-      remaining.delete(task.id)
-      publishDispatchEnd(ctx, task.id, result)
-    }
-
-    if (remaining.size === 0) break
-
-    const ready = plan.filter(
-      (t) =>
-        remaining.has(t.id) &&
-        (t.dependsOn ?? []).every((d) => results.get(d)?.status === 'complete'),
-    )
-    if (ready.length === 0) {
-      throw new Error('Circular dependency or unresolved task in plan')
-    }
-
-    const wave = await Promise.all(ready.map((t) => runChildTask(t, results, planContext, ctx)))
-    for (let i = 0; i < ready.length; i++) {
-      results.set(ready[i].id, wave[i])
-      remaining.delete(ready[i].id)
-    }
-
-    // 同波次「代码冲突」检测：本波 ≥2 个子 run 经 fs_write 写了同一文件且内容不同
-    if (ready.length > 1) {
-      const runWrites: RunFileWrites[] = []
-      for (let i = 0; i < ready.length; i++) {
-        const childRunIds = getDispatchResultRunIds(wave[i])
-        if (childRunIds.length === 0) continue
-        runWrites.push({
-          taskId: ready[i].id,
-          agentId: ready[i].agentId,
-          runId: childRunIds[childRunIds.length - 1],
-          writes: mergeFileWrites(childRunIds),
-        })
+  const ownedRuns = new Map<string, Promise<RunResult>>()
+  const taskRuns = new Map<string, string[]>()
+  const intervals = new Map<string, { startedSequence: number; finishedSequence: number }>()
+  let sequence = 0
+  const executionContext: Omit<ChildDagContext, 'taskFailed'> = {
+    ...ctx,
+    taskStarted(taskId) {
+      intervals.set(taskId, { startedSequence: ++sequence, finishedSequence: 0 })
+    },
+    taskFinished(taskId) {
+      const interval = intervals.get(taskId)
+      if (interval) interval.finishedSequence = ++sequence
+    },
+    trackRun(taskId, runId, promise) {
+      ownedRuns.set(runId, promise)
+      const runs = taskRuns.get(taskId) ?? []
+      runs.push(runId)
+      taskRuns.set(taskId, runs)
+    },
+    async drainTask(taskId) {
+      await Promise.allSettled((taskRuns.get(taskId) ?? []).map((id) => ownedRuns.get(id)!))
+    },
+  }
+  let results: Map<string, DispatchTaskResult> | undefined
+  let conflicts: FileWriteConflict[] = []
+  let failure: unknown
+  let failed = false
+  try {
+    results = await runDispatchDag<DispatchPlanItem, DispatchTaskResult>({
+      tasks: plan,
+      signal: ctx.signal,
+      seedResults: ctx.seedResults,
+      runTask: (task, upstream, signal, taskFailed) => runChildTask(task, upstream, planContext, { ...executionContext, signal, taskFailed }),
+      skipped: skippedTaskResult,
+      aborted: (task) => abortedBeforeStartTaskResult(task, 'Dispatch stopped before task started'),
+      failed: (task, error) => ({
+        ...abortedBeforeStartTaskResult(task, 'Unexpected task rejection'),
+        runId: taskRuns.get(task.id)?.at(-1) ?? null,
+        runIds: taskRuns.get(task.id),
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      onResult: (task, result) => publishDispatchEnd(ctx, task.id, result),
+    })
+  } catch (error) {
+    failure = error
+    failed = true
+  } finally {
+    await Promise.allSettled([...ownedRuns.values()])
+    try {
+      const writes: TaskExecutionWrites[] = []
+      for (const task of plan) {
+        const interval = intervals.get(task.id)
+        const runIds = taskRuns.get(task.id) ?? []
+        if (!interval || !interval.finishedSequence || runIds.length === 0) continue
+        writes.push({ ...interval, taskId: task.id, agentId: task.agentId,
+          runId: runIds[runIds.length - 1], writes: mergeFileWrites(runIds) })
       }
-      conflicts.push(...detectWaveConflicts(runWrites))
+      conflicts = detectOverlapConflicts(planContext, writes)
+      if (failed && conflicts.length > 0) {
+        const error = failure instanceof Error ? failure : new Error(String(failure))
+        error.cause = { originalCause: error.cause, dispatchConflicts: conflicts }
+        error.message += `; Concurrent file conflicts before dispatch shutdown: ${conflicts.map((conflict) =>
+          `${conflict.path} [${conflict.contributors.map((writer) => writer.taskId).join(', ')}]`).join('; ')}`
+        failure = error
+      }
+    } finally {
+      for (const runId of ownedRuns.keys()) {
+        clearFileWrites(runId)
+        clearRunToolEvidence(runId)
+      }
     }
   }
-
-  // 释放本次 dispatch 各子 run 的写入记录（内存）
-  for (const [taskId, r] of results) {
-    if (!currentTaskIds.has(taskId)) continue
-    for (const childRunId of getDispatchResultRunIds(r)) {
-      clearFileWrites(childRunId)
-      clearRunToolEvidence(childRunId)
-    }
-  }
-
-  return {
-    results: new Map([...results].filter(([taskId]) => currentTaskIds.has(taskId))),
-    conflicts,
-  }
+  if (failed) throw failure
+  return { results: results!, conflicts }
 }
 
-function getDispatchResultRunIds(result: DispatchTaskResult): string[] {
-  if (result.runIds && result.runIds.length > 0) return result.runIds
-  return result.runId ? [result.runId] : []
+function hasDispatchConflictDetails(error: Error): boolean {
+  if (!error.cause || typeof error.cause !== 'object') return false
+  const details = error.cause as { dispatchConflicts?: unknown }
+  return Array.isArray(details.dispatchConflicts) && details.dispatchConflicts.length > 0
 }
 
 function mergeFileWrites(runIds: string[]): Map<string, string> {
@@ -837,7 +848,7 @@ async function runChildTask(
   task: DispatchPlanItem,
   upstream: Map<string, DispatchTaskResult>,
   plan: DispatchPlanItem[],
-  ctx: DagContext,
+  ctx: ChildDagContext,
 ): Promise<DispatchTaskResult> {
   const resolvedInputs = resolveTaskInputs(task, upstream, plan)
   const missingRequiredInputs = resolvedInputs.filter(
@@ -845,7 +856,6 @@ async function runChildTask(
   )
   if (missingRequiredInputs.length > 0) {
     const result = skippedMissingInputsTaskResult(task, missingRequiredInputs)
-    publishDispatchEnd(ctx, task.id, result)
     return result
   }
 
@@ -854,10 +864,10 @@ async function runChildTask(
     release = await subAgentRunSemaphore.acquire(ctx.signal)
   } catch {
     const result = abortedBeforeStartTaskResult(task, 'Aborted while waiting for sub-agent concurrency slot')
-    publishDispatchEnd(ctx, task.id, result)
     return result
   }
 
+  ctx.taskStarted(task.id)
   try {
     const basePrompt = await buildSubAgentPrompt(
       task,
@@ -877,7 +887,6 @@ async function runChildTask(
     for (let attempt = 1; attempt <= MAX_CHILD_TASK_ATTEMPTS; attempt++) {
       if (ctx.signal.aborted) {
         const result = abortedBeforeStartTaskResult(task, 'Aborted before sub-agent run started')
-        publishDispatchEnd(ctx, task.id, result)
         return mergeAttemptAggregate(result, aggregate)
       }
 
@@ -926,7 +935,6 @@ async function runChildTask(
       lastEvaluation = currentEvaluation
 
       if (currentEvaluation.result.status === 'complete') {
-        publishDispatchEnd(ctx, task.id, currentEvaluation.result)
         return mergeAttemptAggregate(currentEvaluation.result, aggregate)
       }
 
@@ -934,7 +942,6 @@ async function runChildTask(
         currentEvaluation.result.status === 'aborted' ||
         currentEvaluation.result.taskReport?.status === 'blocked'
       ) {
-        publishDispatchEnd(ctx, task.id, currentEvaluation.result)
         return mergeAttemptAggregate(currentEvaluation.result, aggregate)
       }
 
@@ -958,10 +965,14 @@ async function runChildTask(
           : `Task "${task.id}" did not satisfy completion gates after ${MAX_CHILD_TASK_ATTEMPTS} attempt(s). Last error: ${result.error ?? 'unknown error'}`,
       runIds: [...attemptRunIds],
     }
-    publishDispatchEnd(ctx, task.id, exhausted)
 
     return mergeAttemptAggregate(exhausted, aggregate)
+  } catch (error) {
+    ctx.taskFailed(error)
+    throw error
   } finally {
+    await ctx.drainTask(task.id)
+    ctx.taskFinished(task.id)
     release?.()
   }
 }
@@ -1025,7 +1036,7 @@ async function maybeCreateProjectArtifact(args: {
 async function runChildTaskAttempt(
   task: DispatchPlanItem,
   prompt: string,
-  ctx: DagContext,
+  ctx: ChildDagContext,
 ): Promise<ChildAttemptEvaluation> {
   const { runId: childRunId, promise } = AgentRunner.run({
     agentId: task.agentId,
@@ -1036,6 +1047,8 @@ async function runChildTaskAttempt(
     requireTaskReport: true,
     parentSignal: ctx.signal,
   })
+
+  ctx.trackRun(task.id, childRunId, promise)
 
   publish({
     type: 'dispatch.start',
@@ -1426,27 +1439,6 @@ function skippedTaskResult(
   }
 }
 
-function markRemainingTasksAborted(
-  plan: DispatchPlanItem[],
-  remaining: Set<string>,
-  results: Map<string, DispatchTaskResult>,
-  ctx: DagContext,
-): void {
-  for (const task of plan) {
-    if (!remaining.has(task.id)) continue
-    const result: DispatchTaskResult = {
-      runId: null,
-      status: 'aborted',
-      error: `Aborted before task "${task.id}" started`,
-      artifactIds: [],
-      outputMessageIds: [],
-      outputArtifacts: {},
-    }
-    results.set(task.id, result)
-    remaining.delete(task.id)
-    publishDispatchEnd(ctx, task.id, result)
-  }
-}
 
 function abortedBeforeStartTaskResult(task: DispatchPlanItem, error: string): DispatchTaskResult {
   return {
