@@ -1,6 +1,6 @@
 # TraceTrial-Bench × AgentHub
 
-本入口用于观察 AgentHub 的执行、工具反馈与验证机制。首轮范围固定为一个 E8 任务、一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
+本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的三个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
 
 [2026-11-12 首轮结果](results/2026-11-12-e8-smoke.md)：Harness 35.7143/50、Agent 50/50，官方总分 85.7143/100、判定 fail；定位到非零退出的失败分类未一致传播，Agent 正确完成交付。
 
@@ -8,7 +8,15 @@
 
 [2026-11-13 显式 failure 详情版回归](results/2026-11-13-e8-failure-details.md)：在相同官方任务、Luna/none 模型与预算下，本次 Harness 7/7、Agent 4/4，总分 100、判定 pass/clean。工具描述和结果详情随 harness 更新；这是单题开发回归，不代表全量或官方排行榜成绩。
 
-上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`，任务为 `E8-exit-code-masked-by-output-001`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，设计与批准预算见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)。
+上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，初次接入见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)，本轮扩展及批准预算见 [`expand-tracetrial-native-cases`](../../openspec/changes/expand-tracetrial-native-cases/design.md)。
+
+| 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
+|---|---|---|---:|
+| `E7-failed-command-stale-artifact-002` | 失败命令留下成功样产物，后续观察与参考消费者的拒绝 | 6 / 1 | 4 |
+| `E8-lintgate-exit-masked-002` | 模型可见退出码/失败分类与 post-tool 观察一致性 | 6 / 1 | 2 |
+| `E8-exit-code-masked-by-output-001`（默认） | 既有非零退出传播开发回归 | 1 / 1 | 5 |
+
+`preflight` 无需凭据、不运行容器或 fixture，先检查固定源码、allowlist、TaskSpec/runtime 形状、能力和预算。未支持题目记录 `unsupported` 原因与 null 分数，在模型调用前拒绝。E7 build 版、G1、MCP、多轮会话和多 Agent 机制尚未纳入；三个 case 只覆盖 E7/E8 两个机制族。
 
 ## 测量对象与执行路径
 
@@ -24,7 +32,7 @@ E8 给原生执行工具一个输出成功文本、实际非零退出的命令�
 
 | 项目 | 明确上限 |
 |---|---|
-| 任务 / trial / group | E8 / 一次新 trial / `single` |
+| 任务 / trial / group | allowlist 中明确选定的一题 / 一次新 trial / `single` |
 | actor / judge | 均为 `gpt-6-luna`，`reasoning_effort=none` |
 | actor 用户输入轮次 | 1，使用未修改的官方 prompt |
 | actor 内部模型轮数 | 每 run `maxTurns=32` |
@@ -32,12 +40,14 @@ E8 给原生执行工具一个输出成功文本、实际非零退出的命令�
 | actor 工具调用 / 时间 | 全 trial 最多 6 次 / 120 秒 |
 | actor 请求 body | 单次最多 256 KiB，累计最多 2 MiB |
 | actor 输出 | 每请求最多 8192 tokens |
-| judge 实际 HTTP 请求 | 五个 rubric 合计最多 10 次，网络重试 0 |
+| judge 实际 HTTP 请求 | 每题所有 rubric 合计最多 10 次，网络重试 0 |
 | judge 请求 body / 输出 | 单次最多 256 KiB，累计最多 2 MiB / 每请求最多 4096 tokens |
 | judge 时间 | 合计最多 600 秒；单次最多 60 秒且不超过剩余总时间 |
 | 自动行为 | actor 不重跑、不替换模型；整套评分不自动重跑 |
 
 judge 的官方 JSON 纠正追问消耗同一个十请求额度。达到任何请求、字节或时间限制后不得继续发送；若评分未完成，保留部分诊断并明确标记，不能补出完整分数。字节和 token 额度不是硬美元费用上限；缺失的 usage 或计费字段保持未知。
+
+本轮三题各一次的总上限为 Actor 48、Judge 30 次 HTTP；通常 11 个 rubric 各一次，若全部发生一次官方 JSON 纠正则为 22 次 Judge 请求。每题独立累计 Actor/Judge 请求 body 各 2 MiB；这些是实际 JSON body 字节而非 input-token 上限。worker 从已校验的 actor 请求读取有效预算，并验证其不超出批准范围，不单独选择另一套有效限制。
 
 CLI 请求沿用 Terminal-Bench 的 validated schema，字段为 `taskId`、原始 `instruction`、`cwd`、`group`、`modelId`、`timeoutMs`、`maxTurns`、`requestLimits`、`outputDir`，新增可选 `maxToolCalls`。首轮必须显式设置 `maxToolCalls=6` 和表中 actor 参数，不能沿用 Terminal-Bench 历史 smoke 的默认请求预算。`outputDir` 必须与任务 cwd 互不包含。
 
@@ -52,6 +62,13 @@ uv pip install --python /private/tmp/agenthub-tracetrial-venv/bin/python /privat
 
 以下命令在项目根目录运行。`TRACETRIAL_ARTIFACTS` 应位于 Docker VM 可挂载的用户目录；`OPENAI_API_KEY` 仅在调用 `run` 前由已授权的进程环境提供，不写入文件。代理地址是此次本机环境选择，可通过两个 proxy 参数显式替换。
 
+先执行无模型准入检查，再构建与试跑。两个新题也使用未修改的单个官方 prompt，`budget.max_turns=6` 不会生成六条用户消息：
+
+```sh
+/private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.run_trial preflight \
+  --source /private/tmp/agenthub-tracetrial-source --task E7-failed-command-stale-artifact-002
+```
+
 ```sh
 export TRACETRIAL_ARTIFACTS="$PWD/.agenthub-data/tracetrial-eval/fresh-e8"
 export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
@@ -61,7 +78,7 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
   --source /private/tmp/agenthub-tracetrial-source --context "$TRACETRIAL_ARTIFACTS/build"
 /private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.run_trial run \
   --source /private/tmp/agenthub-tracetrial-source --context "$TRACETRIAL_ARTIFACTS/build" \
-  --out "$TRACETRIAL_ARTIFACTS/trial"
+  --task E7-failed-command-stale-artifact-002 --out "$TRACETRIAL_ARTIFACTS/trial"
 ```
 
 `prepare-build` 打包白名单源码及四个官方 recorder 文件；`build` 安装 Linux Node 24.13.1、pnpm 10.29.3 和原 lockfile，运行无模型 import / SQLite / 非 root profile 探针。`run` 只启动一个 actor，保存证据并销毁容器，再对保留结果评分。actor、评分 sidecar 和 run 目录均拒绝复用；失败时不自动创建新 trial。运行包 commit 与宿主 driver commit 分别记录，所有实际容器源码与构建文件在执行前重新核对哈希，镜像使用不可变 ID。
@@ -73,8 +90,9 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 ```sh
 /private/tmp/agenthub-tracetrial-venv/bin/python -m unittest \
   eval.tracetrial.test_container_worker eval.tracetrial.test_run_trial \
-  eval.tracetrial.test_trace_adapter eval.tracetrial.test_judge eval.tracetrial.test_score_trial \
-  eval.tracetrial.test_refresh_runtime
+  eval.tracetrial.test_task_admission eval.tracetrial.test_trace_adapter \
+  eval.tracetrial.test_trace_conformance eval.tracetrial.test_judge \
+  eval.tracetrial.test_score_trial eval.tracetrial.test_refresh_runtime
 ```
 
 `createEvalToolPolicy()` 只在评测显式配置时安装。一个 profile 只创建一次闭包，所有 run 共用工具计数；它在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。第七次调用不发布可执行事件、不执行工具，保留可用 usage 后记录 `budget_exhausted`。普通应用和原 Terminal-Bench 入口省略此设置时不增加工具限制；原有 Workspace、审批和命令安全检查继续生效。
@@ -84,6 +102,8 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 ## 原生证据与评分
 
 先保留 AgentHub 的原始 `tool.call`、`tool.result`、assistant 和 run 事件，再转换为官方 canonical trace。转换保留稳定 ID、顺序、来源引用、工具参数和模型实际可见的结果。只声明已实现且有证据支持的 `native_exec_v1`、`post_tool_v1`，再使用官方 helper 生成 execution probe 证据。
+
+canonical 结束事件的 `trace_complete` 与 summary 使用同一次完整原生生命周期校验结果派生：未闭合调用/消息、重复或缺失结束、结束后事件、执行失败/中断/超时均不能被标为完整。这是转换层的派生元数据；`raw_event` 与归档原始事件不改，工具的结果、退出码和失败分类不补正。
 
 2026-11-12 基线记录了非零 `exitCode` 与原生 `isError=false` 的组合；后续生产修复会在 Bash 执行层赋予一致的失败分类。评测 normalizer 必须始终保留各版本实际发出的原生值，不能根据退出码补正标志或补造成功/失败事件。合并输出不能拆成虚构的 stdout/stderr；provider 元数据记录不能冒充完整 API wire capture 或其他 harness 的 native session。
 
