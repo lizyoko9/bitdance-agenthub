@@ -8,8 +8,9 @@ import { PassThrough } from 'node:stream'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { clearRunToolEvidence, getRunToolEvidence } from '@/server/dispatch-run-evidence'
-import { executeBashCommand } from './bash'
-import type { ToolContext } from './types'
+import { bashTool, executeBashCommand } from './bash'
+import type { BashFailure } from './bash-failure'
+import type { ToolContext, ToolResult } from './types'
 
 const mocks = vi.hoisted(() => ({
   spawn: vi.fn<typeof import('node:child_process').spawn>(),
@@ -68,11 +69,20 @@ function controlled() {
   return child
 }
 
+function expectFailure(result: ToolResult, kind: BashFailure['kind']) {
+  if (!result.ok) throw new Error('Expected an obtained process observation')
+  const value = result.value as { failure?: BashFailure }
+  expect(value.failure).toMatchObject({ kind, message: expect.any(String) })
+  expect(getRunToolEvidence(context.runId).commands).toEqual([
+    expect.objectContaining({ isError: true, error: value.failure!.message }),
+  ])
+}
+
 describe.skipIf(process.platform === 'win32')('Bash real process observations', () => {
-  it('retains success-shaped stdout and stderr while marking a real exit 23 as failed', async () => {
-    const result = await executeBashCommand({ command: "printf 'STATUS: OK\\nRESULT: complete\\n'; printf 'diagnostic\\n' >&2; exit 23" }, context)
+  it.each([1, 23, 127, 137])('retains success-shaped stdout and stderr while marking real exit %i as failed', async (exitCode) => {
+    const result = await executeBashCommand({ command: `printf 'STATUS: OK\\nRESULT: complete\\n'; printf 'diagnostic\\n' >&2; exit ${exitCode}` }, context)
     expect(result).toMatchObject({ ok: true, isError: true, value: {
-      command: expect.any(String), cwd: directory, exitCode: 23, status: 'failed',
+      command: expect.any(String), cwd: directory, exitCode, status: 'failed',
       isError: true, timedOut: false, aborted: false, signal: null, truncated: false,
     } })
     if (!result.ok) throw new Error('Expected an obtained process observation')
@@ -80,8 +90,9 @@ describe.skipIf(process.platform === 'win32')('Bash real process observations', 
     expect(value.output).toContain('STATUS: OK\nRESULT: complete\n')
     expect(value.output).toContain('diagnostic\n')
     expect(getRunToolEvidence(context.runId).commands).toEqual([
-      expect.objectContaining({ exitCode: 23, timedOut: false, isError: true }),
+      expect.objectContaining({ exitCode, timedOut: false, isError: true }),
     ])
+    expectFailure(result, 'nonzero_exit')
   })
 
   it('keeps exit zero successful even when output text contains ERROR', async () => {
@@ -93,6 +104,9 @@ describe.skipIf(process.platform === 'win32')('Bash real process observations', 
     expect(getRunToolEvidence(context.runId).commands).toEqual([
       expect.objectContaining({ exitCode: 0, isError: false, prepare: true }),
     ])
+    if (!result.ok) throw new Error('Expected an obtained process observation')
+    expect(result.value).not.toHaveProperty('failure')
+    expect(getRunToolEvidence(context.runId).commands[0]).not.toHaveProperty('error')
   })
 
   it('preserves bounded output and the truncation annotation', async () => {
@@ -100,6 +114,7 @@ describe.skipIf(process.platform === 'win32')('Bash real process observations', 
     expect(result).toMatchObject({ ok: true, isError: true, value: {
       exitCode: 9, truncated: true, output: expect.stringContaining('[TRUNCATED at 10000 chars]'),
     } })
+    expectFailure(result, 'nonzero_exit')
   })
 
   it('closes inherited background stdio without losing the successful shell outcome', async () => {
@@ -112,6 +127,12 @@ describe.skipIf(process.platform === 'win32')('Bash real process observations', 
 })
 
 describe('Bash controlled lifecycle boundaries', () => {
+  it('describes metadata-first outcomes and zero, nonzero and null exit codes', () => {
+    for (const text of ['status, isError and failure', 'Exit code 0', 'any nonzero code', 'null exit code', 'Output text does not override']) {
+      expect(bashTool.description).toContain(text)
+    }
+  })
+
   it('does not spawn or seek approval for an already-aborted command', async () => {
     controller.abort()
     const result = await executeBashCommand({ command: 'echo should-not-run' }, context)
@@ -121,6 +142,7 @@ describe('Bash controlled lifecycle boundaries', () => {
       exitCode: null, signal: null, aborted: true, timedOut: false, status: 'failed', isError: true,
     } })
     expect(getRunToolEvidence(context.runId).commands).toHaveLength(1)
+    expectFailure(result, 'aborted')
   })
 
   it('retains cancellation during approval instead of calling it user rejection', async () => {
@@ -129,6 +151,7 @@ describe('Bash controlled lifecycle boundaries', () => {
     const result = await executeBashCommand({ command: 'echo pending' }, context)
     expect(mocks.spawn).not.toHaveBeenCalled()
     expect(result).toMatchObject({ ok: true, isError: true, value: { aborted: true, status: 'failed' } })
+    expectFailure(result, 'aborted')
   })
 
   it('preserves an explicit approval rejection without spawning', async () => {
@@ -145,9 +168,11 @@ describe('Bash controlled lifecycle boundaries', () => {
     const operation = executeBashCommand({ command: 'fixture' }, context)
     await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce())
     child.emit('close', code, signal)
-    expect(await operation).toMatchObject({ ok: true, isError: true,
+    const result = await operation
+    expect(result).toMatchObject({ ok: true, isError: true,
       value: { exitCode: code, signal, status: 'failed', isError: true } })
     expect(getRunToolEvidence(context.runId).commands).toHaveLength(1)
+    expectFailure(result, signal ? 'signal' : 'unknown_exit')
   })
 
   it('marks timeout as failed even when close reports zero', async () => {
@@ -158,7 +183,8 @@ describe('Bash controlled lifecycle boundaries', () => {
     child.stdout.write('partial output')
     await vi.advanceTimersByTimeAsync(1000)
     child.emit('close', 0, null)
-    expect(await operation).toMatchObject({ ok: true, isError: true, value: {
+    const result = await operation
+    expect(result).toMatchObject({ ok: true, isError: true, value: {
       exitCode: 0, timedOut: true, status: 'failed', isError: true,
       output: expect.stringContaining('partial output'),
     } })
@@ -167,6 +193,7 @@ describe('Bash controlled lifecycle boundaries', () => {
       expect.objectContaining({ exitCode: 0, timedOut: true, isError: true }),
     ])
     expect(vi.getTimerCount()).toBe(0)
+    expectFailure(result, 'timeout')
   })
 
   it('marks abort as failed even when close reports zero and ignores a later error', async () => {
@@ -176,11 +203,30 @@ describe('Bash controlled lifecycle boundaries', () => {
     controller.abort()
     child.emit('close', 0, null)
     child.emit('error', new Error('late process error'))
-    expect(await operation).toMatchObject({ ok: true, isError: true, value: {
+    const result = await operation
+    expect(result).toMatchObject({ ok: true, isError: true, value: {
       exitCode: 0, aborted: true, timedOut: false, status: 'failed',
     } })
     expect(child.kill).toHaveBeenCalledOnce()
     expect(getRunToolEvidence(context.runId).commands).toHaveLength(1)
+    expectFailure(result, 'aborted')
+  })
+
+  it('uses timeout as the single reason while retaining overlapping abort, signal and exit observations', async () => {
+    vi.useFakeTimers()
+    const child = controlled()
+    const operation = executeBashCommand({ command: 'fixture', timeoutMs: 1000 }, context)
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce())
+    await vi.advanceTimersByTimeAsync(1000)
+    controller.abort()
+    child.emit('close', 23, 'SIGTERM')
+    const result = await operation
+    expect(result).toMatchObject({ ok: true, isError: true, value: {
+      timedOut: true, aborted: true, signal: 'SIGTERM', exitCode: 23,
+      failure: { kind: 'timeout', message: 'Command timed out after 1000 ms.' },
+    } })
+    expectFailure(result, 'timeout')
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('settles an error/exit/close race once and clears its timers', async () => {

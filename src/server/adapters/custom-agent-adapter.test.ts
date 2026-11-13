@@ -103,7 +103,8 @@ describe('Custom adapter optional request policy', () => {
   })
 
   it.each([true, false, undefined])('translates obtained-result error metadata %s without discarding value or stopping the tool loop', async (isError) => {
-    const value = { exitCode: 23, output: 'STATUS: OK\nRESULT: complete\n', status: 'failed', isError: true }
+    const value = { exitCode: 23, output: 'STATUS: OK\nRESULT: complete\n', status: 'failed', isError: true,
+      failure: { kind: 'nonzero_exit', message: 'Command exited with nonzero exit code 23.' } }
     tools.execute.mockResolvedValueOnce({ ok: true, value, ...(isError === undefined ? {} : { isError }) })
     fetchMock.mockResolvedValueOnce(toolResponse())
 

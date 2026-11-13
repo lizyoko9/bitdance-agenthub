@@ -14,6 +14,7 @@ import { findBannedPattern } from '@/server/security'
 import { assertPathWithinWorkspace, getEffectiveCwd } from '@/server/workspace-utils'
 
 import type { ToolContext, ToolDef, ToolResult } from './types'
+import { describeBashFailure } from './bash-failure'
 
 const ArgsSchema = z.object({
   command: z.string().min(1),
@@ -124,12 +125,15 @@ const DESCRIPTION_WINDOWS =
   'Destructive commands (Remove-Item -Recurse -Force, format, shutdown, iex(iwr ...), reg delete, Set-ExecutionPolicy Unrestricted) are blocked. No interactive stdin. ' +
   'Do not leave persistent background servers running; start test servers only inside a command that cleans them up.'
 
+const EXECUTION_RESULT_DESCRIPTION =
+  'Results expose status, isError and failure alongside the observed exit code and interruption flags. Exit code 0 indicates normal completion only without timeout, abort or signal termination; any nonzero code is classified as failed execution, with its specific meaning defined by the program. A null exit code means no exit code was observed and does not confirm success. Failed results include failure.kind and failure.message. Check these fields for consistency. Output text does not override the observed execution outcome.'
+
 /**
  * bash —— 在 workspace 内跑 shell 命令。详见 specs/07-tools.md, specs/11-platform.md。
  */
 export const bashTool: ToolDef = {
   name: 'bash',
-  description: PLATFORM === 'windows' ? DESCRIPTION_WINDOWS : DESCRIPTION_POSIX,
+  description: `${PLATFORM === 'windows' ? DESCRIPTION_WINDOWS : DESCRIPTION_POSIX} ${EXECUTION_RESULT_DESCRIPTION}`,
   parameters: {
     type: 'object',
     required: ['command'],
@@ -271,7 +275,8 @@ function runShellCommand(
         ? '\n\n[STOPPED background processes after shell exit to close inherited stdio]'
         : ''
       const truncNote = truncated ? `\n\n[TRUNCATED at ${MAX_OUTPUT_CHARS} chars]` : ''
-      const commandFailed = timedOut || aborted || closeSignal !== null || exitCode !== 0
+      const failure = describeBashFailure({ exitCode, signal: closeSignal, timedOut, aborted, timeoutMs })
+      const commandFailed = failure !== undefined
 
       recordRunCommand(ctx.runId, {
         command: args.command,
@@ -279,6 +284,7 @@ function runShellCommand(
         exitCode,
         timedOut,
         isError: commandFailed,
+        ...(failure ? { error: failure.message } : {}),
         ...(args.evidenceKind === 'prepare' ? { prepare: true } : {}),
       })
 
@@ -296,6 +302,7 @@ function runShellCommand(
           signal: closeSignal,
           isError: commandFailed,
           status: commandFailed ? 'failed' : 'completed',
+          ...(failure ? { failure } : {}),
         },
       })
     }

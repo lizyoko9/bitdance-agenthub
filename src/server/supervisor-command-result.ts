@@ -28,12 +28,17 @@ export function toVerificationCommandResult(
   const aborted = fields.aborted === true
   const signaled = fields.signal !== undefined && fields.signal !== null
   const failedStatus = fields.status !== undefined && fields.status !== 'completed'
+  const hasFailure = fields.failure !== undefined && fields.failure !== null
+  const failure = fields.failure && typeof fields.failure === 'object' && !Array.isArray(fields.failure)
+    ? fields.failure as Record<string, unknown> : undefined
+  const failureMessage = typeof failure?.message === 'string' && failure.message.trim().length > 0
+    ? failure.message : undefined
   const ok = exitCode === 0 && !timedOut && !aborted && !signaled && !failedStatus
-    && result.isError !== true && fields.isError !== true
-  const error = timedOut ? 'Command timed out' : aborted ? 'Command aborted'
+    && !hasFailure && result.isError !== true && fields.isError !== true
+  const error = failureMessage ?? (timedOut ? 'Command timed out' : aborted ? 'Command aborted'
     : signaled ? `Command terminated by signal ${String(fields.signal)}`
       : exitCode !== 0 ? `Command exited with code ${exitCode ?? 'unknown'}`
-        : 'Command result reports execution failure'
+        : 'Command result reports execution failure')
   return {
     ...base,
     command: typeof fields.command === 'string' ? fields.command : base.command,

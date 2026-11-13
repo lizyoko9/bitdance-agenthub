@@ -27,6 +27,24 @@ describe('supervisor command verification', () => {
       .toMatchObject({ exitCode: 23, output: 'STATUS: OK\nRESULT: complete\n', ok: false })
   })
 
+  it('reuses the exact process failure explanation without discarding raw observations', () => {
+    const failure = { kind: 'nonzero_exit', message: 'Command exited with nonzero exit code 17.' }
+    expect(toVerificationCommandResult({ ok: true, isError: true, value: {
+      exitCode: 17, output: 'STATUS: OK\n', isError: true, status: 'failed', failure,
+    } }, command, false)).toMatchObject({ exitCode: 17, output: 'STATUS: OK\n', ok: false, error: failure.message })
+  })
+
+  it('does not let a failure object claim success through message text', () => {
+    expect(toVerificationCommandResult({ ok: true, value: {
+      exitCode: 0, status: 'completed', failure: { kind: 'aborted', message: 'SUCCESS in diagnostic text' },
+    } }, command, false)).toMatchObject({ exitCode: 0, ok: false, error: 'SUCCESS in diagnostic text' })
+  })
+
+  it.each([{}, { message: '' }, { message: '  ' }, { message: 42 }, 'invalid'])('retains failure gates for malformed details: %j', (failure) => {
+    const result = toVerificationCommandResult({ ok: true, value: { exitCode: 0, failure } }, command, false)
+    expect(result).toMatchObject({ exitCode: 0, ok: false, error: 'Command result reports execution failure' })
+  })
+
   it.each([null, 0, 'unknown', [], { exitCode: null }, { exitCode: 0.5 }])('does not accept missing/invalid process results: %j', (value) => {
     expect(toVerificationCommandResult({ ok: true, value }, command, false).ok).toBe(false)
   })
