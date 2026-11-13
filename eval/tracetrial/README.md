@@ -6,6 +6,8 @@
 
 [2026-11-13 修复后对照](results/2026-11-13-e8-fixed.md)：确定性失败传播规则恢复，Harness 42.8571/50、Agent 50/50，官方总分 92.8571/100、仍判定 fail；剩余一个 LLM rubric 的判词与所见退出码/失败分类矛盾，保留原分并标注争议。
 
+[2026-11-13 显式 failure 详情版回归](results/2026-11-13-e8-failure-details.md)：在相同官方任务、Luna/none 模型与预算下，本次 Harness 7/7、Agent 4/4，总分 100、判定 pass/clean。工具描述和结果详情随 harness 更新；这是单题开发回归，不代表全量或官方排行榜成绩。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`，任务为 `E8-exit-code-masked-by-output-001`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，设计与批准预算见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)。
 
 ## 测量对象与执行路径
