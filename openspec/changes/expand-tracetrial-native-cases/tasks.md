@@ -12,6 +12,6 @@
 ## 3. Verification and experiment
 
 - [x] 3.1 Update canonical spec/runner documentation and run Python, typecheck, lint and strict OpenSpec checks.
-- [ ] 3.2 Commit runtime/controller sources, reuse the verified dependency image and pass isolated no-key runtime probes.
-- [ ] 3.3 Execute each approved task once in a fresh container and retain independent official layered scoring.
-- [ ] 3.4 Audit task integrity, credentials and container cleanup; record individual outcomes, usage, limits and interpretation in a committed report.
+- [x] 3.2 Commit runtime/controller sources, reuse the verified dependency image and pass isolated no-key runtime probes.
+- [x] 3.3 Execute each approved task once in a fresh container and retain independent scoring outcomes (two full scores; E7 interrupted before tools with no score or rerun).
+- [x] 3.4 Audit task integrity, credentials and container cleanup; record individual outcomes, usage, limits and interpretation in a committed report.

@@ -12,4 +12,6 @@ The Python 3.13 unittest discovery command cannot discover this namespace packag
 
 ## Paid experiment
 
-Pending the committed build and three independent trials. Results will be recorded separately under `eval/tracetrial/results/` and local ignored artifacts; offline tests do not establish benchmark success.
+Runtime/driver commit `7555b182446b17a97a1292eaf592a5fd238eb36d` was built from the verified local dependency image; all 15 assembly steps and no-key runtime/isolation probes passed. Each approved task started exactly one Actor. New E8 lintgate and original E8 both received official raw/effective 100/pass/clean. E7 was interrupted after one model request and before tools, received no Judge calls or score, and was not rerun. Its anomalous recorded wall-clock interval is retained without claiming a confirmed root cause.
+
+Task hashes and original/canonical/sidecar evidence were audited, owned containers removed and credentials absent from retained artifacts/archive members. The complete result, known/unknown usage, configuration and limits are recorded in `eval/tracetrial/results/2026-11-14-native-cases.md`. The E7 attempt does not establish stale-artifact mechanism coverage; completed evidence remains E8 only.
