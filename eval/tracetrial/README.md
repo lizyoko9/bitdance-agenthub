@@ -10,6 +10,8 @@
 
 [2026-11-14 三次 native-case 试跑](results/2026-11-14-native-cases.md)：新 E8 lintgate（Harness 9/9、Agent 5/5）及原 E8 回归（7/7、4/4）均为 100/pass/clean；E7 在工具执行前被中断，未评分、未重跑。有效机制覆盖仍是 E8，未完成试验保留 null，不能当零分或全量成功率。
 
+[2026-11-15 E7 新尝试及机制回归](results/2026-11-15-e7-and-mechanisms.md)：E7 首次有效执行获得 Harness 6/6、Agent 5/5，官方 raw/effective 均为 100/pass/clean；旧中断记录保留。另有 58 项无模型回归通过，属于机制验证，不计为 benchmark 分数。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，初次接入见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)，本轮扩展及批准预算见 [`expand-tracetrial-native-cases`](../../openspec/changes/expand-tracetrial-native-cases/design.md)。
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
