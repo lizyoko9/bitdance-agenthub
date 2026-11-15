@@ -141,10 +141,9 @@ class TerminalConformanceTests(unittest.TestCase):
         def open_message(events): events.pop(11)
         def duplicate_result(events): events.insert(5, copy.deepcopy(events[4]))
         def late_event(events): events.append({'type': 'heartbeat', 'timestamp': events[-1]['timestamp']+1})
-        def regressed_timestamp(events): events[9]['timestamp'] = events[8]['timestamp']-1
         def missing_start(events): events.pop(1)
         for mutate in (missing_end, duplicate_end, dangling_call, open_message,
-                       duplicate_result, late_event, regressed_timestamp, missing_start):
+                       duplicate_result, late_event, missing_start):
             with self.subTest(case=mutate.__name__):
                 native, result = native_fixture()
                 mutate(native)
@@ -154,6 +153,92 @@ class TerminalConformanceTests(unittest.TestCase):
                 self.assertFalse(any(event.get('trace_complete') is True for event in events))
                 if mutate is missing_end:
                     self.assertFalse(any(event['event_type'] == 'run_finished' for event in events))
+
+    def test_clock_regression_is_a_sourced_observation_without_reordering_native_events(self):
+        native, result = native_fixture()
+        native[9]['timestamp'] = native[8]['timestamp']-2
+        _, summary, events = self.normalize(native, result)
+        self.assertTrue(summary['trace_complete'])
+        self.assertEqual(summary['structured_trace_status'], 'available')
+        self.assertEqual(summary['agenthub_normalization_diagnostics'], [])
+        observations = summary['agenthub_normalization_observations']
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0], {'kind': 'timestamp_regression',
+            'previous_timestamp': native[8]['timestamp'], 'timestamp': native[9]['timestamp'],
+            'source_refs': [{'path': summary['agenthub_native_sources']['events'], 'line': line}
+                            for line in (9, 10)]})
+        self.assertEqual([event['seq'] for event in events], list(range(1, len(events)+1)))
+        matching = next(event for event in events if event['source_refs'] == observations[0]['source_refs'][1:])
+        self.assertEqual(matching['raw_event']['timestamp'], native[9]['timestamp'])
+
+    def test_complete_text_snapshot_can_close_without_streaming_end(self):
+        native, result = native_fixture()
+        native[7]['part']['content'] = 'E4B_DONE'
+        del native[8:11]
+        _, summary, events = self.normalize(native, result)
+        self.assertTrue(summary['trace_complete'])
+        self.assertEqual(summary['structured_trace_status'], 'available')
+        self.assertEqual(summary['agenthub_normalization_diagnostics'], [])
+        self.assertEqual(summary['final_answer'], 'E4B_DONE')
+        self.assertIs(events[-1]['trace_complete'], True)
+
+    def test_empty_initial_text_or_any_delta_still_requires_streaming_end(self):
+        for initial, deltas in (('', []), ('Snapshot then append', ['']),
+                                ('Snapshot then append', [' additional text'])):
+            with self.subTest(initial=initial, deltas=deltas):
+                native, result = native_fixture()
+                native[7]['part']['content'] = initial
+                native[8:11] = [{'type': 'part.delta', 'messageId': 'm2', 'partIndex': 0,
+                    'delta': {'type': 'text.append', 'text': text}, 'timestamp': native[8]['timestamp']}
+                    for text in deltas]
+                _, summary, events = self.normalize(native, result)
+                self.assertFalse(summary['trace_complete'])
+                self.assertEqual(summary['structured_trace_status'], 'partial')
+                self.assertTrue(any('open streaming part' in message
+                                    for message in summary['agenthub_normalization_diagnostics']))
+                self.assertIs(events[-1]['trace_complete'], False)
+
+    def test_snapshot_text_does_not_allow_delta_after_part_or_message_end(self):
+        for boundary in ('part.end', 'message.end'):
+            with self.subTest(boundary=boundary):
+                native, result = native_fixture()
+                native[7]['part']['content'] = 'Complete snapshot'
+                del native[8:10]
+                index = next(index for index, event in enumerate(native)
+                             if event['type'] == boundary and event.get('messageId') == 'm2')
+                native.insert(index+1, {'type': 'part.delta', 'messageId': 'm2', 'partIndex': 0,
+                    'delta': {'type': 'text.append', 'text': ''}, 'timestamp': native[index]['timestamp']})
+                _, summary, events = self.normalize(native, result)
+                self.assertFalse(summary['trace_complete'])
+                self.assertEqual(summary['structured_trace_status'], 'partial')
+                self.assertIs(events[-1]['trace_complete'], False)
+                expected = 'delta follows its end' if boundary == 'part.end' else 'Unmatched native message part'
+                self.assertTrue(any(expected in message for message in summary['agenthub_normalization_diagnostics']))
+
+    def test_budget_termination_snapshot_and_clock_regression_keep_failed_trace_available(self):
+        for status, reason in (('failed', 'budget_exhausted'), ('aborted', 'aborted'), ('aborted', 'timed_out')):
+            with self.subTest(status=status, reason=reason):
+                native, result = native_fixture()
+                error_text = f'Evaluation terminated: {reason}'
+                native[7]['part']['content'] = error_text
+                del native[8:11]
+                native.pop(-2)
+                native[-1].update(status=status, timestamp=native[-2]['timestamp']-2)
+                result.update(runStatus=status, terminationReason=reason,
+                              budgetExhausted=reason == 'budget_exhausted', timedOut=reason == 'timed_out')
+                result['runs'][0]['status'] = status
+                _, summary, events = self.normalize(native, result, metadata={
+                    'model': 'synthetic-model', 'exit_code': 1, 'timed_out': reason == 'timed_out'})
+                self.assertFalse(summary['trace_complete'])
+                self.assertEqual(summary['status'], 'failed')
+                self.assertEqual(summary['structured_trace_status'], 'available')
+                self.assertEqual(summary['error_type'], reason)
+                self.assertEqual(summary['agenthub_native_termination_reason'], reason)
+                self.assertEqual(summary['agenthub_normalization_diagnostics'], [])
+                self.assertEqual(len(summary['agenthub_normalization_observations']), 1)
+                self.assertEqual(summary['final_answer'], error_text)
+                self.assertIs(events[-1]['trace_complete'], False)
+                self.assertEqual(events[-1]['native_status'], status)
 
     def test_native_result_and_process_success_must_both_confirm_completion(self):
         for field, value in (('allRunsSettled', False), ('runStatus', 'failed'), ('timedOut', True),

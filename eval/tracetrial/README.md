@@ -115,6 +115,8 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 
 canonical 结束事件的 `trace_complete` 与 summary 使用同一次完整原生生命周期校验结果派生：未闭合调用/消息、重复或缺失结束、结束后事件、执行失败/中断/超时均不能被标为完整。这是转换层的派生元数据；`raw_event` 与归档原始事件不改，工具的结果、退出码和失败分类不补正。
 
+原生 `timestamp` 依据 Spec 02 仅作诊断，回退会记录带来源的 observation，保留原始时钟和发布顺序。非空、无 delta 的完整文本 snapshot 可以在 `message.end` 闭合；已有 delta 或初始为空的流式文本仍须 `part.end`。这区分生产错误消息的快照与未完成流，failed/aborted/budget-exhausted 的 Actor 仍不能被标为成功。对保留轨迹做离线格式修复与首次评分时，必须使用新证据目录、记录处理器版本，并保持原始 trial 不变。
+
 2026-11-12 基线记录了非零 `exitCode` 与原生 `isError=false` 的组合；后续生产修复会在 Bash 执行层赋予一致的失败分类。评测 normalizer 必须始终保留各版本实际发出的原生值，不能根据退出码补正标志或补造成功/失败事件。合并输出不能拆成虚构的 stdout/stderr；provider 元数据记录不能冒充完整 API wire capture 或其他 harness 的 native session。
 
 官方评分分为 Harness 和 Agent 两层。原 E8 两层合计有六个 rule 项及五个 LLM rubric 项，规则结果与 rubric 结果按原上游流程解析、聚合，并保留原始及 effective 判定、`original_score` / `resolved_from` 和 attribution。自定义 judge requester 仅负责兼容请求参数与实施预算，保留官方 rubric、证据选择和评分逻辑。对声明了 rubric 的任务，只运行 rule verifier 必须标为部分诊断；G1 官方配置本来没有 rubric，完整 layered 流程可以给出全分数且不调用 Judge 模型。

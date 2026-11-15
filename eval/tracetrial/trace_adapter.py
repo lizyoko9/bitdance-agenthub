@@ -73,6 +73,7 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
     trace_dir = layout.artifacts_dir / "trace" / "agenthub"
     trace_dir.mkdir(parents=True, exist_ok=False)
     diagnostics = []
+    observations = []
     source_events = trace_dir / "source-events.jsonl"
     source_result = trace_dir / "source-result.json"
     event_data = _archive_source(Path(native_events_path), source_events, diagnostics)
@@ -101,6 +102,7 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
     completed_calls = set()
     messages = {}
     previous_timestamp = None
+    previous_timestamp_line = None
     prelude = []
     writer = EventWriter(trace_dir / "events.json", run_id=run_id)
 
@@ -117,8 +119,12 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
         timestamp = event.get("timestamp")
         if _timestamp(timestamp) is not None:
             if previous_timestamp is not None and timestamp < previous_timestamp:
-                diagnostics.append(f"Native timestamp order regressed at line {line}")
+                observations.append({"kind": "timestamp_regression", "previous_timestamp": previous_timestamp,
+                    "timestamp": timestamp,
+                    "source_refs": [{"path": str(source_events.resolve()), "line": value}
+                                    for value in (previous_timestamp_line, line)]})
             previous_timestamp = timestamp
+            previous_timestamp_line = line
         # The persisted user message is an input prelude, before the native actor run.
         if not started_runs and kind == "message.added" and isinstance(event.get("message"), dict) and event["message"].get("role") == "user":
             prelude.append({"path": str(source_events.resolve()), "line": line})
@@ -204,7 +210,9 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                             diagnostics.append(f"Invalid native part.start at line {line}")
                         else:
                             message["part_states"][index] = {
-                                "streaming": part["type"] in {"text", "thinking", "code"}, "closed": False}
+                                "streaming": part["type"] in {"text", "thinking", "code"}, "closed": False,
+                                "snapshot_text": part["type"] == "text" and isinstance(part.get("content"), str)
+                                                 and bool(part["content"]), "has_delta": False}
                     elif state is None:
                         diagnostics.append(f"Native part event has no matching start at line {line}")
                     elif kind == "part.end":
@@ -213,6 +221,8 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                         state["closed"] = True
                     elif state["closed"] and state["streaming"]:
                         diagnostics.append(f"Native streaming part delta follows its end at line {line}")
+                    if kind == "part.delta" and state is not None:
+                        state["has_delta"] = True
                 if valid_index and kind == "part.start" and isinstance(event.get("part"), dict) and event["part"].get("type") == "text":
                     content = event["part"].get("content")
                     if index in message["parts"] or not isinstance(content, str):
@@ -235,7 +245,9 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                 diagnostics.append(f"Unmatched or duplicate native message.end at line {line}")
                 emit("native_event", line, event)
             else:
-                if any(part["streaming"] and not part["closed"] for part in message["part_states"].values()):
+                if any(part["streaming"] and not part["closed"]
+                       and not (part["snapshot_text"] and not part["has_delta"])
+                       for part in message["part_states"].values()):
                     diagnostics.append(f"Native message closes with an open streaming part at line {line}")
                 message["closed"] = True
                 content = "".join(text for _, text in sorted(message["parts"].items()))
@@ -322,6 +334,7 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
         "result_sha256": hashlib.sha256(result_data).hexdigest() if result_data is not None else None,
     }
     summary["agenthub_normalization_diagnostics"] = diagnostics
+    summary["agenthub_normalization_observations"] = observations
     summary["agenthub_actor_usage"] = result.get("usage")
     summary["agenthub_input_prelude_sources"] = prelude
     summary["agenthub_native_termination_reason"] = result.get("terminationReason")
