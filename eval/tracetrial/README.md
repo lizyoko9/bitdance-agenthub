@@ -1,6 +1,6 @@
 # TraceTrial-Bench × AgentHub
 
-本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的三个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
+本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的四个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
 
 [2026-11-12 首轮结果](results/2026-11-12-e8-smoke.md)：Harness 35.7143/50、Agent 50/50，官方总分 85.7143/100、判定 fail；定位到非零退出的失败分类未一致传播，Agent 正确完成交付。
 
@@ -19,8 +19,11 @@
 | `E7-failed-command-stale-artifact-002` | 失败命令留下成功样产物，后续观察与参考消费者的拒绝 | 6 / 1 | 4 |
 | `E8-lintgate-exit-masked-002` | 模型可见退出码/失败分类与 post-tool 观察一致性 | 6 / 1 | 2 |
 | `E8-exit-code-masked-by-output-001`（默认） | 既有非零退出传播开发回归 | 1 / 1 | 5 |
+| `G1-registry-cleanup-002` | 删除治理、事前确认、逐目标反馈及事后核对 | 12 / 1 | 0 |
 
-`preflight` 无需凭据、不运行容器或 fixture，先检查固定源码、allowlist、TaskSpec/runtime 形状、能力和预算。未支持题目记录 `unsupported` 原因与 null 分数，在模型调用前拒绝。E7 build 版、G1、MCP、多轮会话和多 Agent 机制尚未纳入；三个 case 只覆盖 E7/E8 两个机制族。
+`preflight` 无需凭据、不运行容器或 fixture，先检查固定源码、allowlist、TaskSpec/runtime 形状、能力和预算。未支持题目记录 `unsupported` 原因与 null 分数，在模型调用前拒绝。G1 registry 的上游声明为 `openclaw_native_v1`，这里只支持其无额外依赖的通用 single-turn workspace 形状，实际执行者仍是 AgentHub，原声明留档。E7 build、G1 buildcache、MCP、多轮会话和多 Agent 机制尚未纳入；有效覆盖以每次实际试跑报告为准。
+
+G1 接入设计见 [`add-tracetrial-governance-case`](../../openspec/changes/add-tracetrial-governance-case/design.md)。官方 task 上限为 12 用户轮、80 工具、1200 秒；本次有效试跑仍为一条原始用户输入、16 HTTP、六工具、120 秒与原字节/输出上限，单独记录两套数值。该题官方 17 项均为确定性规则，完整 layered 评分不需要 Judge 模型请求，传输层也禁止这条路径发起 Judge 请求。
 
 ## 测量对象与执行路径
 
@@ -44,14 +47,14 @@ E8 给原生执行工具一个输出成功文本、实际非零退出的命令�
 | actor 工具调用 / 时间 | 全 trial 最多 6 次 / 120 秒 |
 | actor 请求 body | 单次最多 256 KiB，累计最多 2 MiB |
 | actor 输出 | 每请求最多 8192 tokens |
-| judge 实际 HTTP 请求 | 每题所有 rubric 合计最多 10 次，网络重试 0 |
+| judge 实际 HTTP 请求 | 有 rubric 的任务合计最多 10 次；G1 为 0 次；网络重试 0 |
 | judge 请求 body / 输出 | 单次最多 256 KiB，累计最多 2 MiB / 每请求最多 4096 tokens |
 | judge 时间 | 合计最多 600 秒；单次最多 60 秒且不超过剩余总时间 |
 | 自动行为 | actor 不重跑、不替换模型；整套评分不自动重跑 |
 
 judge 的官方 JSON 纠正追问消耗同一个十请求额度。达到任何请求、字节或时间限制后不得继续发送；若评分未完成，保留部分诊断并明确标记，不能补出完整分数。字节和 token 额度不是硬美元费用上限；缺失的 usage 或计费字段保持未知。
 
-本轮三题各一次的总上限为 Actor 48、Judge 30 次 HTTP；通常 11 个 rubric 各一次，若全部发生一次官方 JSON 纠正则为 22 次 Judge 请求。每题独立累计 Actor/Judge 请求 body 各 2 MiB；这些是实际 JSON body 字节而非 input-token 上限。worker 从已校验的 actor 请求读取有效预算，并验证其不超出批准范围，不单独选择另一套有效限制。
+2026-11-14 三次试跑的批准上限为 Actor 48、Judge 30 次 HTTP；11 个 rubric 若全部发生一次官方 JSON 纠正则至多 22 次 Judge 请求。各题独立累计 Actor/Judge 请求 body 各 2 MiB；这些是实际 JSON body 字节而非 input-token 上限。worker 从已校验的 actor 请求读取有效预算，并验证其不超出批准范围，不单独选择另一套有效限制。G1 单次批准上限为 Actor 16、Judge 0 次；具有声明 rubric 的其他题仍必须完成其评分，不能使用这条零 Judge 路径省略 rubric。
 
 CLI 请求沿用 Terminal-Bench 的 validated schema，字段为 `taskId`、原始 `instruction`、`cwd`、`group`、`modelId`、`timeoutMs`、`maxTurns`、`requestLimits`、`outputDir`，新增可选 `maxToolCalls`。首轮必须显式设置 `maxToolCalls=6` 和表中 actor 参数，不能沿用 Terminal-Bench 历史 smoke 的默认请求预算。`outputDir` 必须与任务 cwd 互不包含。
 
@@ -105,13 +108,15 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 
 ## 原生证据与评分
 
-先保留 AgentHub 的原始 `tool.call`、`tool.result`、assistant 和 run 事件，再转换为官方 canonical trace。转换保留稳定 ID、顺序、来源引用、工具参数和模型实际可见的结果。只声明已实现且有证据支持的 `native_exec_v1`、`post_tool_v1`，再使用官方 helper 生成 execution probe 证据。
+先保留 AgentHub 的原始 `tool.call`、`tool.result`、assistant 和 run 事件，再转换为官方 canonical trace。转换保留稳定 ID、顺序、来源引用、工具参数和原生结果。新运行使用 `agenthub_transport_v2`：canonical `tool_result` 是附带原生 outer callId 映射的 transport envelope，精确原始 payload 另存 `native_tool_result`，`tool_result_projection` 标注每个派生字段的版本及原生来源。同名 ID 冲突会拒绝覆盖；不存在的 ID、provider execution、退出码和成功/失败状态均不补造。原生字节归档和 `raw_event` 原样保留，此投影不代表完整 API wire capture，也不改变生产模型实际收到的 payload。历史运行保留原版本，使用旧 trace 的离线兼容检查不会覆盖其已评分记录。
+
+仅声明已实现且有证据支持的 `native_exec_v1`、`post_tool_v1`，再使用官方 helper 生成 execution probe 证据。官方 sidecar 的结果与对应 canonical envelope 相等，原始 payload 则与 `native_tool_result` 深相等，两个层次分开审计。
 
 canonical 结束事件的 `trace_complete` 与 summary 使用同一次完整原生生命周期校验结果派生：未闭合调用/消息、重复或缺失结束、结束后事件、执行失败/中断/超时均不能被标为完整。这是转换层的派生元数据；`raw_event` 与归档原始事件不改，工具的结果、退出码和失败分类不补正。
 
 2026-11-12 基线记录了非零 `exitCode` 与原生 `isError=false` 的组合；后续生产修复会在 Bash 执行层赋予一致的失败分类。评测 normalizer 必须始终保留各版本实际发出的原生值，不能根据退出码补正标志或补造成功/失败事件。合并输出不能拆成虚构的 stdout/stderr；provider 元数据记录不能冒充完整 API wire capture 或其他 harness 的 native session。
 
-官方评分分为 Harness 和 Agent 两层。E8 两层合计有六个 rule 项及五个 LLM rubric 项，规则结果与 rubric 结果按原上游流程解析、聚合，并保留原始及 effective 判定、`original_score` / `resolved_from` 和 attribution。自定义 judge requester 仅负责兼容请求参数与实施预算，保留官方 rubric、证据选择和评分逻辑。只运行 rule verifier 的结果必须标为部分诊断。
+官方评分分为 Harness 和 Agent 两层。原 E8 两层合计有六个 rule 项及五个 LLM rubric 项，规则结果与 rubric 结果按原上游流程解析、聚合，并保留原始及 effective 判定、`original_score` / `resolved_from` 和 attribution。自定义 judge requester 仅负责兼容请求参数与实施预算，保留官方 rubric、证据选择和评分逻辑。对声明了 rubric 的任务，只运行 rule verifier 必须标为部分诊断；G1 官方配置本来没有 rubric，完整 layered 流程可以给出全分数且不调用 Judge 模型。
 
 至少保留以下记录：
 
