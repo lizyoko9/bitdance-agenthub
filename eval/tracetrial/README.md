@@ -25,7 +25,7 @@
 
 `preflight` 无需凭据、不运行容器或 fixture，先检查固定源码、allowlist、TaskSpec/runtime 形状、能力和预算。未支持题目记录 `unsupported` 原因与 null 分数，在模型调用前拒绝。G1 registry 的上游声明为 `openclaw_native_v1`，这里只支持其无额外依赖的通用 single-turn workspace 形状，实际执行者仍是 AgentHub，原声明留档。E7 build、G1 buildcache、MCP、多轮会话和多 Agent 机制尚未纳入；有效覆盖以每次实际试跑报告为准。
 
-G1 接入设计见 [`add-tracetrial-governance-case`](../../openspec/changes/add-tracetrial-governance-case/design.md)。官方 task 上限为 12 用户轮、80 工具、1200 秒；本次有效试跑仍为一条原始用户输入、16 HTTP、六工具、120 秒与原字节/输出上限，单独记录两套数值。该题官方 17 项均为确定性规则，完整 layered 评分不需要 Judge 模型请求，传输层也禁止这条路径发起 Judge 请求。
+G1 接入设计见 [`add-tracetrial-governance-case`](../../openspec/changes/add-tracetrial-governance-case/design.md)，预算修复见 [`fix-tracetrial-task-budgets`](../../openspec/changes/fix-tracetrial-task-budgets/design.md)。历史六工具试跑保留在原报告；当前 task 模式直接采用官方 80 工具、1200 秒，实际仍一条原始用户输入。该题官方 17 项均为确定性规则，完整 layered 评分不需要 Judge 模型请求，传输层也禁止这条路径发起 Judge 请求。
 
 ## 测量对象与执行路径
 
@@ -37,28 +37,26 @@ E8 给原生执行工具一个输出成功文本、实际非零退出的命令�
 
 该入口实名使用 `agenthub`，没有用 Codex、OpenClaw 或其他 stock harness 的运行结果代替 AgentHub，也没有另写模型工具循环。它复用官方 TaskSpec、RunLayout、workspace 准备、strict invocation policy、execution evidence helper、verifier、layered judge、evaluation policy 和 attribution。它尚不代表上游完整原生 harness 注册、所有任务机制或官方排行榜兼容性。
 
-## 首轮固定预算
+## 预算来源与运行模式
 
-| 项目 | 明确上限 |
-|---|---|
-| 任务 / trial / group | allowlist 中明确选定的一题 / 一次新 trial / `single` |
-| actor / judge | 均为 `gpt-6-luna`，`reasoning_effort=none` |
-| actor 用户输入轮次 | 1，使用未修改的官方 prompt |
-| actor 内部模型轮数 | 每 run `maxTurns=32` |
-| actor 实际 HTTP 请求 | 全 trial 最多 16 次，SDK 重试 0 |
-| actor 工具调用 / 时间 | 全 trial 最多 6 次 / 120 秒 |
-| actor 请求 body | 单次最多 256 KiB，累计最多 2 MiB |
-| actor 输出 | 每请求最多 8192 tokens |
-| judge 实际 HTTP 请求 | 有 rubric 的任务合计最多 10 次；G1 为 0 次；网络重试 0 |
-| judge 请求 body / 输出 | 单次最多 256 KiB，累计最多 2 MiB / 每请求最多 4096 tokens |
-| judge 时间 | 合计最多 600 秒；单次最多 60 秒且不超过剩余总时间 |
-| 自动行为 | actor 不重跑、不替换模型；整套评分不自动重跑 |
+工具数和总时间直接来自 TaskSpec。`task` 模式不做 min/clamp；`constrained` 模式才允许显式缩小额度，并保留实验范围。用户输入轮次与内部模型循环分开：当前支持 single profile、一次原始用户输入、零网络重试；每个继续的模型轮次至少执行一个工具，因此给每个允许工具预留一次请求，再留一次最终回复。
 
-judge 的官方 JSON 纠正追问消耗同一个十请求额度。达到任何请求、字节或时间限制后不得继续发送；若评分未完成，保留部分诊断并明确标记，不能补出完整分数。字节和 token 额度不是硬美元费用上限；缺失的 usage 或计费字段保持未知。
+| 当前 task 模式 | 工具 / 秒 | 内部模型轮数 / HTTP | 累计请求 body |
+|---|---:|---:|---:|
+| E7 / 两个 E8 | 6 / 120 | 7 / 7 | 1,835,008 bytes |
+| G1 registry | 80 / 1200 | 81 / 81 | 21,233,664 bytes |
 
-2026-11-14 三次试跑的批准上限为 Actor 48、Judge 30 次 HTTP；11 个 rubric 若全部发生一次官方 JSON 纠正则至多 22 次 Judge 请求。各题独立累计 Actor/Judge 请求 body 各 2 MiB；这些是实际 JSON body 字节而非 input-token 上限。worker 从已校验的 actor 请求读取有效预算，并验证其不超出批准范围，不单独选择另一套有效限制。G1 单次批准上限为 Actor 16、Judge 0 次；具有声明 rubric 的其他题仍必须完成其评分，不能使用这条零 Judge 路径省略 rubric。
+默认 `maxTurns=工具数+1`、HTTP=maxTurns、累计 body=HTTP×单次 body。任务模式在模型轮数不足以覆盖工具+最终回复、HTTP 小于轮数、累计字节小于完整请求容量时拒绝；降低单次 body/output guard 也须显式 constrained。可表达技术域之外的任务会返回 unsupported，不会悄悄降低预算。
 
-CLI 请求沿用 Terminal-Bench 的 validated schema，字段为 `taskId`、原始 `instruction`、`cwd`、`group`、`modelId`、`timeoutMs`、`maxTurns`、`requestLimits`、`outputDir`，新增可选 `maxToolCalls`。首轮必须显式设置 `maxToolCalls=6` 和表中 actor 参数，不能沿用 Terminal-Bench 历史 smoke 的默认请求预算。`outputDir` 必须与任务 cwd 互不包含。
+计划中的 `timeoutMs` 必须是正整数秒对应的毫秒数，以兼容官方秒级 invocation policy；非整秒值在 preflight 明确拒绝。SDK 的一般 programmatic timeout 接口仍接受合法整数毫秒。容器退出/清理宽限另记为 `cleanupGraceSeconds`，不计作额外解题时间。
+
+额外 transport guards 单独记录：单次 body 默认 256 KiB、每请求输出 8192 tokens。它们是显式资源限制，不是 TaskSpec 预算，也不是硬美元费用封顶；触发时单独标记 resource_limited。token/body/费用未知值不补估。生产 Bash 的默认/最大命令超时属于受测工具行为，与 Actor 总时间分开；本入口不改变它们。
+
+`budget_contract.py` 的 canonical plan 记录 taskBudget、mode、有效 actor 配置、每个字段来源和 coverage。host 与 worker 校验同一 plan，请求值必须精确一致；worker 不再维护 E8 的 6/120/16/32/2MiB 通用上限。计划 digest、源码绑定、原配置和实际用量均留档。Node 的 TraceTrial schema 使用 timer 可表达域，SDK timeout 显式继承有效 Actor 时间；其他应用和 Terminal-Bench 的默认值保持。
+
+Judge 仍独立：有 rubric 的任务全题最多 10 HTTP，包含官方 JSON 纠正，零网络重试；单 body 256 KiB/累计 2 MiB、输出 4096 tokens、合计 600 秒/每次 60 秒。G1 官方零 rubric 则零 Judge 模型请求。评分不完整时不能补造全分。
+
+`budget-outcome.json` 按实际 guard 拒绝/termination 证据区分 TaskSpec 耗尽和额外 resource_limited；次数恰好等于额度不算耗尽。原 `budget_exhausted`、output_limit、超时、官方 raw/effective 分数及 attribution 保持不变。constrained 模式即使正常完成也保留受限实验范围，不能包装成完整任务预算下的能力结论。
 
 ## 宿主运行
 
@@ -71,15 +69,18 @@ uv pip install --python /private/tmp/agenthub-tracetrial-venv/bin/python /privat
 
 以下命令在项目根目录运行。`TRACETRIAL_ARTIFACTS` 应位于 Docker VM 可挂载的用户目录；`OPENAI_API_KEY` 仅在调用 `run` 前由已授权的进程环境提供，不写入文件。代理地址是此次本机环境选择，可通过两个 proxy 参数显式替换。
 
-先执行无模型准入检查，再构建与试跑。两个新题也使用未修改的单个官方 prompt，`budget.max_turns=6` 不会生成六条用户消息：
+先用无凭据 preflight 生成并审阅任务绑定的预算文件。实际 `run` 必须显式提供此文件，旧命令不会在升级后静默扩大付费预算。生成文件只是配置与来源记录，不会发出 API 请求。
 
 ```sh
+export TRACETRIAL_ARTIFACTS="$PWD/.agenthub-data/tracetrial-eval/fresh-g1"
 /private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.run_trial preflight \
-  --source /private/tmp/agenthub-tracetrial-source --task E7-failed-command-stale-artifact-002
+  --source /private/tmp/agenthub-tracetrial-source --task G1-registry-cleanup-002 \
+  --budget-out "$TRACETRIAL_ARTIFACTS/task-budget.json"
 ```
 
+该计划是 80 工具、20 分钟、最多 81 Actor 请求的配置，费用潜力明显高于历史 smoke；只有实际试跑获授权后才执行后续 `run`。需要更小试跑时先创建 flat overrides JSON，例如 `{ "maxToolCalls": 6, "timeoutMs": 120000 }`，用 `preflight --budget-mode constrained --limits-file <overrides.json> --budget-out <plan.json>` 生成明确受限的计划。计划文件拒绝覆盖，source/task hash 或有效字段变更后需重新生成。
+
 ```sh
-export TRACETRIAL_ARTIFACTS="$PWD/.agenthub-data/tracetrial-eval/fresh-e8"
 export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 /private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.run_trial prepare-build \
   --source /private/tmp/agenthub-tracetrial-source --context "$TRACETRIAL_ARTIFACTS/build"
@@ -87,10 +88,11 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
   --source /private/tmp/agenthub-tracetrial-source --context "$TRACETRIAL_ARTIFACTS/build"
 /private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.run_trial run \
   --source /private/tmp/agenthub-tracetrial-source --context "$TRACETRIAL_ARTIFACTS/build" \
-  --task E7-failed-command-stale-artifact-002 --out "$TRACETRIAL_ARTIFACTS/trial"
+  --task G1-registry-cleanup-002 --budget-file "$TRACETRIAL_ARTIFACTS/task-budget.json" \
+  --out "$TRACETRIAL_ARTIFACTS/trial"
 ```
 
-`prepare-build` 打包白名单源码及四个官方 recorder 文件；`build` 安装 Linux Node 24.13.1、pnpm 10.29.3 和原 lockfile，运行无模型 import / SQLite / 非 root profile 探针。`run` 只启动一个 actor，保存证据并销毁容器，再对保留结果评分。actor、评分 sidecar 和 run 目录均拒绝复用；失败时不自动创建新 trial。运行包 commit 与宿主 driver commit 分别记录，所有实际容器源码与构建文件在执行前重新核对哈希，镜像使用不可变 ID。
+`prepare-build` 打包白名单源码、worker 共享 budget contract 及四个官方 recorder 文件；`build` 安装 Linux Node 24.13.1、pnpm 10.29.3 和原 lockfile，运行无模型 import / SQLite / 非 root profile 探针。`run` 只启动一个 actor，保存证据并销毁容器，再对保留结果评分。actor、评分 sidecar 和 run 目录均拒绝复用；失败时不自动创建新 trial。运行包 commit 与宿主 driver commit 分别记录，所有实际容器源码与构建文件在执行前重新核对哈希，镜像使用不可变 ID。
 
 当本地已有本入口构建的依赖镜像，`prepare-build` 可增加 `--reuse-image <repository@sha256:digest>`。该路径要求运行源码与 controller 已提交，核验本地固定镜像及原 runtime manifest，并验证 Node/pnpm、package/lockfile/workspace/SQLite 构建脚本完全一致。随后在仅使用本地固定 image ID、`network=none` 的临时容器中更新白名单源码并运行非 root 无凭据探针，保留原 `node_modules`，再本地 commit 镜像；不经 BuildKit 查询远端 metadata。等价 Dockerfile 仍留档，实际命令与清理结果写入 `assembly-log.json`。依赖输入变化时拒绝刷新，改用正常 clean build。基线 image ID、依赖哈希与新的 runtime/image 来源均留档；默认不传此参数仍执行完整安装。
 
@@ -102,10 +104,11 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
   eval.tracetrial.test_task_admission eval.tracetrial.test_trace_adapter \
   eval.tracetrial.test_trace_conformance eval.tracetrial.test_transport_projection \
   eval.tracetrial.test_judge \
-  eval.tracetrial.test_score_trial eval.tracetrial.test_refresh_runtime
+  eval.tracetrial.test_score_trial eval.tracetrial.test_refresh_runtime \
+  eval.tracetrial.test_budget_contract eval.tracetrial.test_budget_outcome
 ```
 
-`createEvalToolPolicy()` 只在评测显式配置时安装。一个 profile 只创建一次闭包，所有 run 共用工具计数；它在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。第七次调用不发布可执行事件、不执行工具，保留可用 usage 后记录 `budget_exhausted`。普通应用和原 Terminal-Bench 入口省略此设置时不增加工具限制；原有 Workspace、审批和命令安全检查继续生效。
+`createEvalToolPolicy()` 只在评测显式配置时安装。一个 profile 只创建一次闭包，所有 run 共用工具计数；它在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。配置 N 次时，第 N+1 次调用不发布可执行事件、不执行工具，保留可用 usage 后记录 `budget_exhausted`。普通应用和原 Terminal-Bench 入口省略此设置时不增加工具限制；原有 Workspace、审批和命令安全检查继续生效。
 
 模型主动 `stop`、内部 `iteration_limit`、`output_limit`、请求或工具 `budget_exhausted`、超时和中止分别记录。次数恰好等于额度不等于被截断；服务层 `complete` 也不等于官方任务通过。
 

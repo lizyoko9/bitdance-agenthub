@@ -174,3 +174,15 @@ AgentHub tool consumers in CustomAgentAdapter and SDK MCP bridges MUST classify 
 #### Scenario: Existing tool omits metadata
 - **WHEN** a successful tool returns only ok=true and value
 - **THEN** existing non-error translation and content remain unchanged.
+
+### Requirement: Custom adapter SHALL support an explicit SDK request timeout
+
+The Custom adapter MUST accept an optional validated programmatic requestTimeoutMs and pass it to the provider SDK without changing defaults for callers that omit it. Evaluation MUST pass its effective deadline explicitly, retain AbortSignal propagation and reject values outside the supported timer domain.
+
+#### Scenario: TraceTrial supplies a twenty-minute task deadline
+- **WHEN** the Custom adapter builds its client
+- **THEN** the SDK receives the explicit timeout instead of imposing its own shorter default.
+
+#### Scenario: An ordinary caller omits the timeout option
+- **WHEN** the client is created
+- **THEN** its existing SDK default remains in effect.

@@ -188,7 +188,7 @@ Orchestrator 计划阶段可能在收到 `plan_tasks` 后主动停止消费 gene
 
 ### 可选运行时评测策略
 
-`CustomAgentAdapter` 构造函数可接收 `CustomAgentAdapterOptions`（`src/server/adapters/custom-request-policy.ts`）：`maxTurns` 指定上述单 run 轮数上限，`requestSettings` 限定可覆盖 `reasoning_effort` / `max_completion_tokens`，`maxRetries` 控制 SDK 重试，`requestPolicy` 提供发送前检查和逐请求观察，`toolPolicy` 提供可选的工具调用前检查。普通应用不传评测策略时，仍使用通常请求参数和 SDK 两次重试；轮数按上述环境变量/默认值解析。调用保留 `AbortSignal`，不改变 `AdapterInput` 或 `StreamEvent`。
+`CustomAgentAdapter` 构造函数可接收 `CustomAgentAdapterOptions`（`src/server/adapters/custom-request-policy.ts`）：`maxTurns` 指定上述单 run 轮数上限，`requestSettings` 限定可覆盖 `reasoning_effort` / `max_completion_tokens`，`maxRetries` 控制 SDK 重试，`requestPolicy` 提供发送前检查和逐请求观察，`toolPolicy` 提供可选的工具调用前检查。可选 `requestTimeoutMs` 是正安全整数且不得超出 timer 域 `2_147_483_647`，显式传入 SDK 的 `timeout`；省略时保留 SDK 默认。评测 profile 从有效 Actor 总时限传入该值，并继续通过 AbortSignal 约束剩余任务时间。普通应用不传评测策略时，仍使用通常请求参数和 SDK 两次重试；轮数按上述环境变量/默认值解析。调用保留 `AbortSignal`，不改变 `AdapterInput` 或 `StreamEvent`。
 
 Terminal-Bench 入口使用 `eval/terminalbench/request-policy.ts` 的 `createEvalRequestPolicy()`：同一 trial 的根、子 run 共享外部 policy 闭包，在实际 HTTP 请求发送前检查 UTF-8 JSON body 大小和累计请求数。该 trial 的请求预算独立于每个 run 的 `maxTurns`。历史首轮 smoke 的默认额度继续为最多八个请求、单 body 64 KiB、累计 256 KiB、`max_completion_tokens=2048`，设置 `reasoning_effort='none'`、SDK 重试为零。trial 输入可显式设置 `maxTurns` 与 `requestLimits`，其中 `maxRequests` 可配置至 1000，累计 body 字节可配置至 64 MiB；单 body 和输出 token 的既有上限保持不变。Python wrapper 对应选项为 `max_turns`、`max_requests`、`max_total_request_bytes`，有效值写入 manifest。额度耗尽后，后续请求保持拒绝；byte 约束不代表精确 token 或美元上限。评测配置不写入普通 Agent 或 DB schema。
 

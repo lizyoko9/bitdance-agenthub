@@ -230,6 +230,13 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - ❌ 引入新的 LLM SDK / 工具 / 框架而不更新本文档
 - ❌ 把多个 spec 的修改塞到一个 PR
 
+### 6.3.1 公开评测的预算检查
+
+- 新接任务先从 TaskSpec 读取工具和时间预算，禁止把上一题的限额或 smoke 默认值作为通用 ceiling，禁止静默 min/clamp。
+- 必须检查整条预算链：用户输入轮次、模型内部轮次、实际 HTTP、单次/累计 body、输出、TS schema、SDK timeout、worker deadline 和清理宽限。额外 guard 要明确来源及触发分类；普通工具自身超时属于受测行为，另行记录。
+- task 模式须覆盖全部允许工具与最终回复；较小试跑显式标 constrained，额外资源耗尽单列 resource_limited，保留原 termination 和官方分数。
+- 新任务至少有真实 resolved 配置跨 Python/TypeScript 校验的无模型回归，不能仅用手写配置副本自证。生成预算计划不等于获准新增付费试跑。
+
 ### 6.4 输出代码时
 
 - **小步**：每次只解决一个 spec / 一个 task。一次 100 行内能解决就别写 500 行
@@ -326,7 +333,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 
 Custom tool loop 的轮数优先使用构造参数 `maxTurns`，其次读取 `AGENTHUB_CUSTOM_MAX_TURNS`，默认 32；有效值为 `1..10000` 的整数。模型主动停止与达到上限分别沿完成和 `iteration_limit` 失败路径记录，详见 Spec 05。评测的 trial 共享请求预算与单 run 轮数分别配置，首轮 smoke 的八请求默认额度不构成全局上限。
 
-Custom adapter 的可选 `toolPolicy.beforeTool` 在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。TraceTrial profile 显式设置 `maxToolCalls=6`，所有 run 共用该 trial 的闭包计数；不传该策略时普通应用和 Terminal-Bench 既有工具行为不变。达到工具额度沿 `budget_exhausted` 失败路径保留已有 usage，不修饰被测工具的 `exitCode` / `isError`。
+Custom adapter 的可选 `toolPolicy.beforeTool` 在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。TraceTrial 的 task 模式从 TaskSpec 解析工具/时间及相容的模型、HTTP、字节额度，host/worker共用已留档的预算计划；较小配置须显式 constrained。所有 run 共用该 trial 的闭包计数；不传该策略时普通应用和 Terminal-Bench 既有工具行为不变。达到工具额度沿 `budget_exhausted` 失败路径保留已有 usage，不修饰被测工具的 `exitCode` / `isError`。评测 SDK 请求 timeout 显式继承有效总时限，普通调用省略该选项时保持 SDK 默认。
 
 公开任务通过与否由官方 verifier reward 判定；AgentHub complete、轮数/请求预算耗尽、基础设施失败与官方 reward 分开记录。验证与真实试跑结果以各次保存的报告为准，运行说明不构成已跑通的证据。
 

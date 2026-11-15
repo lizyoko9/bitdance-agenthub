@@ -22,6 +22,8 @@ Task-mode validation rejects tools/time below the task, model turns below tools+
 
 Technical supported domains match the actual runtime: tools/model turns up to 10,000, HTTP up to 1,000, body up to 256 KiB, cumulative body up to 64 MiB, output up to 8192 tokens, and total timeout within the JavaScript signed-32-bit timer domain (2,147,483,647ms). A task or derivation outside these domains is rejected as unsupported, never clamped. Per-request transport guards can still stop a run and remain explicitly reported; capacity checks are not a claim of unlimited context or cost.
 
+Budget-plan timeouts must also be whole seconds expressed as milliseconds, matching the official invocation policy's unit; fractional-second overrides are rejected before execution. This restriction does not change the general SDK option's integer-millisecond domain. Cleanup grace is recorded separately from the Actor solving deadline.
+
 ### Admission and explicit run configuration
 
 `admit_task(task, *, budget_plan=None, mode='task', overrides=None)` resolves or validates a plan against the actual TaskSpec, and returns it in admission metadata. `actor_request(task, budget_plan=None, *, mode='task', overrides=None)` uses that plan. `actor_settings(..., budget_plan=None)` records its mode, digest, sources and effective fields. Existing capability/runtime and zero-Judge checks remain.
