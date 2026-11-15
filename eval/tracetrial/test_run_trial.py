@@ -16,6 +16,99 @@ from .run_trial import actor_request, checked_source, directory_hashes, docker_e
 
 
 class DriverContractTests(unittest.TestCase):
+    def plan_file(self, folder, task_id=TASK_ID, **options):
+        report = driver.preflight_task(Path('/private/tmp/agenthub-tracetrial-source'), task_id, **options)
+        path = Path(folder) / 'budget.json'
+        driver.write_budget_file(report, path)
+        return path
+
+    def test_run_requires_an_explicit_plan_before_credentials_or_side_effects(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker, \
+             patch.object(driver, 'resolve_trial_task') as resolve:
+            with self.assertRaisesRegex(ValueError, '--budget-file'):
+                driver.run_trial(source=Path('/unused'), output=Path('/unused'), context=Path('/unused'),
+                    image='unused', actor_proxy='', judge_proxy='')
+            docker.assert_not_called()
+            resolve.assert_not_called()
+
+    def test_plan_binds_task_sources_and_cannot_be_overwritten(self):
+        with tempfile.TemporaryDirectory() as folder:
+            plan = self.plan_file(folder)
+            envelope = driver.read_budget_file(plan)
+            self.assertEqual(envelope['taskId'], TASK_ID)
+            self.assertEqual(envelope['budgetPlan']['actor']['maxToolCalls'], 6)
+            with self.assertRaises(FileExistsError):
+                driver.write_budget_file(driver.preflight_task(Path('/private/tmp/agenthub-tracetrial-source')), plan)
+            envelope['budgetPlan']['actor']['maxToolCalls'] = 5
+            plan.write_text(json.dumps(envelope))
+            with self.assertRaises(ValueError):
+                driver.read_budget_file(plan)
+
+    def test_stale_source_binding_fails_before_key_or_docker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            plan = self.plan_file(folder)
+            envelope = json.loads(plan.read_text())
+            envelope['sourceTaskHashes']['prompt.md'] = 'changed'
+            plan.write_text(json.dumps(envelope))
+            with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:
+                with self.assertRaisesRegex(ValueError, 'task inputs changed'):
+                    driver.run_trial(source=Path('/private/tmp/agenthub-tracetrial-source'),
+                        output=Path(folder)/'trial', context=Path('/unused'), image='unused',
+                        actor_proxy='', judge_proxy='', budget_file=plan)
+                self.assertFalse((Path(folder)/'trial').exists())
+                docker.assert_not_called()
+
+    def test_driver_copies_the_reviewed_plan_and_uses_the_full_task_deadline(self):
+        task_id = driver.APPROVED_TASK_IDS[-1]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            plan_file = self.plan_file(root, task_id)
+            envelope = driver.read_budget_file(plan_file)
+            task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'),
+                task_id, budget_plan=envelope['budgetPlan'])
+            context = root/'build'
+            context.mkdir()
+            (context/'build-manifest.json').write_text(json.dumps({'runtime': {'agenthubCommit': 'fixture'}}))
+            (context/'image.json').write_text(json.dumps({'id': 'fixture-image'}))
+            output = root/'trial'
+            calls = []
+
+            def docker(*args, **kwargs):
+                calls.append((args, kwargs))
+                if args[:2] == ('image', 'inspect'):
+                    return SimpleNamespace(stdout=json.dumps([{'Id': 'fixture-image'}]), stderr='', returncode=0)
+                if args[0] == 'create':
+                    return SimpleNamespace(stdout='fixture-container', stderr='', returncode=0)
+                if args[:2] == ('cp', 'fixture-container:/state/.'):
+                    native = Path(args[2])
+                    (native/'trial').mkdir()
+                    (native/'trial/result.json').write_text(json.dumps({
+                        'runStatus': 'complete', 'terminationReason': 'completed'}))
+                    (native/'actor_process.json').write_text(json.dumps({'exit_code': 0, 'timed_out': False}))
+                return SimpleNamespace(stdout='', stderr='', returncode=0)
+
+            with patch.dict(os.environ, {'OPENAI_API_KEY': 'fixture-only-key'}, clear=True), \
+                 patch.object(driver, 'resolve_trial_task', return_value=(task, report, request)), \
+                 patch.object(driver, 'verify_build_files'), patch.object(driver, 'verify_runtime_sources'), \
+                 patch.object(driver.subprocess, 'check_output', return_value='fixture-revision'), \
+                 patch.object(driver, 'docker', side_effect=docker), \
+                 patch('eval.tracetrial.trace_adapter.normalize_agenthub_trace', return_value={'structured_trace_status': 'available'}), \
+                 patch('eval.tracetrial.trace_adapter.emit_execution_evidence'), \
+                 patch('eval.tracetrial.score_trial.score_retained_trial', return_value={'scoringStatus': 'completed'}):
+                result = driver.run_trial(source=Path('/unused'), output=output, context=context,
+                    image='fixture-image', actor_proxy='proxy', judge_proxy='', task_id=task_id, budget_file=plan_file)
+            copied = [args for args, _ in calls if args[0]=='cp' and args[-1]=='fixture-container:/state/budget-plan.json']
+            self.assertEqual(len(copied), 1)
+            self.assertEqual(json.loads(Path(copied[0][1]).read_text()), envelope['budgetPlan'])
+            execution = next((args, kwargs) for args, kwargs in calls if args[0]=='exec')
+            self.assertEqual(execution[0][-4:], ('/state/request.json', '/state', 'proxy', '/state/budget-plan.json'))
+            self.assertEqual(execution[1]['timeout'], 1235)
+            protocol = json.loads((output/'artifacts/protocol.json').read_text())
+            self.assertEqual(protocol['actor']['sdkRequestTimeoutMs'], 1200000)
+            self.assertEqual(protocol['budgetPlanSha256'], envelope['budgetPlanSha256'])
+            self.assertEqual(result['budgetOutcome']['kind'], 'not_limited')
+            self.assertEqual(json.loads((output/'artifacts/budget-outcome.json').read_text()), result['budgetOutcome'])
+
     def test_preflight_admits_only_allowlisted_pinned_tasks_without_a_key_or_docker(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:
             for task_id in driver.APPROVED_TASK_IDS:
@@ -39,6 +132,7 @@ class DriverContractTests(unittest.TestCase):
             with patch.object(driver.tarfile, 'open') as archive:
                 archive.return_value.__enter__.return_value.extractfile.return_value.read.return_value = json.dumps(manifest).encode()
                 (root/'container_worker.py').write_bytes(Path(driver.__file__).with_name('container_worker.py').read_bytes())
+                (root/'budget_contract.py').write_bytes(Path(driver.__file__).with_name('budget_contract.py').read_bytes())
                 with self.assertRaisesRegex(ValueError, 'Refresh controller source differs'):
                     driver.verify_runtime_sources(root)
 
@@ -56,16 +150,18 @@ class DriverContractTests(unittest.TestCase):
 
     def test_unsupported_run_has_no_output_or_container_side_effects_and_needs_no_key(self):
         report = {'status': 'unsupported', 'score': None, 'reasons': ['fixture missing capability']}
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {}, clear=True), \
-             patch.object(driver, 'resolve_trial_task', return_value=(None, report, None)), \
-             patch.object(driver, 'docker') as docker, patch.object(driver, 'verify_build_files') as verify:
-            output = Path(folder)/'not-created'
-            result = driver.run_trial(source=Path('/unused'), output=output, context=Path('/unused'),
-                                      image='unused', actor_proxy='', judge_proxy='')
-            self.assertEqual(result, report)
-            self.assertFalse(output.exists())
-            docker.assert_not_called()
-            verify.assert_not_called()
+        with tempfile.TemporaryDirectory() as folder:
+            plan = self.plan_file(folder)
+            with patch.dict(os.environ, {}, clear=True), \
+                 patch.object(driver, 'resolve_trial_task', return_value=(None, report, None)), \
+                 patch.object(driver, 'docker') as docker, patch.object(driver, 'verify_build_files') as verify:
+                output = Path(folder)/'not-created'
+                result = driver.run_trial(source=Path('/unused'), output=output, context=Path('/unused'),
+                                          image='unused', actor_proxy='', judge_proxy='', budget_file=plan)
+                self.assertEqual(result, report)
+                self.assertFalse(output.exists())
+                docker.assert_not_called()
+                verify.assert_not_called()
 
     def test_preflight_cli_needs_only_source_and_optional_task(self):
         report = {'status': 'supported', 'score': None}
@@ -73,22 +169,24 @@ class DriverContractTests(unittest.TestCase):
              patch.object(driver, 'preflight_task', return_value=report) as preflight, \
              patch.object(driver.sys, 'stdout', new_callable=io.StringIO) as output:
             driver.main()
-            preflight.assert_called_once_with(Path('/fixture-source'), TASK_ID)
+            preflight.assert_called_once_with(Path('/fixture-source'), TASK_ID, mode='task', overrides=None)
             self.assertEqual(json.loads(output.getvalue()), report)
 
     def test_existing_or_symlink_run_directory_is_rejected_before_key_or_docker(self):
         task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'))
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {}, clear=True), \
-             patch.object(driver, 'resolve_trial_task', return_value=(task, report, request)), \
-             patch.object(driver, 'docker') as docker:
+        with tempfile.TemporaryDirectory() as folder:
+            plan = self.plan_file(folder)
             link = Path(folder)/'dangling'
             link.symlink_to(Path(folder)/'new-target')
-            for output in (Path(folder), link):
-                with self.subTest(output=output), self.assertRaises(FileExistsError):
-                    driver.run_trial(source=Path('/unused'), output=output, context=Path('/unused'),
-                                     image='unused', actor_proxy='', judge_proxy='')
-            self.assertFalse((Path(folder)/'new-target').exists())
-            docker.assert_not_called()
+            with patch.dict(os.environ, {}, clear=True), \
+                 patch.object(driver, 'resolve_trial_task', return_value=(task, report, request)), \
+                 patch.object(driver, 'docker') as docker:
+                for output in (Path(folder), link):
+                    with self.subTest(output=output), self.assertRaises(FileExistsError):
+                        driver.run_trial(source=Path('/unused'), output=output, context=Path('/unused'),
+                                         image='unused', actor_proxy='', judge_proxy='', budget_file=plan)
+                self.assertFalse((Path(folder)/'new-target').exists())
+                docker.assert_not_called()
 
     def test_public_actor_request_contains_no_private_grading_inputs(self):
         source = checked_source(Path('/private/tmp/agenthub-tracetrial-source'))
@@ -178,6 +276,7 @@ class DriverContractTests(unittest.TestCase):
             self.assertEqual(value['runtime']['agenthubCommit'], revision)
             self.assertIn('refresh-runtime.py', value['buildFiles'])
             self.assertIn('baseline-runtime-source.json', value['buildFiles'])
+            self.assertIn('budget_contract.py', value['buildFiles'])
             self.assertNotIn('build-manifest.json', value['buildFiles'])
             self.assertEqual((context/'Dockerfile').read_bytes(), Path(driver.__file__).with_name('Dockerfile.refresh').read_bytes())
             self.assertEqual(set(value['controllerFiles']), set(driver.REFRESH_CONTROLLER_FILES))
@@ -201,7 +300,7 @@ class LocalAssemblyTests(unittest.TestCase):
     def context(self, folder):
         root = Path(folder)
         names = ['Dockerfile', 'runtime.tar.gz', 'baseline-runtime-source.json', 'refresh-runtime.py',
-                 'container_worker.py', *('recorder/' + name for name in driver.RECORDER_FILES)]
+                 'container_worker.py', 'budget_contract.py', *('recorder/' + name for name in driver.RECORDER_FILES)]
         for name in names:
             target = root/name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -259,23 +358,24 @@ class LocalAssemblyTests(unittest.TestCase):
             self.assertTrue(container.startswith('agenthub-refresh-'))
             self.assertEqual(create[6:], [self.base_id, 'sleep', 'infinity'])
             operations = [command[1] for command in commands]
-            self.assertEqual(operations, ['image', 'create', 'cp', 'cp', 'cp', 'cp', 'cp', 'start',
+            self.assertEqual(operations, ['image', 'create', 'cp', 'cp', 'cp', 'cp', 'cp', 'cp', 'start',
                                           'exec', 'exec', 'exec', 'exec', 'commit', 'image', 'rm'])
             self.assertEqual(commands[2], ['docker', 'cp', str(context/'runtime.tar.gz'), container+':/tmp/agenthub-runtime.tar.gz'])
-            self.assertEqual(commands[6], ['docker', 'cp', str(context/'recorder')+'/.', container+':/opt/recorder'])
+            self.assertEqual(commands[6], ['docker', 'cp', str(context/'budget_contract.py'), container+':/opt/agenthub-eval/budget_contract.py'])
+            self.assertEqual(commands[7], ['docker', 'cp', str(context/'recorder')+'/.', container+':/opt/recorder'])
             self.assertEqual(commands[-1], ['docker', 'rm', '--force', container])
-            for command in commands[8:11]:
+            for command in commands[9:12]:
                 self.assertEqual(command[:3], ['docker', 'exec', '--user=0'])
-            self.assertIn('chown 501:20 /state /state/home', commands[10][-1])
-            probe = commands[11]
+            self.assertIn('chown 501:20 /state /state/home', commands[11][-1])
+            probe = commands[12]
             self.assertEqual(probe[:7], ['docker', 'exec', '--user', '501:20', '--workdir', '/installed-agent/agenthub', container])
             self.assertIn('better-sqlite3', probe[-1])
             self.assertIn('runTraceTrial', probe[-1])
             self.assertIn('createIsolatedProfile', probe[-1])
             self.assertIn('process.getuid()===0', probe[-1])
             self.assertIn('API_KEY', probe[-1])
-            self.assertEqual(commands[12][-2:], [container, self.image])
-            self.assertIn('USER 501:20', commands[12])
+            self.assertEqual(commands[13][-2:], [container, self.image])
+            self.assertIn('USER 501:20', commands[13])
             self.assertNotIn(manifest['baseImage']['reference'], json.dumps(commands))
             for _command, kwargs in calls:
                 self.assertNotIn('OPENAI_API_KEY', kwargs['env'])

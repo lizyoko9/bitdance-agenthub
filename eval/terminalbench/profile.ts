@@ -29,7 +29,7 @@ const WORKER_PROMPT = `You are AgentHub's terminal task execution agent. Complet
 const WORKER_TOOLS = ['fs_list', 'fs_read', 'fs_write', 'bash', 'ask_user']
 
 export async function createIsolatedProfile(
-  request: Pick<TrialRequest, 'outputDir' | 'group' | 'modelId'> & Partial<Pick<TrialRequest, 'maxTurns' | 'maxToolCalls' | 'requestLimits'>>,
+  request: Pick<TrialRequest, 'outputDir' | 'group' | 'modelId'> & Partial<Pick<TrialRequest, 'maxTurns' | 'maxToolCalls' | 'requestLimits' | 'timeoutMs'>>,
   onRequest: (observation: CustomRequestObservation) => void,
   options: TrialProfileOptions = {},
 ): Promise<TrialProfile> {
@@ -79,6 +79,7 @@ export async function createIsolatedProfile(
     agentRegistry.register(new CustomAgentAdapter({
       ...createEvalRequestPolicy(request.requestLimits, onRequest),
       maxTurns: request.maxTurns ?? DEFAULT_CUSTOM_MAX_TURNS,
+      requestTimeoutMs: request.timeoutMs,
       ...(request.maxToolCalls === undefined ? {} : { toolPolicy: createEvalToolPolicy(request.maxToolCalls) }),
     }))
     return { dataDir, workerIds: [worker.id], orchestratorId: orchestrator.id, close: () => sqlite.close() }

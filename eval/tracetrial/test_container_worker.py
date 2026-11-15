@@ -1,6 +1,9 @@
-import importlib.util
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -8,16 +11,26 @@ from urllib.error import URLError
 from urllib.request import Request
 from unittest.mock import Mock, patch
 
-spec = importlib.util.spec_from_file_location('container_worker', Path(__file__).with_name('container_worker.py'))
-worker = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(worker)
+from tracetrial_bench.task_resolver import resolve_task
+
+from . import container_worker as worker
+from .budget_contract import build_budget_plan, budget_plan_digest
 
 
-def actor_request(**overrides):
-    return {'taskId': worker.APPROVED_TASK_IDS[-1], 'instruction': 'Complete the fixture task',
+TASK_BUDGET = {'maxUserTurns': 12, 'maxToolCalls': 80, 'maxWallTimeSeconds': 1200}
+
+
+def plan(*, task_id=worker.GOVERNANCE_TASK_ID, mode='task', overrides=None):
+    return build_budget_plan(task_id, TASK_BUDGET, mode=mode, overrides=overrides)
+
+
+def actor_request(budget_plan=None, **overrides):
+    budget = plan() if budget_plan is None else budget_plan
+    actor = budget['actor']
+    return {'taskId': budget['taskId'], 'instruction': 'Complete the fixture task',
         'cwd': '/workspace', 'group': 'single', 'modelId': worker.MODEL,
-        **worker.ACTOR_CEILINGS, 'requestLimits': dict(worker.REQUEST_CEILINGS),
-        'outputDir': '/state/trial', **overrides}
+        **{name: actor[name] for name in ('timeoutMs', 'maxTurns', 'maxToolCalls')},
+        'requestLimits': dict(actor['requestLimits']), 'outputDir': '/state/trial', **overrides}
 
 
 class UpstreamBudgetTests(unittest.TestCase):
@@ -26,149 +39,198 @@ class UpstreamBudgetTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.transport = Mock()
         self.transport.open.return_value.status = 200
-        self.guard = worker.BoundedUpstream(proxy='', deadline=time.monotonic()+120,
-            ledger_path=Path(self.tmp.name)/'requests.jsonl', opener=self.transport, request=actor_request())
+        self.budget = plan()
+        self.guard = self.guard_for(self.budget)
+
+    def guard_for(self, budget, name='requests.jsonl', deadline=None):
+        return worker.BoundedUpstream(proxy='',
+            deadline=time.monotonic()+budget['actor']['timeoutMs']/1000 if deadline is None else deadline,
+            ledger_path=Path(self.tmp.name)/name, opener=self.transport,
+            request=actor_request(budget), budget_plan=budget)
 
     def request(self, **overrides):
         payload = {'model': 'gpt-6-luna', 'reasoning_effort': 'none', 'max_completion_tokens': 8192}
         payload.update(overrides)
         return Request('https://api.openai.com/v1/chat/completions', data=json.dumps(payload).encode())
 
-    def test_blocks_seventeenth_upstream_and_no_retry_after_failure(self):
-        self.transport.open.side_effect = URLError('offline')
-        for _ in range(16):
-            with self.assertRaises(URLError):
-                self.guard.open(self.request())
+    def test_g1_allows_eighty_one_http_opportunities_without_an_equality_exhaustion_claim(self):
+        for _ in range(81):
+            self.guard.open(self.request())
+        self.assertEqual(self.transport.open.call_count, 81)
+        self.assertIsNone(self.guard.budget_rejection)
         with self.assertRaisesRegex(URLError, 'budget'):
             self.guard.open(self.request())
-        self.assertEqual(self.transport.open.call_count, 16)
+        self.assertEqual(self.transport.open.call_count, 81)
+        self.assertEqual(self.guard.budget_rejection['limit'], 'http_requests')
 
-    def test_bytes_and_settings_rejected_before_network(self):
-        for request in [self.request(model='other'), self.request(max_completion_tokens=9000),
-                        self.request(padding='a'*262144), Request('https://other.test', data=b'{}')]:
-            with self.assertRaises(URLError):
-                self.guard.open(request)
-        self.assertEqual(self.transport.open.call_count, 0)
-        self.guard.total_bytes = 2097152
+    def test_failed_upstream_is_counted_once_without_transport_retry(self):
+        self.transport.open.side_effect = URLError('offline')
         with self.assertRaises(URLError):
             self.guard.open(self.request())
+        self.assertEqual(self.guard.count, 1)
+        self.assertEqual(self.transport.open.call_count, 1)
+        self.assertIsNone(self.guard.budget_rejection)
 
-    def test_timeout_is_capped_and_ledger_has_no_authorization(self):
+    def test_unapproved_endpoint_model_or_output_setting_has_no_budget_or_network_side_effect(self):
+        for request in [self.request(model='other'), self.request(max_completion_tokens=9000),
+                        Request('https://other.test', data=b'{}')]:
+            with self.assertRaises(URLError):
+                self.guard.open(request)
+        self.transport.open.assert_not_called()
+        self.assertIsNone(self.guard.budget_rejection)
+
+    def test_byte_guards_preserve_safe_structured_rejection_and_never_send_after_rejection(self):
+        with self.assertRaises(URLError):
+            self.guard.open(self.request(padding='a'*262144))
+        self.assertEqual(self.guard.budget_rejection, {
+            'limit': 'request_bytes', 'reason': 'actor request body exceeds byte limit'})
+        with self.assertRaises(URLError):
+            self.guard.open(self.request())
+        self.transport.open.assert_not_called()
+        other = self.guard_for(self.budget, 'total.jsonl')
+        other.total_bytes = self.budget['actor']['requestLimits']['maxTotalRequestBytes']
+        with self.assertRaises(URLError):
+            other.open(self.request())
+        self.assertEqual(other.budget_rejection['limit'], 'total_request_bytes')
+        self.transport.open.assert_not_called()
+
+    def test_timeout_is_dynamic_and_ledger_does_not_contain_authorization(self):
         request = self.request()
         request.add_header('Authorization', 'Bearer test-sensitive-key')
         self.guard.open(request, timeout=3600)
-        self.assertLessEqual(self.transport.open.call_args.kwargs['timeout'], 120)
+        self.assertGreater(self.transport.open.call_args.kwargs['timeout'], 600)
+        self.assertLessEqual(self.transport.open.call_args.kwargs['timeout'], 1200)
         contents = self.guard.ledger_path.read_text()
         self.assertNotIn('test-sensitive-key', contents)
         self.assertEqual(json.loads(contents)['sequence'], 1)
+
+    def test_deadline_guard_is_recorded_before_transport(self):
+        guard = self.guard_for(self.budget, deadline=time.monotonic()-1)
+        with self.assertRaises(URLError):
+            guard.open(self.request())
+        self.assertEqual(guard.budget_rejection['limit'], 'wall_time')
+        self.transport.open.assert_not_called()
+
+    def test_explicit_constrained_request_limit_output_and_deadline_are_enforced(self):
+        budget = plan(mode='constrained', overrides={
+            'timeoutMs': 5000, 'maxRequests': 1, 'maxRequestBytes': 1024,
+            'maxTotalRequestBytes': 1024, 'maxCompletionTokens': 2048})
+        guard = self.guard_for(budget, 'small.jsonl')
+        with self.assertRaisesRegex(URLError, 'settings'):
+            guard.open(self.request(max_completion_tokens=8192))
+        guard.open(self.request(max_completion_tokens=2048), timeout=120)
+        self.assertLessEqual(self.transport.open.call_args.kwargs['timeout'], 5)
+        with self.assertRaises(URLError):
+            guard.open(self.request(max_completion_tokens=2048))
+        self.assertEqual(guard.budget_rejection['limit'], 'http_requests')
+        self.assertEqual(self.transport.open.call_count, 1)
 
     def test_redirects_raise_before_following(self):
         with self.assertRaises(URLError):
             worker.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://other.test')
 
-    def test_worker_enforces_effective_request_limits_instead_of_approved_maxima(self):
-        limits = {'maxRequests': 1, 'maxRequestBytes': 1024, 'maxTotalRequestBytes': 1024,
-                  'maxCompletionTokens': 2048}
-        guard = worker.BoundedUpstream(proxy='', deadline=time.monotonic()+120,
-            ledger_path=Path(self.tmp.name)/'small.jsonl', opener=self.transport,
-            request=actor_request(timeoutMs=5000, requestLimits=limits))
-        with self.assertRaisesRegex(URLError, 'settings'):
-            guard.open(self.request(max_completion_tokens=8192))
-        guard.open(self.request(max_completion_tokens=2048), timeout=120)
-        self.assertLessEqual(self.transport.open.call_args.kwargs['timeout'], 5)
-        with self.assertRaisesRegex(URLError, 'budget'):
-            guard.open(self.request(max_completion_tokens=2048))
-        self.assertEqual(self.transport.open.call_count, 1)
-
-    def test_worker_enforces_both_effective_byte_limits_before_transport(self):
-        limits = {'maxRequests': 16, 'maxRequestBytes': 512, 'maxTotalRequestBytes': 512,
-                  'maxCompletionTokens': 8192}
-        guard = worker.BoundedUpstream(proxy='', deadline=time.monotonic()+120,
-            ledger_path=Path(self.tmp.name)/'bytes.jsonl', opener=self.transport,
-            request=actor_request(requestLimits=limits))
-        with self.assertRaisesRegex(URLError, 'budget'):
-            guard.open(self.request(padding='a'*512))
-        self.transport.open.assert_not_called()
-        guard.total_bytes = 512
-        with self.assertRaisesRegex(URLError, 'budget'):
-            guard.open(self.request())
-        self.transport.open.assert_not_called()
-
 
 class RequestValidationTests(unittest.TestCase):
-    def test_governance_task_cannot_use_its_larger_declared_limits_in_the_worker(self):
-        request = actor_request(taskId=worker.GOVERNANCE_TASK_ID)
-        self.assertEqual(worker.validate_actor_request(request)['maxToolCalls'], 6)
-        for overrides in ({'maxToolCalls': 80}, {'timeoutMs': 1200000}):
-            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
-                worker.validate_actor_request({**request, **overrides})
-
-    def test_all_approved_ids_share_one_bounded_public_request_contract(self):
+    def test_worker_accepts_full_task_plan_and_exact_request_for_each_allowed_id(self):
         for task_id in worker.APPROVED_TASK_IDS:
             with self.subTest(task=task_id):
-                request = actor_request(taskId=task_id)
-                self.assertEqual(worker.validate_actor_request(request), request)
+                task = resolve_task(Path('/private/tmp/agenthub-tracetrial-source/Task')/task_id)
+                budget = build_budget_plan(task_id, {'maxUserTurns': task.max_turns,
+                    'maxToolCalls': task.max_tool_calls, 'maxWallTimeSeconds': task.max_wall_time_sec})
+                request = actor_request(budget)
+                self.assertEqual(worker.validate_actor_request(request, budget), request)
+                self.assertEqual(request['maxToolCalls'], task.max_tool_calls)
+                self.assertEqual(request['maxTurns'], task.max_tool_calls + 1)
 
-    def test_request_shape_and_scalar_ceiling_disagreement_is_rejected(self):
-        cases = [{'taskId': '../private'}, {'modelId': 'other'}, {'group': 'orch-gate'},
-                 {'cwd': '/private'}, {'outputDir': '/workspace/results'}, {'instruction': ''},
-                 {'timeoutMs': 120001}, {'maxTurns': 33}, {'maxToolCalls': 7},
-                 {'maxToolCalls': True}, {'extraSetting': 'unapproved'}]
-        for overrides in cases:
+    def test_plan_request_scalar_shape_and_limit_disagreement_are_rejected(self):
+        budget = plan()
+        for overrides in ({'taskId': '../private'}, {'modelId': 'other'}, {'group': 'orch-gate'},
+                          {'cwd': '/private'}, {'outputDir': '/workspace/results'}, {'instruction': ''},
+                          {'timeoutMs': 120000}, {'maxTurns': 32}, {'maxToolCalls': 6},
+                          {'maxToolCalls': True}, {'extraSetting': 'unapproved'},
+                          {'requestLimits': {**budget['actor']['requestLimits'], 'maxRequests': 16}}):
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
-                worker.validate_actor_request(actor_request(**overrides))
-        missing = actor_request()
-        del missing['maxToolCalls']
+                worker.validate_actor_request(actor_request(budget, **overrides), budget)
+        with self.assertRaises(TypeError):
+            worker.validate_actor_request(actor_request(budget))
         with self.assertRaises(ValueError):
-            worker.validate_actor_request(missing)
+            worker.validate_actor_request(actor_request(budget), {})
 
-    def test_request_limits_cannot_exceed_any_approved_ceiling(self):
-        for name, ceiling in worker.REQUEST_CEILINGS.items():
-            for invalid in (ceiling + 1, 0, True, '1'):
-                with self.subTest(name=name, invalid=invalid), self.assertRaises(ValueError):
-                    worker.validate_actor_request(actor_request(requestLimits={**worker.REQUEST_CEILINGS, name: invalid}))
-
-    def test_invalid_worker_request_is_rejected_before_credentials_or_process_start(self):
+    def test_missing_or_stale_plan_is_rejected_before_credentials_or_process_start(self):
         with tempfile.TemporaryDirectory() as folder:
-            request_file = Path(folder)/'request.json'
-            request_file.write_text(json.dumps(actor_request(maxToolCalls=7)))
+            state = Path(folder)
+            request_file, budget_file = state/'request.json', state/'budget.json'
+            budget = plan()
+            request_file.write_text(json.dumps(actor_request(budget, maxToolCalls=6)))
+            budget_file.write_text(json.dumps(budget))
             with patch.object(worker.sys, 'stdin') as stdin, patch.object(worker.subprocess, 'Popen') as popen:
-                with self.assertRaises(ValueError):
-                    worker.run_worker(request_file, Path(folder)/'state', '')
+                for path in (budget_file, state/'missing.json'):
+                    with self.subTest(path=path), self.assertRaises((ValueError, FileNotFoundError)):
+                        worker.run_worker(request_file, state, '', path)
                 stdin.read.assert_not_called()
                 popen.assert_not_called()
 
-    def test_worker_uses_request_deadline_and_retains_the_exact_effective_limits(self):
-        request = actor_request(timeoutMs=5000, maxTurns=4, maxToolCalls=2,
-                                requestLimits={**worker.REQUEST_CEILINGS, 'maxRequests': 3})
+    def test_standalone_worker_imports_adjacent_contract_and_rejects_before_actor_creation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ('container_worker.py', 'budget_contract.py'):
+                shutil.copyfile(Path(worker.__file__).with_name(name), root/name)
+            budget = plan()
+            (root/'request.json').write_text(json.dumps(actor_request(budget, maxTurns=32)))
+            (root/'budget.json').write_text(json.dumps(budget))
+            completed = subprocess.run([sys.executable, str(root/'container_worker.py'),
+                str(root/'request.json'), str(root/'not-created'), '', str(root/'budget.json')],
+                env={'PATH': os.defpath, 'PYTHONDONTWRITEBYTECODE': '1'},
+                capture_output=True, text=True, timeout=10, input='fixture-only-key')
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn('Actor request differs from the budget plan', completed.stderr)
+            self.assertNotIn('fixture-only-key', completed.stderr)
+            self.assertFalse((root/'not-created').exists())
+
+    def run_mock_worker(self, *, timeout=False):
+        budget = plan(mode='constrained', overrides={
+            'timeoutMs': 5000, 'maxTurns': 4, 'maxToolCalls': 2, 'maxRequests': 3})
+        request = actor_request(budget)
         with tempfile.TemporaryDirectory() as folder:
             state = Path(folder)
-            request_file = state/'request.json'
+            request_file, budget_file = state/'request.json', state/'budget.json'
             request_file.write_text(json.dumps(request))
+            budget_file.write_text(json.dumps(budget))
             recorder = Mock()
             recorder.start.return_value.base_url = 'http://127.0.0.1:4002'
             recorder.public_summary.return_value = {}
             child = Mock(pid=99)
-            child.wait.return_value = 0
+            child.wait.side_effect = [subprocess.TimeoutExpired('fixture', 5), 0] if timeout else [0]
             with patch('tracetrial_bench.provider_request_recorder.ProviderRequestRecorderProxy', return_value=recorder), \
                  patch.object(worker.os, 'geteuid', return_value=0), \
                  patch.object(worker.sys, 'stdin') as stdin, \
                  patch.dict(worker.os.environ, {'PATH': '/fixture/bin', 'ACTOR_UID': '501', 'ACTOR_GID': '20'}, clear=True), \
                  patch.object(worker.subprocess, 'Popen', return_value=child) as popen, \
+                 patch.object(worker.os, 'killpg') as kill, \
                  patch.object(worker.time, 'monotonic', return_value=100), \
                  patch.object(worker.Path, 'mkdir'):
                 stdin.read.return_value = 'fixture-only-key'
-                self.assertEqual(worker.run_worker(request_file, state, ''), 0)
-                child.wait.assert_called_once_with(timeout=5)
+                self.assertEqual(worker.run_worker(request_file, state, '', budget_file), 124 if timeout else 0)
+                self.assertEqual(child.wait.call_args_list[0].kwargs['timeout'], 5)
                 self.assertEqual(recorder._opener.deadline, 105)
                 self.assertEqual(recorder._opener.settings, request)
+                self.assertEqual(kill.call_count, int(timeout))
                 self.assertNotIn('fixture-only-key', json.dumps(popen.call_args.kwargs['env']))
                 self.assertEqual(popen.call_args.kwargs['user'], 501)
                 self.assertEqual(popen.call_args.kwargs['group'], 20)
             metadata = json.loads((state/'actor_process.json').read_text())
+            self.assertEqual(metadata['budget_plan_digest'], budget_plan_digest(budget))
+            self.assertEqual(metadata['budget_mode'], 'constrained')
             self.assertEqual(metadata['effective_limits'], {name: request[name]
                 for name in ('timeoutMs', 'maxTurns', 'maxToolCalls', 'requestLimits')})
             self.assertNotIn('fixture-only-key', (state/'actor_process.json').read_text())
+            return metadata
+
+    def test_worker_uses_plan_deadline_and_records_exact_plan_digest_without_a_rejection_on_success(self):
+        self.assertIsNone(self.run_mock_worker()['budget_rejection'])
+
+    def test_worker_wall_timeout_records_structured_budget_rejection(self):
+        self.assertEqual(self.run_mock_worker(timeout=True)['budget_rejection']['limit'], 'wall_time')
 
 
 if __name__ == '__main__':

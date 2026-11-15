@@ -37,8 +37,8 @@ const contains = (parent: string, child: string): boolean => {
   return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
 }
 
-export function validateTrialRequest(input: unknown): TrialRequest {
-  const request = TrialRequestSchema.parse(input)
+export function validateTrialRequest(input: unknown, schema: typeof TrialRequestSchema = TrialRequestSchema): TrialRequest {
+  const request = schema.parse(input)
   const cwd = realpathSync(request.cwd)
   if (!statSync(cwd).isDirectory()) throw new Error(`Task cwd is not a directory: ${cwd}`)
   const outputDir = canonicalPath(path.resolve(request.outputDir))

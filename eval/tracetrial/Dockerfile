@@ -4,6 +4,7 @@ COPY install-runtime.sh /tmp/install-runtime.sh
 RUN sh /tmp/install-runtime.sh /tmp/agenthub-runtime.tar.gz /installed-agent/agenthub && rm /tmp/agenthub-runtime.tar.gz
 COPY recorder /opt/recorder
 COPY container_worker.py /opt/agenthub-eval/container_worker.py
+COPY budget_contract.py /opt/agenthub-eval/budget_contract.py
 ENV PATH="/installed-agent/node/bin:${PATH}" PYTHONPATH=/opt/recorder
 ARG ACTOR_UID=501
 ARG ACTOR_GID=20

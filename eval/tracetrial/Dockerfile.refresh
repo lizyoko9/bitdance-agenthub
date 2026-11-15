@@ -7,6 +7,7 @@ COPY refresh-runtime.py /opt/agenthub-eval/refresh-runtime.py
 RUN --network=none python3 /opt/agenthub-eval/refresh-runtime.py /tmp/agenthub-runtime.tar.gz /installed-agent/agenthub /opt/agenthub-eval/baseline-runtime-source.json && rm /tmp/agenthub-runtime.tar.gz
 COPY recorder /opt/recorder
 COPY container_worker.py /opt/agenthub-eval/container_worker.py
+COPY budget_contract.py /opt/agenthub-eval/budget_contract.py
 ENV PATH="/installed-agent/node/bin:${PATH}" PYTHONPATH=/opt/recorder
 ARG ACTOR_UID=501
 ARG ACTOR_GID=20

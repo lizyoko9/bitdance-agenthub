@@ -3,6 +3,17 @@ import { z } from 'zod'
 export const DEFAULT_CUSTOM_MAX_TURNS = 32
 export const MAX_CUSTOM_TURNS = 10_000
 export const CustomMaxTurnsSchema = z.number().int().min(1).max(MAX_CUSTOM_TURNS)
+export const MAX_CUSTOM_REQUEST_TIMEOUT_MS = 2_147_483_647
+export const CustomRequestTimeoutMsSchema = z.number().int().positive().max(MAX_CUSTOM_REQUEST_TIMEOUT_MS)
+
+export function resolveCustomRequestTimeoutMs(override?: number): number | undefined {
+  if (override === undefined) return undefined
+  const parsed = CustomRequestTimeoutMsSchema.safeParse(override)
+  if (!parsed.success) {
+    throw new Error(`Invalid CustomAgentAdapter requestTimeoutMs: expected an integer from 1 to ${MAX_CUSTOM_REQUEST_TIMEOUT_MS}`)
+  }
+  return parsed.data
+}
 
 export function resolveCustomMaxTurns(override?: number): number {
   const environment = process.env.AGENTHUB_CUSTOM_MAX_TURNS

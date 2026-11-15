@@ -56,6 +56,7 @@ export interface CustomToolPolicy {
 export interface CustomAgentAdapterOptions {
   maxTurns?: number
   maxRetries?: number
+  requestTimeoutMs?: number
   requestSettings?: Pick<
     OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
     'reasoning_effort' | 'max_completion_tokens'

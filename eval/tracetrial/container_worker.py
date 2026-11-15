@@ -11,6 +11,11 @@ from datetime import datetime, timezone
 from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
+if __package__:
+    from .budget_contract import budget_plan_digest, validate_budget_plan
+else:
+    from budget_contract import budget_plan_digest, validate_budget_plan
+
 
 GOVERNANCE_TASK_ID = 'G1-registry-cleanup-002'
 APPROVED_TASK_IDS = (
@@ -20,12 +25,9 @@ APPROVED_TASK_IDS = (
     GOVERNANCE_TASK_ID,
 )
 MODEL = 'gpt-6-luna'
-ACTOR_CEILINGS = {'timeoutMs': 120000, 'maxTurns': 32, 'maxToolCalls': 6}
-REQUEST_CEILINGS = {'maxRequests': 16, 'maxRequestBytes': 262144,
-                    'maxTotalRequestBytes': 2097152, 'maxCompletionTokens': 8192}
 
 
-def validate_actor_request(request):
+def validate_actor_request(request, budget_plan):
     fields = {'taskId', 'instruction', 'cwd', 'group', 'modelId', 'timeoutMs',
               'maxTurns', 'maxToolCalls', 'requestLimits', 'outputDir'}
     if not isinstance(request, dict) or set(request) != fields:
@@ -36,15 +38,16 @@ def validate_actor_request(request):
         raise ValueError('Actor request paths differ from the isolated runtime paths')
     if not isinstance(request['instruction'], str) or not request['instruction'].strip() or len(request['instruction']) > 262144:
         raise ValueError('Actor instruction is missing or exceeds the public request bound')
-    for name, ceiling in ACTOR_CEILINGS.items():
-        if type(request[name]) is not int or not 0 < request[name] <= ceiling:
-            raise ValueError('Actor setting exceeds approved ceiling: ' + name)
+    plan = validate_budget_plan(budget_plan, task_id=request['taskId'])
+    effective = plan['actor']
+    for name in ('timeoutMs', 'maxTurns', 'maxToolCalls'):
+        if type(request[name]) is not int or request[name] != effective[name]:
+            raise ValueError('Actor request differs from the budget plan: ' + name)
     limits = request['requestLimits']
-    if not isinstance(limits, dict) or set(limits) != set(REQUEST_CEILINGS):
-        raise ValueError('Actor request limits are incomplete or contain unknown settings')
-    for name, ceiling in REQUEST_CEILINGS.items():
-        if type(limits[name]) is not int or not 0 < limits[name] <= ceiling:
-            raise ValueError('Actor setting exceeds approved ceiling: ' + name)
+    if not isinstance(limits, dict) or set(limits) != set(effective['requestLimits']):
+        raise ValueError('Actor request limits differ from the budget plan')
+    if any(type(value) is not int or value != effective['requestLimits'][name] for name, value in limits.items()):
+        raise ValueError('Actor request limits differ from the budget plan')
     return {**request, 'requestLimits': dict(limits)}
 
 
@@ -54,22 +57,30 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 class BoundedUpstream:
-    def __init__(self, *, proxy, deadline, ledger_path, request, opener=None):
+    def __init__(self, *, proxy, deadline, ledger_path, request, budget_plan, opener=None):
         self.opener = opener or build_opener(ProxyHandler({'https': proxy}), NoRedirect())
-        self.settings = validate_actor_request(request)
+        self.settings = validate_actor_request(request, budget_plan)
         self.limits = self.settings['requestLimits']
         self.deadline = deadline
         self.ledger_path = Path(ledger_path)
         self.lock = threading.Lock()
         self.count = 0
         self.total_bytes = 0
+        self.budget_rejection = None
+
+    def _reject_budget(self, limit, reason):
+        if self.budget_rejection is None:
+            self.budget_rejection = {'limit': limit, 'reason': reason}
+        raise URLError('actor budget exhausted: ' + self.budget_rejection['reason'])
 
     def open(self, request, timeout=None):
         body = request.data or b''
         with self.lock:
             remaining = self.deadline - time.monotonic()
+            if self.budget_rejection is not None:
+                self._reject_budget(self.budget_rejection['limit'], self.budget_rejection['reason'])
             if remaining <= 0:
-                raise URLError('actor deadline exhausted')
+                self._reject_budget('wall_time', 'actor deadline exhausted')
             if request.full_url != 'https://api.openai.com/v1/chat/completions' or request.get_method() != 'POST':
                 raise URLError('actor endpoint is not allowlisted')
             try:
@@ -80,9 +91,12 @@ class BoundedUpstream:
                     or type(payload.get('max_completion_tokens')) is not int
                     or payload['max_completion_tokens'] != self.limits['maxCompletionTokens']):
                 raise URLError('actor model settings differ from approved settings')
-            if (self.count >= self.limits['maxRequests'] or len(body) > self.limits['maxRequestBytes']
-                    or self.total_bytes + len(body) > self.limits['maxTotalRequestBytes']):
-                raise URLError('actor HTTP budget exhausted')
+            if self.count >= self.limits['maxRequests']:
+                self._reject_budget('http_requests', 'maximum actor HTTP requests reached')
+            if len(body) > self.limits['maxRequestBytes']:
+                self._reject_budget('request_bytes', 'actor request body exceeds byte limit')
+            if self.total_bytes + len(body) > self.limits['maxTotalRequestBytes']:
+                self._reject_budget('total_request_bytes', 'cumulative actor request bodies exceed byte limit')
             self.count += 1
             self.total_bytes += len(body)
             row = {'sequence': self.count, 'body_bytes': len(body), 'total_body_bytes': self.total_bytes,
@@ -92,6 +106,8 @@ class BoundedUpstream:
             row['upstream_status'] = response.status
             return response
         except Exception as exc:
+            if time.monotonic() >= self.deadline and self.budget_rejection is None:
+                self.budget_rejection = {'limit': 'wall_time', 'reason': 'actor deadline exhausted during upstream request'}
             row['error_type'] = type(exc).__name__
             row['upstream_status'] = getattr(exc, 'code', None)
             raise
@@ -100,10 +116,11 @@ class BoundedUpstream:
                 stream.write(json.dumps(row) + '\n')
 
 
-def run_worker(request_path, state_dir, proxy):
+def run_worker(request_path, state_dir, proxy, budget_path):
     from tracetrial_bench.provider_request_recorder import ProviderRequestRecorderProxy
 
-    request = validate_actor_request(json.loads(Path(request_path).read_text(encoding='utf-8')))
+    budget_plan = validate_budget_plan(json.loads(Path(budget_path).read_text(encoding='utf-8')))
+    request = validate_actor_request(json.loads(Path(request_path).read_text(encoding='utf-8')), budget_plan)
     state = Path(state_dir)
     if os.geteuid() != 0:
         raise RuntimeError('Recorder supervisor requires root; actor child is explicitly unprivileged')
@@ -116,7 +133,7 @@ def run_worker(request_path, state_dir, proxy):
     recorder = ProviderRequestRecorderProxy(output_root=state / 'recorder',
         upstream_base_url='https://api.openai.com/v1', upstream_api_key=key,
         listen_host='127.0.0.1', listen_port=4002)
-    guard = BoundedUpstream(proxy=proxy, deadline=deadline, ledger_path=state / 'upstream_requests.jsonl', request=request)
+    guard = BoundedUpstream(proxy=proxy, deadline=deadline, ledger_path=state / 'upstream_requests.jsonl', request=request, budget_plan=budget_plan)
     recorder._opener = guard
     info = recorder.start()
     environment = {'PATH': os.environ['PATH'], 'HOME': '/state/home', 'LANG': 'C.UTF-8',
@@ -135,6 +152,8 @@ def run_worker(request_path, state_dir, proxy):
                 code = child.wait(timeout=max(0.01, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
                 timed_out = True
+                if guard.budget_rejection is None:
+                    guard.budget_rejection = {'limit': 'wall_time', 'reason': 'actor deadline exhausted'}
                 os.killpg(child.pid, signal.SIGTERM)
                 try:
                     code = child.wait(timeout=10)
@@ -147,6 +166,8 @@ def run_worker(request_path, state_dir, proxy):
         (state / 'actor_process.json').write_text(json.dumps({'exit_code': code, 'timed_out': timed_out,
             'started_at': started, 'finished_at': datetime.now(timezone.utc).isoformat(),
             'model': request['modelId'], 'actual_upstream_requests': guard.count,
+            'budget_plan_digest': budget_plan_digest(budget_plan), 'budget_mode': budget_plan['mode'],
+            'budget_rejection': guard.budget_rejection,
             'effective_limits': {name: request[name] for name in ('timeoutMs', 'maxTurns', 'maxToolCalls', 'requestLimits')},
             'total_request_bytes': guard.total_bytes}, indent=2) + '\n')
     return 124 if timed_out else code

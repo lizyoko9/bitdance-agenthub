@@ -8,7 +8,7 @@ import type { ToolContext } from '@/server/tools/types'
 import type { DeployStatusRecord, ModelProvider, StreamEvent } from '@/shared/types'
 
 import { resolveCustomProviderClientConfig } from './custom-provider-client'
-import { CustomAgentTerminationError, resolveCustomMaxTurns } from './custom-agent-limits'
+import { CustomAgentTerminationError, resolveCustomMaxTurns, resolveCustomRequestTimeoutMs } from './custom-agent-limits'
 import { CustomRequestTracker, type CustomAgentAdapterOptions, type CustomRequestStatus } from './custom-request-policy'
 import type { AdapterAttachment, AdapterInput, AgentPlatformAdapter } from './types'
 
@@ -39,6 +39,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
   constructor(private options: CustomAgentAdapterOptions = {}) {
     this.maxTurns = resolveCustomMaxTurns(options.maxTurns)
+    this.options = { ...options, requestTimeoutMs: resolveCustomRequestTimeoutMs(options.requestTimeoutMs) }
   }
 
   async *stream(input: AdapterInput, signal: AbortSignal): AsyncIterable<StreamEvent> {
@@ -421,6 +422,7 @@ function buildClient(
   return new OpenAI({
     ...resolveCustomProviderClientConfig(provider, overrideKey, apiBaseUrl),
     maxRetries: options.maxRetries ?? MAX_API_RETRIES,
+    ...(options.requestTimeoutMs === undefined ? {} : { timeout: options.requestTimeoutMs }),
     ...(fetch ? { fetch } : {}),
   })
 }

@@ -14,6 +14,8 @@ import time
 import uuid
 
 from .container_worker import APPROVED_TASK_IDS
+from .budget_contract import budget_plan_digest, validate_budget_plan
+from .budget_outcome import classify_budget_outcome
 from .task_admission import actor_request, actor_settings, admit_task, unsupported
 
 
@@ -27,6 +29,7 @@ REFRESH_CONTROLLER_FILES = ('eval/tracetrial/run_trial.py', 'eval/tracetrial/Doc
     'eval/tracetrial/refresh-runtime.py', 'eval/tracetrial/container_worker.py',
     'eval/tracetrial/task_admission.py', 'eval/tracetrial/trace_adapter.py',
     'eval/tracetrial/score_trial.py', 'eval/tracetrial/judge.py',
+    'eval/tracetrial/budget_contract.py', 'eval/tracetrial/budget_outcome.py',
     'eval/terminalbench/prepare-runtime.py')
 
 
@@ -124,6 +127,7 @@ def prepare_build(source, output, reuse_image=None):
     archive = packer.prepare(ROOT, destination / 'runtime.tar.gz')
     shutil.copy2(Path(__file__).with_name('Dockerfile.refresh' if reuse_image else 'Dockerfile'), destination / 'Dockerfile')
     shutil.copy2(Path(__file__).with_name('container_worker.py'), destination / 'container_worker.py')
+    shutil.copy2(Path(__file__).with_name('budget_contract.py'), destination / 'budget_contract.py')
     shutil.copy2(ROOT / 'eval/terminalbench/install-runtime.sh', destination / 'install-runtime.sh')
     for name in RECORDER_FILES:
         target = destination / 'recorder' / name
@@ -178,7 +182,7 @@ def build_image(context, image, proxy):
 def assemble_reused_image(context, image, manifest):
     base = manifest['baseImage']
     required = {'Dockerfile', 'runtime.tar.gz', 'baseline-runtime-source.json', 'refresh-runtime.py',
-                'container_worker.py', *('recorder/' + name for name in RECORDER_FILES)}
+                'container_worker.py', 'budget_contract.py', *('recorder/' + name for name in RECORDER_FILES)}
     if not required <= manifest['buildFiles'].keys():
         raise ValueError('Local runtime assembly is missing verified build inputs')
     if not re.fullmatch(r'sha256:[0-9a-f]{64}', base.get('id', '')):
@@ -220,6 +224,7 @@ def assemble_reused_image(context, image, manifest):
             ('baseline-runtime-source.json', '/opt/agenthub-eval/baseline-runtime-source.json'),
             ('refresh-runtime.py', '/opt/agenthub-eval/refresh-runtime.py'),
             ('container_worker.py', '/opt/agenthub-eval/container_worker.py'),
+            ('budget_contract.py', '/opt/agenthub-eval/budget_contract.py'),
         ):
             step('cp', context/source, container + ':' + target)
         step('cp', str(context/'recorder') + '/.', container + ':/opt/recorder')
@@ -274,15 +279,16 @@ def verify_runtime_sources(context):
             contents = (json.dumps(package, indent=2)+'\n').encode()
         if hashlib.sha256(contents).hexdigest() != digest:
             raise ValueError(f'Runtime source differs from committed archive: {name}')
-    if hashlib.sha256(Path(__file__).with_name('container_worker.py').read_bytes()).hexdigest() != hashlib.sha256((Path(context)/'container_worker.py').read_bytes()).hexdigest():
-        raise ValueError('Container worker differs from committed build context')
+    for name in ('container_worker.py', 'budget_contract.py'):
+        if hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() != hashlib.sha256((Path(context)/name).read_bytes()).hexdigest():
+            raise ValueError('Container control source differs from committed build context: ' + name)
     build = json.loads((Path(context)/'build-manifest.json').read_text())
     for name, digest in build.get('controllerFiles', {}).items():
         if name not in REFRESH_CONTROLLER_FILES or hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != digest:
             raise ValueError('Refresh controller source differs from committed build context')
 
 
-def resolve_trial_task(source, task_id=TASK_ID):
+def resolve_trial_task(source, task_id=TASK_ID, *, budget_plan=None, mode='task', overrides=None):
     from tracetrial_bench.task_resolver import resolve_task
 
     source = checked_source(source)
@@ -292,25 +298,70 @@ def resolve_trial_task(source, task_id=TASK_ID):
     if task_id not in APPROVED_TASK_IDS:
         return None, unsupported(task_id, ['task is outside the approved explicit allowlist']), None
     task = resolve_task(source / 'Task' / task_id)
-    report, request = admit_task(task)
+    report, request = admit_task(task, budget_plan=budget_plan, mode=mode, overrides=overrides)
     report.update(sourceRevision=SOURCE_REVISION, sourceTaskHashes=directory_hashes(task.task_dir))
     return task, report, request
 
 
-def preflight_task(source, task_id=TASK_ID):
-    return resolve_trial_task(source, task_id)[1]
+def preflight_task(source, task_id=TASK_ID, *, mode='task', overrides=None):
+    return resolve_trial_task(source, task_id, mode=mode, overrides=overrides)[1]
 
 
-def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_id=TASK_ID):
+def write_budget_file(report, destination):
+    if report.get('status') != 'supported':
+        raise ValueError('Cannot write a run plan for an unsupported task')
+    plan = validate_budget_plan(report['budgetPlan'])
+    envelope = {'schemaVersion': 'agenthub_tracetrial_run_plan_v1',
+        'taskId': report['taskId'], 'sourceRevision': report['sourceRevision'],
+        'sourceTaskHashes': report['sourceTaskHashes'], 'budgetPlan': plan,
+        'budgetPlanSha256': budget_plan_digest(plan)}
+    path = Path(destination)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('x', encoding='utf-8') as stream:
+        stream.write(json.dumps(envelope, ensure_ascii=False, indent=2) + '\n')
+    return envelope
+
+
+def read_budget_file(path):
+    if path is None:
+        raise ValueError('run requires --budget-file generated by preflight --budget-out; no implicit paid budget')
+    data = json.loads(Path(path).read_text(encoding='utf-8'))
+    fields = {'schemaVersion', 'taskId', 'sourceRevision', 'sourceTaskHashes', 'budgetPlan', 'budgetPlanSha256'}
+    if not isinstance(data, dict) or set(data) != fields or data['schemaVersion'] != 'agenthub_tracetrial_run_plan_v1':
+        raise ValueError('Invalid run plan envelope; generate it with preflight --budget-out')
+    plan = validate_budget_plan(data['budgetPlan'], task_id=data['taskId'])
+    if data['sourceRevision'] != SOURCE_REVISION or data['budgetPlanSha256'] != budget_plan_digest(plan):
+        raise ValueError('Run plan revision or budget digest does not match')
+    if not isinstance(data['sourceTaskHashes'], dict) or not data['sourceTaskHashes']:
+        raise ValueError('Run plan must bind the pinned task source hashes')
+    return data
+
+
+def read_optional_json(path):
+    try:
+        value = Path(path).read_text(encoding='utf-8')
+        result = json.loads(value)
+        return result if isinstance(result, dict) else None
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_id=TASK_ID, budget_file=None):
     from tracetrial_bench.runner_policy import resolve_harness_invocation
     from tracetrial_bench.workspace import (prepare_run_dir, snapshot_workspace, persist_scoring_inputs,
         validate_workspace_for_host_verifier, write_workspace_diff)
     from .trace_adapter import normalize_agenthub_trace, emit_execution_evidence
     from .score_trial import score_retained_trial
 
-    task, admission, request = resolve_trial_task(source, task_id)
+    run_plan = read_budget_file(budget_file)
+    if run_plan['taskId'] != task_id:
+        raise ValueError('Run plan task differs from the selected task')
+    task, admission, request = resolve_trial_task(source, task_id, budget_plan=run_plan['budgetPlan'])
     if admission['status'] != 'supported':
         return admission
+    if admission['sourceTaskHashes'] != run_plan['sourceTaskHashes']:
+        raise ValueError('Run plan task inputs changed; generate a new preflight plan')
+    plan = admission['budgetPlan']
     output = Path(output)
     if output.exists() or output.is_symlink():
         raise FileExistsError('Trial output directory already exists; refusing to reuse it')
@@ -335,6 +386,8 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
     persist_scoring_inputs(task, layout)
     request_file = layout.agent_dir / 'request.json'
     write_json(request_file, request)
+    plan_file = layout.agent_dir / 'budget-plan.json'
+    write_json(plan_file, plan)
     invocation = resolve_harness_invocation(harness='agenthub', requested_timeout=request['timeoutMs'] // 1000,
         task_max_wall_time_sec=task.max_wall_time_sec, task_max_turns=task.max_turns,
         requested_extra_args={}, strict=True)
@@ -342,12 +395,15 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
     container_id = None
     native = layout.agent_dir / 'native'
     native.mkdir()
-    settings = actor_settings(request, task, admission['declaredRuntime'])
+    settings = actor_settings(request, task, admission['declaredRuntime'], budget_plan=plan)
+    settings['sdkRequestTimeoutMs'] = request['timeoutMs']
+    settings['cleanupGraceSeconds'] = 35
     write_json(layout.artifacts_dir / 'admission.json', admission)
     write_json(layout.artifacts_dir / 'protocol.json', {'taskId': task.task_id, 'upstream': SOURCE_REVISION,
         'agenthubCommit': build['runtime']['agenthubCommit'], 'driverCommit': current_revision,
         'runtime': build, 'image': pinned_image,
         'actor': settings, 'executionAdapter': 'project-local AgentHub; official scorer unchanged',
+        'budgetPlan': plan, 'budgetPlanSha256': budget_plan_digest(plan),
         'sourceTaskHashesBefore': hashes_before, 'priceEstimateUsd': None, 'hardDollarCap': False})
     failure = None
     try:
@@ -357,6 +413,7 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
         lifecycle.append({'stage': 'created', 'containerId': container_id, 'at': time.time()})
         docker('start', container_id)
         docker('cp', request_file, container_id + ':/state/request.json')
+        docker('cp', plan_file, container_id + ':/state/budget-plan.json')
         # The privileged recorder receives the key over stdin; tools run as the unprivileged image user.
         environment = docker_environment()
         marker = layout.artifacts_dir / 'actor-started.json'
@@ -365,8 +422,9 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
         lifecycle.append({'stage': 'actor_started', 'at': time.time()})
         result = docker('exec', '--interactive', '--user=0', '--env', f'ACTOR_UID={os.getuid()}',
             '--env', f'ACTOR_GID={os.getgid()}', container_id, 'python3',
-            '/opt/agenthub-eval/container_worker.py', '/state/request.json', '/state', actor_proxy,
-            environment=environment, input_text=key, timeout=request['timeoutMs'] / 1000 + 35, check=False)
+            '/opt/agenthub-eval/container_worker.py', '/state/request.json', '/state', actor_proxy, '/state/budget-plan.json',
+            environment=environment, input_text=key,
+            timeout=request['timeoutMs'] / 1000 + settings['cleanupGraceSeconds'], check=False)
         (native / 'worker.log').write_text((result.stdout + result.stderr).replace(key, '[REDACTED]'))
         lifecycle.append({'stage': 'actor_exited', 'exitCode': result.returncode, 'at': time.time()})
     except Exception as exception:
@@ -380,6 +438,9 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
                 removed = docker('rm', '--force', container_id, check=False)
                 lifecycle.append({'stage': 'removed', 'exitCode': removed.returncode, 'at': time.time()})
         write_json(layout.artifacts_dir / 'lifecycle.json', lifecycle)
+    budget_outcome = classify_budget_outcome(plan,
+        read_optional_json(native / 'trial/result.json'), read_optional_json(native / 'actor_process.json'))
+    write_json(layout.artifacts_dir / 'budget-outcome.json', budget_outcome)
     if failure:
         write_json(layout.artifacts_dir / 'apparatus-failure.json', {'stage': 'actor', 'type': failure})
         raise RuntimeError('Actor apparatus failed; evidence retained, no automatic actor rerun')
@@ -404,8 +465,9 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
     scores = score_retained_trial(task=task, layout=layout, trace_summary=trace,
         actor_settings=settings, judge_key=key, judge_proxy=judge_proxy, invocation_report=invocation.report)
     write_json(layout.artifacts_dir / 'result.json', {'taskId': task.task_id, 'actor': metadata,
-        'trace': trace, 'scoring': scores})
-    return {'taskId': task.task_id, 'runDir': str(layout.run_dir), 'actor': metadata, 'scoringStatus': scores['scoringStatus']}
+        'trace': trace, 'scoring': scores, 'budgetOutcome': budget_outcome})
+    return {'taskId': task.task_id, 'runDir': str(layout.run_dir), 'actor': metadata,
+        'scoringStatus': scores['scoringStatus'], 'budgetOutcome': budget_outcome}
 
 
 def main():
@@ -417,6 +479,10 @@ def main():
     parser.add_argument('--image', default='agenthub/tracetrial:e8-local')
     parser.add_argument('--reuse-image', help='prepare-build only: exact locally available baseline RepoDigest')
     parser.add_argument('--out', type=Path)
+    parser.add_argument('--budget-mode', choices=['task', 'constrained'], default='task')
+    parser.add_argument('--limits-file', type=Path, help='preflight only: explicit flat budget overrides')
+    parser.add_argument('--budget-out', type=Path, help='preflight only: write a source-bound run plan')
+    parser.add_argument('--budget-file', type=Path, help='run only: plan generated by preflight')
     parser.add_argument('--actor-proxy', default='http://192.168.5.2:7890')
     parser.add_argument('--judge-proxy', default='http://127.0.0.1:7890')
     args = parser.parse_args()
@@ -424,8 +490,15 @@ def main():
         parser.error('--reuse-image is only accepted by prepare-build')
     if args.action != 'preflight' and args.context is None:
         parser.error('--context is required for build and run actions')
+    if args.action != 'preflight' and (args.limits_file or args.budget_out or args.budget_mode != 'task'):
+        parser.error('--limits-file, --budget-out and --budget-mode are preflight options')
+    if args.action != 'run' and args.budget_file:
+        parser.error('--budget-file is only accepted for run')
     if args.action == 'preflight':
-        result = preflight_task(args.source, args.task)
+        overrides = json.loads(args.limits_file.read_text(encoding='utf-8')) if args.limits_file else None
+        result = preflight_task(args.source, args.task, mode=args.budget_mode, overrides=overrides)
+        if args.budget_out:
+            write_budget_file(result, args.budget_out)
     elif args.action == 'prepare-build':
         result = {'context': str(prepare_build(args.source, args.context, reuse_image=args.reuse_image))}
     elif args.action == 'build':
@@ -435,8 +508,10 @@ def main():
     else:
         if args.out is None:
             parser.error('--out is required for run')
+        if args.budget_file is None:
+            parser.error('run requires --budget-file generated by preflight --budget-out')
         result = run_trial(source=args.source, output=args.out, context=args.context, image=args.image,
-            actor_proxy=args.actor_proxy, judge_proxy=args.judge_proxy, task_id=args.task)
+            actor_proxy=args.actor_proxy, judge_proxy=args.judge_proxy, task_id=args.task, budget_file=args.budget_file)
     print(json.dumps(result, indent=2))
 
 

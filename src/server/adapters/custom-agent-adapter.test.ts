@@ -4,11 +4,24 @@ import { createEvalRequestPolicy, createEvalToolPolicy, EvalBudgetExceededError 
 import type { StreamEvent } from '@/shared/types'
 
 import { CustomAgentAdapter } from './custom-agent-adapter'
-import { DEFAULT_CUSTOM_MAX_TURNS, CustomAgentTerminationError } from './custom-agent-limits'
+import { DEFAULT_CUSTOM_MAX_TURNS, CustomAgentTerminationError, MAX_CUSTOM_REQUEST_TIMEOUT_MS } from './custom-agent-limits'
 import type { CustomRequestObservation } from './custom-request-policy'
 import type { AdapterInput } from './types'
 
 const tools = vi.hoisted(() => ({ execute: vi.fn() }))
+const sdk = vi.hoisted(() => ({ clients: [] as { provided: boolean; timeout?: number; effectiveTimeout: number }[] }))
+vi.mock('openai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('openai')>()
+  return {
+    ...actual,
+    default: class extends actual.default {
+      constructor(options: ConstructorParameters<typeof actual.default>[0]) {
+        super(options)
+        sdk.clients.push({ provided: Object.hasOwn(options ?? {}, 'timeout'), timeout: options?.timeout, effectiveTimeout: this.timeout })
+      }
+    },
+  }
+})
 vi.mock('@/server/tools/registry', () => ({
   toolRegistry: {
     resolve: (names: string[]) => names.map((name) => ({ name, description: name, parameters: { type: 'object' } })),
@@ -51,6 +64,7 @@ describe('Custom adapter optional request policy', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    sdk.clients.length = 0
     vi.stubEnv('AGENTHUB_CUSTOM_MAX_TURNS', undefined)
     vi.stubGlobal('fetch', fetchMock)
     fetchMock.mockImplementation(async () => done())
@@ -228,6 +242,29 @@ describe('Custom adapter optional request policy', () => {
     expect(body).not.toHaveProperty('reasoning_effort')
     expect(body).not.toHaveProperty('max_completion_tokens')
     expect(fetchMock.mock.calls[0][1]?.redirect).not.toBe('error')
+    expect(sdk.clients).toEqual([{ provided: false, timeout: undefined, effectiveTimeout: 600_000 }])
+  })
+
+  it('passes an explicit request timeout to the SDK while retaining the caller abort signal', async () => {
+    const controller = new AbortController()
+    await consume(new CustomAgentAdapter({ requestTimeoutMs: 1_200_000 }), input(), controller.signal)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(sdk.clients).toEqual([{ provided: true, timeout: 1_200_000, effectiveTimeout: 1_200_000 }])
+    expect(fetchMock.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, MAX_CUSTOM_REQUEST_TIMEOUT_MS+1])(
+    'rejects invalid programmatic requestTimeoutMs %s before requests', (requestTimeoutMs) => {
+      expect(() => new CustomAgentAdapter({ requestTimeoutMs })).toThrow(/requestTimeoutMs/)
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('accepts the timer-domain boundaries without changing the default for omitted options', () => {
+    expect(() => new CustomAgentAdapter({ requestTimeoutMs: 1 })).not.toThrow()
+    expect(() => new CustomAgentAdapter({ requestTimeoutMs: MAX_CUSTOM_REQUEST_TIMEOUT_MS })).not.toThrow()
+    expect(() => new CustomAgentAdapter()).not.toThrow()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('applies completion settings and enforces eight actual requests across concurrent runs', async () => {

@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util'
 import { loadTrialRuntime, type TrialProfileOptions, type TrialRuntime } from './profile'
 import type { CustomRequestObservation } from './request-policy'
 import { classifyTrialTermination, executeTrial, type ExecutionResult } from './trial-execution'
-import { validateTrialRequest, type TrialRequest } from './trial-schema'
+import { validateTrialRequest, type TrialRequest, type TrialRequestSchema } from './trial-schema'
 
 const TOKEN_FIELDS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'reasoningTokens'] as const
 
@@ -73,7 +73,7 @@ export async function runHeadlessTrial(request: TrialRequest, options: HeadlessT
     nodeVersion: process.version,
     cwd: request.cwd,
     model: { adapter: 'custom', provider: 'openai', requestedModel: request.modelId, reasoningEffort: 'none' },
-    limits: { ...request.requestLimits, maxTurns: request.maxTurns, ...(request.maxToolCalls === undefined ? {} : { maxToolCalls: request.maxToolCalls }), timeoutMs: request.timeoutMs, sdkRetries: 0 },
+    limits: { ...request.requestLimits, maxTurns: request.maxTurns, ...(request.maxToolCalls === undefined ? {} : { maxToolCalls: request.maxToolCalls }), timeoutMs: request.timeoutMs, sdkRequestTimeoutMs: request.timeoutMs, sdkRetries: 0 },
     policy: { skills: 'none, including public pool', writes: 'auto', plans: 'deferred approval', bash: 'deferred approval after existing policy checks', questions: 'fixed continuation answer' },
     startedAt: new Date().toISOString(),
   }
@@ -119,17 +119,18 @@ export async function runHeadlessTrial(request: TrialRequest, options: HeadlessT
   return JSON.parse(serialize(result)) as typeof result
 }
 
-export async function runHeadlessCli(options: Pick<HeadlessTrialOptions, 'benchmark' | 'sourceRevision'> = {}): Promise<void> {
+export async function runHeadlessCli(options: Pick<HeadlessTrialOptions, 'benchmark' | 'sourceRevision'> & { requestSchema?: typeof TrialRequestSchema } = {}): Promise<void> {
+  const { requestSchema, ...trialOptions } = options
   const { values } = parseArgs({ options: { request: { type: 'string' } }, strict: true })
   if (!values.request) throw new Error('Usage: run-agenthub.ts --request <trial.json>')
-  const request = validateTrialRequest(JSON.parse(readFileSync(values.request, 'utf8')))
+  const request = validateTrialRequest(JSON.parse(readFileSync(values.request, 'utf8')), requestSchema)
   if (!process.env.OPENAI_API_KEY?.trim()) throw new Error('OPENAI_API_KEY is required in the process environment')
   const controller = new AbortController()
   const stop = () => controller.abort()
   process.once('SIGTERM', stop)
   process.once('SIGINT', stop)
   try {
-    const result = await runHeadlessTrial(request, { ...options, signal: controller.signal })
+    const result = await runHeadlessTrial(request, { ...trialOptions, signal: controller.signal })
     process.stdout.write(`AgentHub trial ${request.taskId}: ${result.runStatus}\n`)
     process.exitCode = result.runStatus === 'complete' ? 0 : 1
     if (!result.allRunsSettled) process.exit(process.exitCode)

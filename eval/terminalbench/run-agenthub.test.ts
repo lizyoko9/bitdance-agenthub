@@ -109,7 +109,7 @@ print(json.dumps(build_trial_request(${JSON.stringify(request.instruction)}, ${J
     expect(events).toContain('[REDACTED]')
     expect(JSON.parse(readFileSync(path.join(request.outputDir, 'requests.jsonl'), 'utf8'))).toMatchObject({ runId: 'root', parentRunId: null, usageComplete: true })
     const manifest = JSON.parse(readFileSync(path.join(request.outputDir, 'manifest.json'), 'utf8'))
-    expect(manifest).toMatchObject({ taskId: request.taskId, model: { provider: 'openai', requestedModel: request.modelId }, limits: { maxTurns: 64, maxRequests: 32, maxTotalRequestBytes: 1048576, sdkRetries: 0 } })
+    expect(manifest).toMatchObject({ taskId: request.taskId, model: { provider: 'openai', requestedModel: request.modelId }, limits: { maxTurns: 64, maxRequests: 32, maxTotalRequestBytes: 1048576, sdkRequestTimeoutMs: request.timeoutMs, sdkRetries: 0 } })
     expect(manifest.scope).toContain('Harbor')
     expect(manifest).not.toHaveProperty('benchmark')
     expect(manifest.limits).not.toHaveProperty('maxToolCalls')
