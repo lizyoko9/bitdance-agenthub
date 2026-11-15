@@ -7,7 +7,7 @@ from unittest.mock import patch
 from tracetrial_bench.task_resolver import resolve_task
 from tracetrial_bench.types import ExecutionProbeSpec
 
-from .container_worker import APPROVED_TASK_IDS
+from .container_worker import APPROVED_TASK_IDS, GOVERNANCE_TASK_ID
 from .task_admission import actor_settings, admit_task
 
 
@@ -16,10 +16,10 @@ SOURCE = Path('/private/tmp/agenthub-tracetrial-source')
 
 class TaskAdmissionTests(unittest.TestCase):
     def setUp(self):
-        self.task = resolve_task(SOURCE/'Task'/APPROVED_TASK_IDS[-1])
+        self.task = resolve_task(SOURCE/'Task'/'E8-exit-code-masked-by-output-001')
 
-    def test_all_three_approved_tasks_preserve_one_user_input_and_independent_internal_turns(self):
-        for task_id, user_ceiling, rubrics in zip(APPROVED_TASK_IDS, (6, 6, 1), (4, 2, 5)):
+    def test_all_approved_tasks_preserve_one_user_input_and_independent_internal_turns(self):
+        for task_id, user_ceiling, rubrics in zip(APPROVED_TASK_IDS, (6, 6, 1, 12), (4, 2, 5, 0), strict=True):
             with self.subTest(task=task_id):
                 task = resolve_task(SOURCE/'Task'/task_id)
                 report, request = admit_task(task)
@@ -34,11 +34,49 @@ class TaskAdmissionTests(unittest.TestCase):
                 settings = report['effectiveActor']
                 self.assertEqual(settings['userTurns'], 1)
                 self.assertEqual(settings['taskUserTurnCeiling'], user_ceiling)
-                self.assertEqual(settings['declaredRuntime'], {'timeoutSeconds': 600, 'networkMode': 'none'})
+                self.assertEqual(settings['declaredRuntime'], {
+                    'timeoutSeconds': 1200 if task_id == GOVERNANCE_TASK_ID else 600, 'networkMode': 'none'})
                 self.assertEqual(settings['timeoutSeconds'], 120)
                 self.assertEqual(settings['networkMode'], 'bridge')
-                self.assertEqual(report['judgeCoverage'], {'rubrics': rubrics, 'maxRequests': 10,
+                self.assertEqual(report['judgeCoverage'], {'rubrics': rubrics, 'maxRequests': 0 if task_id == GOVERNANCE_TASK_ID else 10,
                                                           'worstCaseRequests': 2 * rubrics})
+
+    def test_governance_declared_ceilings_and_protocol_are_distinct_from_effective_agenthub_limits(self):
+        task = resolve_task(SOURCE/'Task'/GOVERNANCE_TASK_ID)
+        report, request = admit_task(task)
+        settings = report['effectiveActor']
+        self.assertEqual(settings['declaredTaskBudget'], {
+            'maxUserTurns': 12, 'maxToolCalls': 80, 'maxWallTimeSeconds': 1200})
+        self.assertEqual(settings['executionProfileMapping'], {
+            'declaredProtocol': 'openclaw_native_v1', 'declaredRuntimeSchema': 'openclaw_native_v1',
+            'executor': 'agenthub', 'compatibleShape': 'single_turn_workspace', 'stockHarnessExecuted': False})
+        self.assertEqual((request['maxToolCalls'], request['timeoutMs']), (6, 120000))
+        self.assertEqual(request['instruction'], task.prompt)
+        self.assertNotIn('provider_executed', json.dumps(report))
+
+    def test_governance_mapping_cannot_admit_other_profiles_or_changed_declared_ceilings(self):
+        task = resolve_task(SOURCE/'Task'/GOVERNANCE_TASK_ID)
+        for changes in ({'max_tool_calls': 81}, {'max_tool_calls': 80.0}, {'max_wall_time_sec': 1201},
+                        {'max_turns': 13}, {'metadata': {'execution': {
+                            'mode': 'native', 'protocol': 'native_v1', 'profile': 'runtime/execution.json'}}}):
+            with self.subTest(changes=changes):
+                report, request = admit_task(replace(task, **changes))
+                self.assertEqual(report['status'], 'unsupported')
+                self.assertIsNone(request)
+        metadata = {**self.task.metadata, 'execution': {
+            'mode': 'native', 'protocol': 'openclaw_native_v1', 'profile': 'runtime/execution.json'}}
+        report, _ = admit_task(replace(self.task, metadata=metadata))
+        self.assertEqual(report['status'], 'unsupported')
+
+    def test_governance_rejects_any_added_rubric_before_actor_admission(self):
+        class Sheet:
+            rubric_items = [object()]
+        task = resolve_task(SOURCE/'Task'/GOVERNANCE_TASK_ID)
+        with patch('eval.tracetrial.task_admission.load_score_sheet', return_value=Sheet()):
+            report, request = admit_task(task)
+        self.assertEqual(report['status'], 'unsupported')
+        self.assertEqual(report['judgeCoverage']['maxRequests'], 0)
+        self.assertIsNone(request)
 
     def test_missing_capability_is_unsupported_with_null_score(self):
         task = replace(self.task, execution_probe=ExecutionProbeSpec('lifecycle_v1', ('native_exec_v1', 'unknown_v1')))

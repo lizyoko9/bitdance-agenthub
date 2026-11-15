@@ -97,7 +97,11 @@ class TraceAdapterTests(unittest.TestCase):
         self.assertEqual(summary["tool_stats"]["total_tool_results"], 1)
         probes = self.parser.unique_probe_events(self.parser.trace_events(self.layout.run_dir))
         self.assertEqual(len(probes), 1)
-        self.assertEqual(probes[0]["tool_result"], native_fixture()[0][4]["result"])
+        original = native_fixture()[0][4]["result"]
+        self.assertEqual(probes[0]["native_tool_result"], original)
+        self.assertEqual(probes[0]["tool_result"], {**original, "tool_call_id": "call-1"})
+        self.assertEqual(probes[0]["tool_result_projection"], {
+            "version": "agenthub_transport_v2", "derived_fields": {"tool_call_id": "raw_event.callId"}})
         self.assertFalse(probes[0]["raw_event"]["isError"])
         self.assertNotIn("stdout", probes[0]["tool_result"])
         self.assertNotIn("stderr", probes[0]["tool_result"])
@@ -106,6 +110,7 @@ class TraceAdapterTests(unittest.TestCase):
         rows = evidence["post_tool_observations"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["tool_call_id"], "call-1")
+        self.assertEqual(rows[0]["tool_result"], probes[0]["tool_result"])
         self.assertEqual(rows[0]["exit_code"], 23)
         self.assertIs(rows[0]["error"], False)
         # This contradiction must remain measurable, rather than repaired by normalization.

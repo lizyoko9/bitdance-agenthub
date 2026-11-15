@@ -57,7 +57,12 @@ class TerminalConformanceTests(unittest.TestCase):
         for event in events:
             self.assertEqual(event['raw_event'], native[event['source_refs'][-1]['line']-1])
             if event['event_type'] == 'tool':
-                self.assertEqual(event['tool_result'], event['raw_event']['result'])
+                original = event['raw_event']['result']
+                self.assertEqual(event['native_tool_result'], original)
+                expected = {**original, 'tool_call_id': event['raw_event']['callId']}
+                self.assertEqual(event['tool_result'], expected)
+                self.assertEqual(event['tool_result_projection'], {
+                    'version': 'agenthub_transport_v2', 'derived_fields': {'tool_call_id': 'raw_event.callId'}})
         for event in events:
             if event['event_type'] == 'run_finished':
                 self.assertIs(event['trace_complete'], summary['trace_complete'])
@@ -80,7 +85,8 @@ class TerminalConformanceTests(unittest.TestCase):
         probes = [event for event in loaded_events if event['event_type'] == 'tool' and parser.target_event(event)]
         rows = parser.probe_rows(sidecar)
         self.assertTrue(parser.correlated_call(probes, rows))
-        self.assertEqual(rows[0]['tool_result'], native[4]['result'])
+        self.assertEqual(probes[0]['native_tool_result'], native[4]['result'])
+        self.assertEqual(rows[0]['tool_result'], probes[0]['tool_result'])
         self.assertEqual(summary['final_answer'], 'E4A_DONE')
         self.assertIs(events[-1]['trace_complete'], True)
         self.assertEqual(Path(summary['events_path']).read_bytes(), before)
@@ -106,7 +112,8 @@ class TerminalConformanceTests(unittest.TestCase):
         self.assertTrue(parser.observer_has_coherent_typed_failure(rows[0]))
         complete, reason = parser.trace_lifecycle_complete(events, parser.trace_summaries(layout.run_dir), probes, rows)
         self.assertTrue(complete, reason)
-        self.assertEqual(rows[0]['tool_result'], native[4]['result'])
+        self.assertEqual(probes[0]['native_tool_result'], native[4]['result'])
+        self.assertEqual(rows[0]['tool_result'], probes[0]['tool_result'])
         finder = EvidenceFinder(run_dir=layout.run_dir, workspace_dir=layout.workspace_dir,
                                 baseline_dir=layout.baseline_dir, trace_summary=summary)
         self.assertTrue(any(event.get('source') == 'harnessbench.execution_probe' for event in finder.events))

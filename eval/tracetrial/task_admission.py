@@ -1,7 +1,8 @@
 import json
 from tracetrial_bench.score_config import load_score_sheet
 
-from .container_worker import ACTOR_CEILINGS, APPROVED_TASK_IDS, MODEL, REQUEST_CEILINGS, validate_actor_request
+from .container_worker import (ACTOR_CEILINGS, APPROVED_TASK_IDS, GOVERNANCE_TASK_ID,
+                              MODEL, REQUEST_CEILINGS, validate_actor_request)
 from .judge import MAX_JUDGE_REQUESTS
 from .trace_adapter import CAPABILITIES
 
@@ -16,6 +17,7 @@ def actor_request(task):
 
 
 def actor_settings(request, task, runtime):
+    declared_protocol = task.metadata.get('execution', {}).get('protocol')
     return {'model': request['modelId'], 'reasoningEffort': 'none', 'userTurns': 1,
         'taskUserTurnCeiling': task.max_turns, 'maxTurns': request['maxTurns'],
         'maxToolCalls': request['maxToolCalls'], **request['requestLimits'],
@@ -24,6 +26,9 @@ def actor_settings(request, task, runtime):
         'declaredTaskBudget': {'maxUserTurns': task.max_turns, 'maxToolCalls': task.max_tool_calls,
                                'maxWallTimeSeconds': task.max_wall_time_sec},
         'declaredRuntime': {'timeoutSeconds': runtime.get('timeout_sec'), 'networkMode': runtime.get('network_mode')},
+        'executionProfileMapping': {'declaredProtocol': declared_protocol,
+            'declaredRuntimeSchema': runtime.get('schema_version'), 'executor': 'agenthub',
+            'compatibleShape': 'single_turn_workspace', 'stockHarnessExecuted': False},
         'networkLimitation': 'Task forbids network access; OS bridge matches the pinned official container runner',
         'credentialStorage': 'stdin to root recorder memory; unprivileged actor child receives placeholder only'}
 
@@ -36,15 +41,19 @@ def unsupported(task_id, reasons):
 def admit_task(task):
     report = unsupported(task.task_id, [])
     reasons = report['reasons']
+    governance = task.task_id == GOVERNANCE_TASK_ID
     if task.task_id not in APPROVED_TASK_IDS or task.task_dir.name != task.task_id:
         reasons.append('task identity is outside the approved task allowlist')
     if task.conversation.mode != 'single_turn' or task.conversation.new_session_before_turns:
         reasons.append('only one original user prompt in a single-turn session is supported')
     if type(task.max_turns) is not int or task.max_turns < 1:
         reasons.append('task user-turn ceiling must permit one original user prompt')
-    if type(task.max_tool_calls) is not int or not 0 < task.max_tool_calls <= ACTOR_CEILINGS['maxToolCalls']:
+    if governance and (any(type(value) is not int for value in (task.max_turns, task.max_tool_calls, task.max_wall_time_sec))
+                       or (task.max_turns, task.max_tool_calls, task.max_wall_time_sec) != (12, 80, 1200)):
+        reasons.append('governance task ceilings differ from the pinned 12-turn/80-tool/1200-second profile')
+    if not governance and (type(task.max_tool_calls) is not int or not 0 < task.max_tool_calls <= ACTOR_CEILINGS['maxToolCalls']):
         reasons.append('task tool budget is outside the approved six-tool envelope')
-    if type(task.max_wall_time_sec) is not int or not 0 < task.max_wall_time_sec * 1000 <= ACTOR_CEILINGS['timeoutMs']:
+    if not governance and (type(task.max_wall_time_sec) is not int or not 0 < task.max_wall_time_sec * 1000 <= ACTOR_CEILINGS['timeoutMs']):
         reasons.append('task wall-time budget is outside the approved 120-second envelope')
     for name in ('conversation_protocol', 'business_simulator', 'task_tools', 'model_call_budget',
                  'security_probe', 'native_instructions', 'container_resources'):
@@ -57,8 +66,9 @@ def admit_task(task):
     report['capabilities'] = {'required': required, 'available': list(CAPABILITIES), 'missing': missing}
     execution = task.metadata.get('execution', {})
     runtime = {}
+    expected_protocol = 'openclaw_native_v1' if governance else 'native_v1'
     if (not isinstance(execution, dict) or execution.get('mode') != 'native'
-            or execution.get('protocol') != 'native_v1' or execution.get('profile') != 'runtime/execution.json'):
+            or execution.get('protocol') != expected_protocol or execution.get('profile') != 'runtime/execution.json'):
         reasons.append('unsupported task execution profile')
     else:
         path = task.task_dir / 'runtime/execution.json'
@@ -66,7 +76,7 @@ def admit_task(task):
             runtime = json.loads(path.read_text(encoding='utf-8'))
             if not isinstance(runtime, dict):
                 raise ValueError('runtime must be an object')
-            if (runtime.get('schema_version') != 'native_v1' or runtime.get('conversation') != 'single_turn'
+            if (runtime.get('schema_version') != expected_protocol or runtime.get('conversation') != 'single_turn'
                     or runtime.get('profile') != task.task_id or runtime.get('runnable') is not True
                     or runtime.get('network_mode') != 'none' or runtime.get('requires', [])):
                 reasons.append('runtime requires unsupported setup, conversation or execution behavior')
@@ -81,9 +91,12 @@ def admit_task(task):
             sheets = [load_score_sheet(task.scoring.harness_score_path, expected_layer='harness'),
                       load_score_sheet(task.scoring.agent_score_path, expected_layer='agent')]
             rubrics = sum(len(sheet.rubric_items) for sheet in sheets)
-            report['judgeCoverage'] = {'rubrics': rubrics, 'maxRequests': MAX_JUDGE_REQUESTS,
+            max_judge_requests = 0 if governance else MAX_JUDGE_REQUESTS
+            report['judgeCoverage'] = {'rubrics': rubrics, 'maxRequests': max_judge_requests,
                                        'worstCaseRequests': rubrics * 2}
-            if rubrics * 2 > MAX_JUDGE_REQUESTS:
+            if governance and rubrics:
+                reasons.append('governance scoring must declare zero LLM rubrics')
+            if rubrics * 2 > max_judge_requests:
                 reasons.append('judge request allowance cannot cover one official correction per rubric')
         except (OSError, ValueError, UnicodeError):
             reasons.append('official score sheets are missing or invalid')

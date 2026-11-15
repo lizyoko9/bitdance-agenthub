@@ -98,7 +98,8 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 /private/tmp/agenthub-tracetrial-venv/bin/python -m unittest \
   eval.tracetrial.test_container_worker eval.tracetrial.test_run_trial \
   eval.tracetrial.test_task_admission eval.tracetrial.test_trace_adapter \
-  eval.tracetrial.test_trace_conformance eval.tracetrial.test_judge \
+  eval.tracetrial.test_trace_conformance eval.tracetrial.test_transport_projection \
+  eval.tracetrial.test_judge \
   eval.tracetrial.test_score_trial eval.tracetrial.test_refresh_runtime
 ```
 

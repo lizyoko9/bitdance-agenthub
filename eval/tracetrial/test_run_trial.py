@@ -16,7 +16,7 @@ from .run_trial import actor_request, checked_source, directory_hashes, docker_e
 
 
 class DriverContractTests(unittest.TestCase):
-    def test_preflight_admits_only_three_pinned_tasks_without_a_key_or_docker(self):
+    def test_preflight_admits_only_allowlisted_pinned_tasks_without_a_key_or_docker(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:
             for task_id in driver.APPROVED_TASK_IDS:
                 report = driver.preflight_task(Path('/private/tmp/agenthub-tracetrial-source'), task_id)
@@ -25,6 +25,22 @@ class DriverContractTests(unittest.TestCase):
                 self.assertIsNone(report['score'])
                 self.assertEqual(report['modelCalls'], 0)
             docker.assert_not_called()
+
+    def test_changed_host_trace_or_scoring_controller_is_rejected_before_execution(self):
+        required = {'eval/tracetrial/trace_adapter.py', 'eval/tracetrial/score_trial.py',
+                    'eval/tracetrial/judge.py'}
+        self.assertLessEqual(required, set(driver.REFRESH_CONTROLLER_FILES))
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root/'runtime.tar.gz').write_bytes(b'unused')
+            (root/'build-manifest.json').write_text(json.dumps({'controllerFiles': {
+                'eval/tracetrial/score_trial.py': 'wrong-hash'}}))
+            manifest = {'files': {}}
+            with patch.object(driver.tarfile, 'open') as archive:
+                archive.return_value.__enter__.return_value.extractfile.return_value.read.return_value = json.dumps(manifest).encode()
+                (root/'container_worker.py').write_bytes(Path(driver.__file__).with_name('container_worker.py').read_bytes())
+                with self.assertRaisesRegex(ValueError, 'Refresh controller source differs'):
+                    driver.verify_runtime_sources(root)
 
     def test_unapproved_or_path_task_ids_return_unsupported_before_resolving_a_task(self):
         with patch.object(driver, 'checked_source', return_value=Path('/fixture-source')), \

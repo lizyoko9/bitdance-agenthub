@@ -12,10 +12,12 @@ from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
 
+GOVERNANCE_TASK_ID = 'G1-registry-cleanup-002'
 APPROVED_TASK_IDS = (
     'E7-failed-command-stale-artifact-002',
     'E8-lintgate-exit-masked-002',
     'E8-exit-code-masked-by-output-001',
+    GOVERNANCE_TASK_ID,
 )
 MODEL = 'gpt-6-luna'
 ACTOR_CEILINGS = {'timeoutMs': 120000, 'maxTurns': 32, 'maxToolCalls': 6}

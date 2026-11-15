@@ -96,6 +96,13 @@ class UpstreamBudgetTests(unittest.TestCase):
 
 
 class RequestValidationTests(unittest.TestCase):
+    def test_governance_task_cannot_use_its_larger_declared_limits_in_the_worker(self):
+        request = actor_request(taskId=worker.GOVERNANCE_TASK_ID)
+        self.assertEqual(worker.validate_actor_request(request)['maxToolCalls'], 6)
+        for overrides in ({'maxToolCalls': 80}, {'timeoutMs': 1200000}):
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                worker.validate_actor_request({**request, **overrides})
+
     def test_all_approved_ids_share_one_bounded_public_request_contract(self):
         for task_id in worker.APPROVED_TASK_IDS:
             with self.subTest(task=task_id):

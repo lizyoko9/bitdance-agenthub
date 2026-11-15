@@ -6,13 +6,16 @@ import shlex
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from tracetrial_bench.types import LayeredScoringSpec, TaskSpec, VerifierSpec
 from tracetrial_bench.workspace import RunLayout
 
-from .score_trial import score_retained_trial
+from .container_worker import GOVERNANCE_TASK_ID
+from .judge import JudgeRequestError
+from .score_trial import NoModelJudgeRequester, score_retained_trial
 from .test_judge import success
 
 
@@ -62,7 +65,7 @@ items:
                              scoring=LayeredScoringSpec("score_v1", self.layout.verifier_dir / "harness.yaml",
                                                        self.layout.verifier_dir / "agent.yaml"))
 
-    def score(self, transport):
+    def score(self, transport, *, judge_key="test-only-key"):
         # A clean test environment never consumes a real host credential.
         with patch.dict(os.environ, {"PATH": os.defpath, "OPENAI_API_KEY": "fixture-actor-key",
                                      "JUDGE_API_KEY": "fixture-judge-key",
@@ -70,9 +73,72 @@ items:
             before = dict(os.environ)
             result = score_retained_trial(task=self.task, layout=self.layout, trace_summary=self.trace,
                                            actor_settings={"model": "gpt-6-luna", "reasoningEffort": "none"},
-                                           judge_key="test-only-key", transport=transport, judge_proxy=None)
+                                           judge_key=judge_key, transport=transport, judge_proxy=None)
             self.assertEqual(dict(os.environ), before)
         return result
+
+    def governance_rules_only(self):
+        self.task = replace(self.task, task_id=GOVERNANCE_TASK_ID)
+        for layer, prefix in (("harness", "h"), ("agent", "a")):
+            (self.layout.verifier_dir / f"{layer}.yaml").write_text(
+                f"version: score_v1\nlayer: {layer}\nitems:\n"
+                f"  - id: {prefix}_rule\n    type: rule\n    criterion: fixture rule\n")
+
+    def test_zero_rubric_governance_keeps_complete_official_scoring_without_model_transport(self):
+        self.governance_rules_only()
+        with patch('eval.tracetrial.score_trial.BoundedJudgeRequester') as bounded:
+            result = self.score(lambda _job: self.fail('zero-rubric task reached model transport'), judge_key="")
+            bounded.assert_not_called()
+        self.assertEqual(result['scoringStatus'], 'completed')
+        self.assertEqual(result['rawEvaluation']['score'], 100)
+        self.assertEqual(result['effectiveEvaluation']['score'], 100)
+        self.assertEqual(result['combinedScore']['harness_score']['passed_items'], 1)
+        self.assertEqual(result['combinedScore']['agent_score']['passed_items'], 1)
+        self.assertEqual(result['combinedScore']['judge_runtime']['logical_calls'], 0)
+        self.assertEqual(result['combinedScore']['judge_runtime']['scoring_order'], ['rules:harness', 'rules:agent'])
+        self.assertEqual(result['judge']['requests'], 0)
+        self.assertTrue(result['judge']['transportProhibited'])
+        self.assertEqual(result['judge']['rejectedLogicalCalls'], 0)
+        self.assertEqual(result['actualSettings']['judge']['maxRequests'], 0)
+        self.assertEqual(result['actualSettings']['judge']['credentialStorage'], 'not used')
+        self.assertIsInstance(result['policy'], dict)
+        self.assertIsInstance(result['attribution'], dict)
+
+    def test_governance_with_any_declared_rubric_is_rejected_without_side_effects(self):
+        self.task = replace(self.task, task_id=GOVERNANCE_TASK_ID)
+        with patch('eval.tracetrial.score_trial.score_layout') as official:
+            with self.assertRaisesRegex(ValueError, 'must declare zero LLM rubrics'):
+                self.score(lambda _job: self.fail('unexpected transport'))
+            official.assert_not_called()
+        self.assertFalse((self.layout.artifacts_dir / 'agenthub_scoring').exists())
+
+    def test_non_governance_rubrics_cannot_use_an_empty_key_or_zero_requester(self):
+        with patch('eval.tracetrial.score_trial.NoModelJudgeRequester') as disabled:
+            with self.assertRaisesRegex(ValueError, 'credential is required'):
+                self.score(lambda _job: self.fail('unexpected transport'), judge_key="")
+            disabled.assert_not_called()
+        self.assertFalse((self.layout.artifacts_dir / 'agenthub_scoring').exists())
+
+    def test_unexpected_governance_rubric_request_is_hard_blocked_and_makes_score_incomplete(self):
+        self.governance_rules_only()
+        def official(**kwargs):
+            self.assertEqual(kwargs['judge_runtime'].api_key, '')
+            kwargs['judge_requester'](kwargs['judge_runtime'], 'unexpected rubric')
+        with patch('eval.tracetrial.score_trial.score_layout', side_effect=official):
+            result = self.score(lambda _job: self.fail('hard block reached model transport'))
+        self.assertEqual(result['scoringStatus'], 'incomplete')
+        self.assertIsNone(result['combinedScore'])
+        self.assertIsNone(result['rawEvaluation'])
+        self.assertEqual(result['error']['type'], 'JudgeRequestError')
+        self.assertEqual(result['judge']['requests'], 0)
+        self.assertEqual(result['judge']['rejectedLogicalCalls'], 1)
+
+    def test_zero_requester_always_rejects_without_acquiring_a_transport(self):
+        requester = NoModelJudgeRequester(self.layout.artifacts_dir / 'disabled-judge')
+        with self.assertRaises(JudgeRequestError):
+            requester(object(), 'unexpected rubric')
+        self.assertEqual(requester.summary()['requests'], 0)
+        self.assertEqual((requester.output_dir / 'requests.jsonl').read_text(), '')
 
     def test_real_official_rules_judging_aggregation_and_policy(self):
         jobs = []

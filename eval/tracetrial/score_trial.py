@@ -10,9 +10,12 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from tracetrial_bench.llm_judge import JudgeRuntime
+from tracetrial_bench.score_config import load_score_sheet
 from tracetrial_bench.scoring import score_layout
 
-from .judge import BoundedJudgeRequester, JUDGE_MODEL, _api_url, _minimal_environment
+from .container_worker import GOVERNANCE_TASK_ID
+from .judge import (BoundedJudgeRequester, JUDGE_MODEL, JudgeRequestError, MAX_JUDGE_REQUESTS,
+                    TOKEN_FIELDS, _api_url, _minimal_environment)
 
 
 UPSTREAM_COMMIT = "98a381307184fa4212db3466b21b4c92a031940b"
@@ -59,6 +62,35 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+class NoModelJudgeRequester:
+    def __init__(self, output_dir: Path):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
+        self.rejected_calls = 0
+        self.rejection_reason = None
+        (self.output_dir / "settings.json").write_text(json.dumps({
+            "mode": "official_zero_rubrics", "maxRequests": 0, "transportProhibited": True,
+            "reason": "The approved governance score sheets declare no LLM rubric."}, indent=2) + "\n")
+        (self.output_dir / "requests.jsonl").write_text("")
+        self._persist_summary()
+
+    def _persist_summary(self) -> None:
+        (self.output_dir / "summary.json").write_text(json.dumps(self.summary(), indent=2) + "\n")
+
+    def __call__(self, _runtime: Any, _prompt: str) -> str:
+        self.rejected_calls += 1
+        self.rejection_reason = "Judge model transport is prohibited for the approved zero-rubric task"
+        self._persist_summary()
+        raise JudgeRequestError(self.rejection_reason)
+
+    def summary(self) -> dict[str, Any]:
+        return {"requests": 0, "totalRequestBytes": 0, "budgetExhausted": False,
+                "rejectionReason": self.rejection_reason, "elapsedSeconds": 0,
+                "usageComplete": False, "unknownUsageRequests": 0,
+                "mode": "official_zero_rubrics", "transportProhibited": True,
+                "rejectedLogicalCalls": self.rejected_calls, **dict.fromkeys(TOKEN_FIELDS)}
+
+
 def score_retained_trial(
     *, task: Any, layout: Any, trace_summary: dict[str, Any],
     actor_settings: dict[str, Any], judge_key: str,
@@ -75,26 +107,37 @@ def score_retained_trial(
     compatibility probe is made until the official scorer requests a rubric.
     This function intentionally refuses reuse of a scoring sidecar directory.
     """
-    if not isinstance(judge_key, str) or not judge_key:
-        raise ValueError("An in-memory judge credential is required")
     if type(verifier_timeout) is not int or not 1 <= verifier_timeout <= 120:
         raise ValueError("Verifier timeout must be between 1 and 120 seconds")
     if task.scoring is None:
         raise ValueError("This integration requires the official layered scoring configuration")
+    sheets = [load_score_sheet(task.scoring.harness_score_path, expected_layer="harness"),
+              load_score_sheet(task.scoring.agent_score_path, expected_layer="agent")]
+    rubric_count = sum(len(sheet.rubric_items) for sheet in sheets)
+    no_model_judge = task.task_id == GOVERNANCE_TASK_ID
+    if no_model_judge and rubric_count:
+        raise ValueError("The approved zero-Judge governance task must declare zero LLM rubrics")
+    if not isinstance(judge_key, str) or (not no_model_judge and not judge_key):
+        raise ValueError("An in-memory judge credential is required for rubric scoring")
     _api_url(judge_base_url)
     sidecars = Path(layout.artifacts_dir) / "agenthub_scoring"
     sidecars.mkdir(parents=True, exist_ok=False, mode=0o700)
-    requester = BoundedJudgeRequester(sidecars / "judge", proxy=judge_proxy, transport=transport)
+    requester = (NoModelJudgeRequester(sidecars / "judge") if no_model_judge else
+                 BoundedJudgeRequester(sidecars / "judge", proxy=judge_proxy, transport=transport))
     runtime = JudgeRuntime(provider="openai", model=JUDGE_MODEL, base_url=judge_base_url,
-                           api_key=judge_key, api_mode="chat_completions", timeout=60.0,
+                           api_key="" if no_model_judge else judge_key, api_mode="chat_completions", timeout=60.0,
                            retry_delays=())
     settings = {
         "upstreamCommit": UPSTREAM_COMMIT, "harness": "agenthub", "actor": actor_settings,
         "judge": {"provider": runtime.provider, "model": runtime.model,
+                  "mode": "official_zero_rubrics" if no_model_judge else "bounded_rubrics",
+                  "rubricCount": rubric_count, "maxRequests": 0 if no_model_judge else MAX_JUDGE_REQUESTS,
+                  "transportProhibited": no_model_judge,
                   "baseUrl": runtime.base_url, "apiMode": runtime.api_mode,
                   "reasoningEffort": "none", "maxCompletionTokens": 4096,
                   "timeoutSeconds": 60.0, "networkRetries": 0, "redirects": "error",
-                  "proxy": judge_proxy, "credentialStorage": "memory only"},
+                  "proxy": None if no_model_judge else judge_proxy,
+                  "credentialStorage": "not used" if no_model_judge else "memory only"},
         "verifier": {"timeoutSeconds": verifier_timeout, "execution": "host-only",
                      "environment": "minimal allowlist; provider credentials removed"},
     }

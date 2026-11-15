@@ -25,7 +25,9 @@ RECORDER_FILES = ('tracetrial_bench/__init__.py', 'tracetrial_bench/provider_req
 ROOT = Path(__file__).resolve().parents[2]
 REFRESH_CONTROLLER_FILES = ('eval/tracetrial/run_trial.py', 'eval/tracetrial/Dockerfile.refresh',
     'eval/tracetrial/refresh-runtime.py', 'eval/tracetrial/container_worker.py',
-    'eval/tracetrial/task_admission.py', 'eval/terminalbench/prepare-runtime.py')
+    'eval/tracetrial/task_admission.py', 'eval/tracetrial/trace_adapter.py',
+    'eval/tracetrial/score_trial.py', 'eval/tracetrial/judge.py',
+    'eval/terminalbench/prepare-runtime.py')
 
 
 def write_json(path, payload):

@@ -10,6 +10,7 @@ from tracetrial_bench.execution_capabilities import persist_execution_probe_evid
 
 
 CAPABILITIES = ("native_exec_v1", "post_tool_v1")
+TOOL_RESULT_PROJECTION_VERSION = "agenthub_transport_v2"
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -159,10 +160,21 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                 diagnostics.append(f"Native tool result value is absent at line {line}")
             if not isinstance(event.get("isError"), bool):
                 diagnostics.append(f"Native tool result lacks a boolean isError at line {line}")
+            native_result = event.get("result")
+            projected_result = dict(native_result) if isinstance(native_result, dict) else {"value": native_result}
+            derived_fields = {} if isinstance(native_result, dict) else {"value": "raw_event.result"}
+            if "tool_call_id" in projected_result:
+                if projected_result["tool_call_id"] != identifier:
+                    diagnostics.append(f"Native payload tool_call_id conflicts with transport callId at line {line}")
+            else:
+                projected_result["tool_call_id"] = identifier
+                derived_fields["tool_call_id"] = "raw_event.callId"
             emit("tool", line, event,
                  tool_call={"tool_call_id": identifier, "tool_name": call.get("toolName"),
                             "arguments": call.get("args")},
-                 tool_result=event.get("result"),
+                 tool_result=projected_result, native_tool_result=native_result,
+                 tool_result_projection={"version": TOOL_RESULT_PROJECTION_VERSION,
+                                         "derived_fields": derived_fields},
                  source_lines=[call_line, line],
                  native_call_source={"path": str(source_events.resolve()), "line": call_line},
                  native_tool_call=call)
@@ -313,6 +325,7 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
     summary["agenthub_actor_usage"] = result.get("usage")
     summary["agenthub_input_prelude_sources"] = prelude
     summary["agenthub_native_termination_reason"] = result.get("terminationReason")
+    summary["agenthub_tool_result_projection_version"] = TOOL_RESULT_PROJECTION_VERSION
     _write_json(trace_dir / "summary.json", summary)
     return summary
 
