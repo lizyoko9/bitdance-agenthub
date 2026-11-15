@@ -12,6 +12,8 @@
 
 [2026-11-15 E7 新尝试及机制回归](results/2026-11-15-e7-and-mechanisms.md)：E7 首次有效执行获得 Harness 6/6、Agent 5/5，官方 raw/effective 均为 100/pass/clean；旧中断记录保留。另有 58 项无模型回归通过，属于机制验证，不计为 benchmark 分数。
 
+[2026-11-16 G1 治理诊断](results/2026-11-16-g1-governance.md)：一次 Actor 在六工具额度耗尽后终止，未开始删除或报告。修复接入对原生 snapshot/诊断时间戳的过严假设后，保留数据的首次官方评分为 6.25/fail（Harness 1/8、Agent 0/9），零 Judge 请求、无 Actor 重跑。静态归因链与零删除轨迹不匹配，删除反馈机制尚未测成。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，初次接入见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)，本轮扩展及批准预算见 [`expand-tracetrial-native-cases`](../../openspec/changes/expand-tracetrial-native-cases/design.md)。
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |

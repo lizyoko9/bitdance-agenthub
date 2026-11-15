@@ -12,5 +12,5 @@
 
 ## 3. One-shot experiment
 
-- [ ] 3.1 Commit implementation inputs and refresh/probe the verified local runtime without credentials or model calls.
-- [ ] 3.2 Execute G1 once, retain all original outcomes without automatic rerun, and audit task hashes, evidence, usage, credential handling and cleanup.
+- [x] 3.1 Commit implementation inputs and refresh/probe the verified local runtime without credentials or model calls.
+- [x] 3.2 Execute G1 once and audit immutable outcomes (six-tool budget exhausted; first retained-evidence official score 6.25/fail, zero new Actor/Judge requests), task hashes, usage, credentials and cleanup.
