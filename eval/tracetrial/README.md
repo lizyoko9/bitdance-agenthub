@@ -18,6 +18,8 @@
 
 [2026-11-16 G1 识别修复离线诊断](results/2026-11-16-g1-recognition-diagnostic.md)：同一保留轨迹的原识别器重放为 29.1667，补 Python 删除识别为 77.7778，再支持原生完整目录观察为 88.8889（Harness 8/8、Agent 7/9，仍 fail）。后两项是 nonofficial diagnostic；原报告与官方 29.1667 分保留，报告的两项严格文本规则仍失败。无新 Actor/Judge 模型请求。
 
+[2026-11-16 E6 超时与进程观测](results/2026-11-16-e6-timeout.md)：一次 Actor、3 HTTP/2 工具，官方 raw/effective 均为 100/pass/clean（Harness 6/6、Agent 4/4）。测得 cleanup 前存活残留为 0，另有 3 个 Z 状态条目；新增的是只读进程证据与显式 timeout 字段适配，未修改生产 Bash。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，初次接入见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)，本轮扩展及批准预算见 [`expand-tracetrial-native-cases`](../../openspec/changes/expand-tracetrial-native-cases/design.md)。
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
