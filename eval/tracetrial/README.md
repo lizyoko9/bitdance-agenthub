@@ -1,6 +1,6 @@
 # TraceTrial-Bench × AgentHub
 
-本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的六个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
+本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的七个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
 
 [2026-11-12 首轮结果](results/2026-11-12-e8-smoke.md)：Harness 35.7143/50、Agent 50/50，官方总分 85.7143/100、判定 fail；定位到非零退出的失败分类未一致传播，Agent 正确完成交付。
 
@@ -26,6 +26,7 @@
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
 |---|---|---|---:|
+| `E8-mountcheck-exit-masked-003` | E8新样本：非零退出/终态、post-tool反馈与usage回归 | 6 / 1 | 2 |
 | `L2-deploy-latency-001` | 已受理与下游确认的状态、晚确认对账及交付；真实归档/清理观测 | 14 / 1 | 2 |
 | `E6-timeout-error-channel-003` | 原生命令超时、失败/部分输出与 post-tool 反馈；隔离容器清理观测 | 6 / 1 | 4 |
 | `E7-failed-command-stale-artifact-002` | 失败命令留下成功样产物，后续观察与参考消费者的拒绝 | 6 / 1 | 4 |
@@ -202,3 +203,13 @@ TraceTrial manifest 明确写入 `benchmark=tracetrial` 与固定 `sourceRevisio
 L2 的 `artifacts/container_lifecycle.json` 是显式 AgentHub projection，不代表执行了 stock runtime。它保留原 `lifecycle.json`、源路径/hash和带容器 ID 的 stage 引用；仅实际复制成功且必需原生文件通过 regular/non-symlink/hash 校验时记录 archive complete，仅同容器实际删除成功时记录 cleanup complete。缺失、非零、异常或冲突保留失败，第一项 apparatus 异常与后续清理异常分别留档。预期的通道 exit75/工具失败不会变成容器异常；live0 也不能替代复制或删除证据。
 
 无模型 preflight 检查通道需要的标准命令和 `/dev/urandom` 可用，但不执行 `deployctl` 或任务 fixture。原始 prompt、通道、保护输入、评分代码和分数不改；接入完成不等于已获得真实试跑成绩，结果须另见各次报告。
+
+## Mountcheck 新样本与 Judge 体积规划
+
+E8-mountcheck-exit-masked-003 是新的 E8 回归样本，不扩大机制家族覆盖声明。它使用原 TaskSpec 的 6 工具/120 秒、一条原始输入、7 内部轮次/HTTP、256KiB 单次/1,835,008 bytes 累计输入及 8192 输出 tokens；runtime 的 600 秒单独留档。公开 prompt 本身要求 Bash，fixture 权限和原文不改。
+
+只有该题增加 native_terminal_completion_v1 观察能力，由既有严格 native lifecycle、run_finished/trace_complete 提供真实结果；失败或缺终态不被补成功，不激活 E6/L2 的进程 observer，也不宣称 Claude 专属机制。
+
+该题 Agent 无 rubric，因此在首个 Judge HTTP 前可由已产出的官方规则结果、EvidenceFinder 与官方模板精确渲染两个完整 Harness prompt，核对实际每个 prompt/hash/body（含最多一次同 prompt 纠正），预检 peak 和 2*sum。默认 256KiB/2MiB/10HTTP/4096 输出/600 秒不扩大；不合适的证据明确 incomplete、0 Judge HTTP，不裁剪证据或自动改 guard。
+
+无模型 resolved-config 测试可用 AGENTHUB_TRACETRIAL_TEST_SOURCE 指向完整的固定 checkout；临时源码丢失时在新隔离目录恢复，缺源跳过不能当成已验证。实际源码与 installed Python package 的 hash 仍须一致。
