@@ -1,0 +1,28 @@
+## Context
+
+Current Bash already exposes per-call timeout, failure and partial output and terminates a detached POSIX process group. The next selected task requires actual cleanup evidence beyond those result fields. The user authorized further cases; this change adds evaluation measurement and admission, not a production cleanup fix.
+
+## Goals / Non-Goals
+
+**Goals:** Run E6-timeout-error-channel-003 once with faithful native timeout/post-tool feedback, real process-census evidence, task-derived budgets and full official layered scoring.
+
+**Non-Goals:** Changing production Bash, prompts, safety rules, official tasks/scoring, delivery self-check implementation, stock harness substitution, or proving every short-lived process birth was observed.
+
+## Decisions
+
+1. Add only the selected E6 task to the explicit shared Worker allowlist. TaskSpec remains 6 tools/120 seconds, one original input, seven model/HTTP opportunities, 256KiB per body, 1,835,008 total body bytes and 8192 output tokens. Runtime's separate declared 600 seconds is retained without clamping or overriding TaskSpec. Existing Judge bounds remain; four rubric items permit up to eight official logical requests including corrections within the ten-HTTP guard.
+2. Embed a standard-library-only `ProcessObserver` in the already-packaged Worker. Only E6 activates it. In a fresh exclusive Linux PID namespace, baseline must contain exactly PID1 `sleep infinity` and the root Worker itself; record PID namespace and exact PID/start-ticks identities. Recorder uses threads and Worker starts no trusted child process after baseline except the actual unprivileged AgentHub Node actor. Unexpected baseline processes reject observation before Actor startup.
+3. Observe the entire container PID identity delta, with no UID or PGID filter. Read stat/status/stat consistently, keep all four UIDs as metadata, and track PID reuse by start ticks. This covers detached, reparented and changed-UID live processes in this isolated scope; it does not claim a general host process-tree tracker. Only confirmed disappearance can be treated as normal churn. Permission/parse/identity/baseline/namespace failures are explicit tracking errors.
+4. On natural Actor exit, stop background sampling and take two fixed final process censuses; residual live identities are their union outside the verified baseline. A nonempty first census cannot be washed into success by waiting. Zombie identities are separately counted and excluded from live residuals, matching upstream semantics. The observer never sends signals. On Actor wall-time expiration or other forced shutdown, freeze a failed receipt before the first existing killpg call; later cleanup cannot overwrite it.
+5. Use an independent receipt schema `agenthub-process-observation-v1`, scope `isolated_container_pid_delta`, measurement_only=true and observer_did_signal=false. Include Actor identity, baseline/namespace evidence, sampling/final census provenance, tracking errors, observed-new count, live residual identities/count, zombie count, forced-stop state and cleanup validity. Unknown counts remain null. Cleanup validity requires natural exit, no forced stop, successful complete final censuses, unchanged baseline and zero live residuals. The observed-new count is a lower bound, not a full birth history.
+6. Preserve the exact Worker receipt inside actor_process.json and copy it into the evaluation summary with a file hash/source reference. Only the E6 policy exposes timeout_observation_v1/process_containment_v1, backed by installed observer code, no-model runtime probes and actual receipt presence. Capability installation is distinct from this trial succeeding: tracking failure or residuals remain measured failures, not grounds to relabel the trial unsupported. Native tool payloads and canonical result fields remain unchanged; official evidence helpers consume the additive summary receipt.
+7. Verify fake-/proc edge cases plus actual isolated Linux observer probes: a naturally completed child produces a clean receipt, an intentionally detached surviving child produces a failed receipt before container cleanup. Also verify existing real Bash timeout metadata and post-tool mapping without model calls. The actual task fixture is executed only by the one authorized Actor trial, never by this preflight.
+8. Run one new E6 trial with Luna/none and existing authorized credentials, no automatic Actor/scoring rerun, retain original official scores and per-item causes. Rough cost reference is $0.6 at near-full transport/output budgets, not a hard dollar cap. Audit task/runtime hashes, no new production behavior, native/sidecar fidelity, observer freeze before Docker cleanup and actual Actor/Judge usage.
+
+## Risks / Trade-offs
+
+- PID polling can miss short-lived births → only claim bounded runtime observations and full final censuses; residual validity is not a complete historical process trace.
+- Another Docker exec can contaminate process scope → exclusive container/strict baseline and no concurrent in-container progress probes; unexpected new processes are conservatively counted.
+- `/proc` races or privilege changes can hide records → no UID filtering; double-read identities; errors/unknowns do not become zero.
+- Outer cleanup could mask leaks → immutable pre-cleanup freeze and forced-stop failure; artifact timestamps/lifecycle retain that ordering.
+- Benchmark integration can be confused with production improvement → document observer-only addition and independently classify native behavior, model decisions, apparatus faults and grader limitations.
