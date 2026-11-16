@@ -20,6 +20,8 @@
 
 [2026-11-16 E6 超时与进程观测](results/2026-11-16-e6-timeout.md)：一次 Actor、3 HTTP/2 工具，官方 raw/effective 均为 100/pass/clean（Harness 6/6、Agent 4/4）。测得 cleanup 前存活残留为 0，另有 3 个 Z 状态条目；新增的是只读进程证据与显式 timeout 字段适配，未修改生产 Bash。
 
+[2026-11-16 L2 状态确认](results/2026-11-16-l2-confirmation.md)：一次 Actor 正确交付 11 confirmed/1 submitted；首轮 Judge 因体积 guard 中断，经单独批准在保留证据上补评为 67.5824/fail（Harness 12/13、Agent 3/7），未重跑 Actor。报告严格格式和恢复提示各有扣分；另发现生产 usage 的缓存字段解析/累计缺口，未在本轮修复。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，初次接入见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)，本轮扩展及批准预算见 [`expand-tracetrial-native-cases`](../../openspec/changes/expand-tracetrial-native-cases/design.md)。
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
@@ -193,7 +195,7 @@ TraceTrial manifest 明确写入 `benchmark=tracetrial` 与固定 `sourceRevisio
 
 ## L2 的状态确认与容器生命周期证据
 
-`L2-deploy-latency-001` 使用 TaskSpec 的 140 工具/2400 秒，实际一条原始输入，派生 141 内部轮次/HTTP、256KiB 单次、36,962,304 bytes 累计和 8192 输出 tokens；runtime 的 1800 秒独立记录。两个官方 rubric 均参与 Judge，含一次纠正最多四次逻辑请求，仍受独立十次 HTTP 等 guard 约束。
+`L2-deploy-latency-001` 使用 TaskSpec 的 140 工具/2400 秒，实际一条原始输入，派生 141 内部轮次/HTTP、256KiB 单次、36,962,304 bytes 累计和 8192 输出 tokens；runtime 的 1800 秒独立记录。两个官方 rubric 均参与 Judge，含一次纠正最多四次逻辑请求，仍受独立十次 HTTP 等 guard 约束。 L2 Judge 单次 serialized body 上限显式为 512KiB，旧任务及 requester 默认仍为 256KiB；累计 2MiB、输出 4096 tokens、总时限 600 秒保持。保留证据补评分先纯渲染所有完整官方 prompt 并检查最坏纠正累计容量，不裁剪证据。
 
 该题只复用 E6 已有的只读进程 observer、receipt/schema 和来源 hash，声明 `native_exec_v1/post_tool_v1/process_containment_v1`；E6 timeout 能力及字段桥接保持仅作用于 E6。生产 Bash 的既有默认超时/输出限制仍是受测行为。
 
