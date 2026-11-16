@@ -15,7 +15,7 @@ from tracetrial_bench.scoring import score_layout
 
 from .container_worker import GOVERNANCE_TASK_ID
 from .judge import (BoundedJudgeRequester, JUDGE_MODEL, JudgeRequestError, MAX_JUDGE_REQUESTS,
-                    TOKEN_FIELDS, _api_url, _minimal_environment)
+                    TOKEN_FIELDS, _api_url, _minimal_environment, judge_request_limits)
 
 
 UPSTREAM_COMMIT = "98a381307184fa4212db3466b21b4c92a031940b"
@@ -122,8 +122,10 @@ def score_retained_trial(
     _api_url(judge_base_url)
     sidecars = Path(layout.artifacts_dir) / "agenthub_scoring"
     sidecars.mkdir(parents=True, exist_ok=False, mode=0o700)
+    limits = judge_request_limits(task.task_id)
     requester = (NoModelJudgeRequester(sidecars / "judge") if no_model_judge else
-                 BoundedJudgeRequester(sidecars / "judge", proxy=judge_proxy, transport=transport))
+                 BoundedJudgeRequester(sidecars / "judge", proxy=judge_proxy, transport=transport,
+                                       max_request_bytes=int(limits['maxRequestBytes'])))
     runtime = JudgeRuntime(provider="openai", model=JUDGE_MODEL, base_url=judge_base_url,
                            api_key="" if no_model_judge else judge_key, api_mode="chat_completions", timeout=60.0,
                            retry_delays=())
@@ -132,6 +134,8 @@ def score_retained_trial(
         "judge": {"provider": runtime.provider, "model": runtime.model,
                   "mode": "official_zero_rubrics" if no_model_judge else "bounded_rubrics",
                   "rubricCount": rubric_count, "maxRequests": 0 if no_model_judge else MAX_JUDGE_REQUESTS,
+                  "maxRequestBytes": limits['maxRequestBytes'], "maxTotalRequestBytes": limits['maxTotalRequestBytes'],
+                  "wallSeconds": limits['wallSeconds'], "callSeconds": limits['callSeconds'],
                   "transportProhibited": no_model_judge,
                   "baseUrl": runtime.base_url, "apiMode": runtime.api_mode,
                   "reasoningEffort": "none", "maxCompletionTokens": 4096,

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -12,7 +13,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from .judge import (BoundedJudgeRequester, JudgeBudgetExceeded, JudgeRequestError,
-                    _NoRedirect, _http_transport, _perform_http_job)
+                    MAX_REQUEST_BYTES, MAX_SUPPORTED_REQUEST_BYTES, _NoRedirect,
+                    _http_transport, _perform_http_job)
 
 
 def runtime(**kwargs):
@@ -29,6 +31,10 @@ def success(content='{"score":1,"reason":"fixture evidence"}', *, usage=True, fi
                             "prompt_tokens_details": {"cached_tokens": 5},
                             "completion_tokens_details": {"reasoning_tokens": 0}}
     return {"httpStatus": 200, "requestId": "request-fixture", "payload": payload}
+
+
+def large_prompt():
+    return '\\"' * 127700
 
 
 class BoundedJudgeTests(unittest.TestCase):
@@ -91,6 +97,59 @@ class BoundedJudgeTests(unittest.TestCase):
         with self.assertRaises(JudgeBudgetExceeded):
             requester(runtime(), "fixture" * 10)
         self.assertEqual(transport.call_count, 1)
+
+    def test_default_stays_256kib_and_explicit_512kib_accepts_full_serialized_body(self):
+        transport = Mock(return_value=success())
+        default = BoundedJudgeRequester(self.directory / 'default', transport=transport)
+        with self.assertRaises(JudgeBudgetExceeded):
+            default(runtime(), large_prompt())
+        transport.assert_not_called()
+        self.assertEqual(default.max_request_bytes, 256 * 1024)
+        self.assertEqual(default.summary()['requests'], 0)
+        explicit = BoundedJudgeRequester(self.directory / 'explicit', transport=transport,
+                                        max_request_bytes=512 * 1024)
+        explicit(runtime(), large_prompt())
+        body_bytes = len(transport.call_args.args[0]['body'].encode('utf-8'))
+        self.assertGreater(body_bytes, 510000)
+        self.assertLessEqual(body_bytes, 512 * 1024)
+        self.assertEqual(explicit.summary()['totalRequestBytes'], body_bytes)
+        self.assertEqual(explicit.max_total_request_bytes, 2 * 1024 * 1024)
+        with self.assertRaises(ValueError):
+            BoundedJudgeRequester(self.directory / 'over-technical', max_request_bytes=512 * 1024 + 1)
+
+    def test_larger_single_request_capacity_keeps_the_two_mib_cumulative_guard(self):
+        transport = Mock(return_value=success())
+        requester = BoundedJudgeRequester(self.directory, transport=transport, max_request_bytes=512 * 1024)
+        for _ in range(4):
+            requester(runtime(), large_prompt())
+        with self.assertRaises(JudgeBudgetExceeded):
+            requester(runtime(), large_prompt())
+        self.assertEqual(transport.call_count, 4)
+        self.assertLessEqual(requester.summary()['totalRequestBytes'], 2 * 1024 * 1024)
+        self.assertEqual(requester.summary()['requests'], 4)
+
+    def test_real_worker_entry_reads_large_doubly_serialized_job_without_network(self):
+        transport = Mock(return_value=success())
+        requester = BoundedJudgeRequester(self.directory, transport=transport, max_request_bytes=512 * 1024)
+        requester(runtime(), large_prompt())
+        job = transport.call_args.args[0]
+        encoded = json.dumps(job, ensure_ascii=False).encode('utf-8')
+        self.assertGreater(len(encoded), 2 * MAX_REQUEST_BYTES + 8192)
+        self.assertLessEqual(len(encoded), 2 * MAX_SUPPORTED_REQUEST_BYTES + 8192)
+        wrapper = '''import runpy,sys,urllib.request
+def blocked(*args, **kwargs):
+    raise RuntimeError('network disabled in worker framing test')
+urllib.request.build_opener = blocked
+worker = sys.argv[1]
+sys.argv = [worker, '--http-worker']
+runpy.run_path(worker, run_name='__main__')
+'''
+        completed = subprocess.run([sys.executable, '-B', '-c', wrapper,
+                                    str(Path(__file__).with_name('judge.py'))], input=encoded,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+                                   env={'PATH': os.defpath, 'PYTHONDONTWRITEBYTECODE': '1'}, check=False)
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(json.loads(completed.stdout), {'httpStatus': None, 'requestId': None, 'errorType': 'RuntimeError'})
 
     def test_deadline_limits_single_transport_and_prevents_later_request(self):
         now = [100.0]

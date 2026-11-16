@@ -82,6 +82,20 @@ class TaskAdmissionTests(unittest.TestCase):
         expected = ['native_exec_v1', 'post_tool_v1', 'process_containment_v1']
         self.assertEqual(report['capabilities'], {'required': expected, 'available': expected, 'missing': []})
 
+    def test_only_confirmation_selects_larger_judge_capacity_with_unchanged_coverage_and_other_guards(self):
+        for task_id in APPROVED_TASK_IDS:
+            with self.subTest(task=task_id):
+                task = resolve_task(SOURCE / 'Task' / task_id)
+                report, _ = admit_task(task)
+                self.assertEqual(report['status'], 'supported')
+                self.assertEqual(report['judgeLimits'], {
+                    'maxRequests': 0 if task_id == GOVERNANCE_TASK_ID else 10,
+                    'maxRequestBytes': 512 * 1024 if task_id == CONFIRMATION_TASK_ID else 256 * 1024,
+                    'maxTotalRequestBytes': 2 * 1024 * 1024, 'maxCompletionTokens': 4096,
+                    'wallSeconds': 600.0, 'callSeconds': 60.0})
+                if task_id == CONFIRMATION_TASK_ID:
+                    self.assertEqual(report['judgeCoverage'], {'rubrics': 2, 'maxRequests': 10, 'worstCaseRequests': 4})
+
     def test_confirmation_cannot_borrow_timeout_capability_or_use_the_previous_task_ceiling(self):
         task = resolve_task(SOURCE/'Task'/CONFIRMATION_TASK_ID)
         added = replace(task, execution_probe=ExecutionProbeSpec('lifecycle_v1',

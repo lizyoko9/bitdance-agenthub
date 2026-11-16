@@ -16,12 +16,22 @@ from urllib.parse import urlsplit
 JUDGE_MODEL = "gpt-6-luna"
 MAX_JUDGE_REQUESTS = 10
 MAX_REQUEST_BYTES = 256 * 1024
+MAX_SUPPORTED_REQUEST_BYTES = 512 * 1024
 MAX_TOTAL_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_COMPLETION_TOKENS = 4096
 MAX_WALL_SECONDS = 600.0
 MAX_CALL_SECONDS = 60.0
 MAX_RESPONSE_BYTES = 1024 * 1024
 TOKEN_FIELDS = ("inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "reasoningTokens")
+
+
+def judge_request_limits(task_id: str) -> dict[str, int | float]:
+    from .container_worker import CONFIRMATION_TASK_ID
+
+    return {"maxRequests": MAX_JUDGE_REQUESTS,
+            "maxRequestBytes": MAX_SUPPORTED_REQUEST_BYTES if task_id == CONFIRMATION_TASK_ID else MAX_REQUEST_BYTES,
+            "maxTotalRequestBytes": MAX_TOTAL_REQUEST_BYTES, "maxCompletionTokens": MAX_COMPLETION_TOKENS,
+            "wallSeconds": MAX_WALL_SECONDS, "callSeconds": MAX_CALL_SECONDS}
 
 
 class JudgeRequestError(RuntimeError):
@@ -141,7 +151,7 @@ class BoundedJudgeRequester:
         wall_seconds: float = MAX_WALL_SECONDS, call_seconds: float = MAX_CALL_SECONDS,
     ):
         for name, value, bound in (("max_requests", max_requests, MAX_JUDGE_REQUESTS),
-                                   ("max_request_bytes", max_request_bytes, MAX_REQUEST_BYTES),
+                                   ("max_request_bytes", max_request_bytes, MAX_SUPPORTED_REQUEST_BYTES),
                                    ("max_total_request_bytes", max_total_request_bytes, MAX_TOTAL_REQUEST_BYTES)):
             if type(value) is not int or not 1 <= value <= bound:
                 raise ValueError(f"Invalid bounded judge {name}")
@@ -258,7 +268,7 @@ class BoundedJudgeRequester:
 
 if __name__ == "__main__" and sys.argv[1:] == ["--http-worker"]:
     try:
-        job = json.loads(sys.stdin.buffer.read(2 * MAX_REQUEST_BYTES + 8192))
+        job = json.loads(sys.stdin.buffer.read(2 * MAX_SUPPORTED_REQUEST_BYTES + 8192))
         result = _perform_http_job(job)
     except Exception as error:
         result = {"httpStatus": None, "requestId": None, "errorType": type(error).__name__}

@@ -3,7 +3,7 @@ from tracetrial_bench.score_config import load_score_sheet
 
 from .budget_contract import build_budget_plan, budget_plan_digest, validate_budget_plan
 from .container_worker import APPROVED_TASK_IDS, GOVERNANCE_TASK_ID, MODEL, PROCESS_OBSERVED_TASK_IDS, validate_actor_request
-from .judge import MAX_JUDGE_REQUESTS
+from .judge import MAX_JUDGE_REQUESTS, judge_request_limits
 from .trace_adapter import capabilities_for_task
 
 
@@ -112,6 +112,7 @@ def admit_task(task, *, budget_plan=None, mode='task', overrides=None):
             max_judge_requests = 0 if governance else MAX_JUDGE_REQUESTS
             report['judgeCoverage'] = {'rubrics': rubrics, 'maxRequests': max_judge_requests,
                                        'worstCaseRequests': rubrics * 2}
+            report['judgeLimits'] = {**judge_request_limits(task.task_id), 'maxRequests': max_judge_requests}
             if governance and rubrics:
                 reasons.append('governance scoring must declare zero LLM rubrics')
             if rubrics * 2 > max_judge_requests:

@@ -13,10 +13,10 @@ from unittest.mock import patch
 from tracetrial_bench.types import LayeredScoringSpec, TaskSpec, VerifierSpec
 from tracetrial_bench.workspace import RunLayout
 
-from .container_worker import GOVERNANCE_TASK_ID
+from .container_worker import CONFIRMATION_TASK_ID, GOVERNANCE_TASK_ID
 from .judge import JudgeRequestError
 from .score_trial import NoModelJudgeRequester, score_retained_trial
-from .test_judge import success
+from .test_judge import large_prompt, success
 
 
 class OfficialScoringTests(unittest.TestCase):
@@ -158,10 +158,74 @@ items:
         self.assertIsInstance(result["policy"], dict)
         self.assertEqual(len(jobs), 2)
         self.assertEqual(result["judge"]["requests"], 2)
+        self.assertEqual(result['actualSettings']['judge']['maxRequestBytes'], 256 * 1024)
+        self.assertEqual(result['actualSettings']['judge']['maxTotalRequestBytes'], 2 * 1024 * 1024)
         self.assertTrue(Path(result["policyPath"]).is_file())
         for path in (self.layout.artifacts_dir / "agenthub_scoring").rglob("*"):
             if path.is_file():
                 self.assertNotIn("test-only-key", path.read_text())
+
+    def test_default_task_rejects_large_actual_request_before_any_transport(self):
+        calls = []
+
+        def official(**kwargs):
+            kwargs['judge_requester'](kwargs['judge_runtime'], large_prompt())
+
+        with patch('eval.tracetrial.score_trial.score_layout', side_effect=official):
+            result = self.score(lambda job: calls.append(job))
+        self.assertEqual(calls, [])
+        self.assertEqual(result['scoringStatus'], 'incomplete')
+        self.assertEqual(result['error']['type'], 'JudgeBudgetExceeded')
+        self.assertEqual(result['actualSettings']['judge']['maxRequestBytes'], 256 * 1024)
+        self.assertEqual(result['judge']['requests'], 0)
+
+    def test_confirmation_explicitly_accepts_large_actual_request_and_records_unchanged_other_guards(self):
+        self.task = replace(self.task, task_id=CONFIRMATION_TASK_ID)
+        calls = []
+
+        def official(**kwargs):
+            kwargs['judge_requester'](kwargs['judge_runtime'], large_prompt())
+
+        def transport(job):
+            calls.append(job)
+            return success()
+
+        with patch('eval.tracetrial.score_trial.score_layout', side_effect=official):
+            result = self.score(transport)
+        self.assertEqual(len(calls), 1)
+        body_bytes = len(calls[0]['body'].encode('utf-8'))
+        self.assertGreater(body_bytes, 510000)
+        self.assertLessEqual(body_bytes, 512 * 1024)
+        self.assertEqual(result['judge']['requests'], 1)
+        self.assertFalse(result['judge']['budgetExhausted'])
+        settings = result['actualSettings']['judge']
+        self.assertEqual({key: settings[key] for key in ('maxRequests', 'maxRequestBytes', 'maxTotalRequestBytes',
+                         'maxCompletionTokens', 'wallSeconds', 'callSeconds')},
+                         {'maxRequests': 10, 'maxRequestBytes': 524288, 'maxTotalRequestBytes': 2097152,
+                          'maxCompletionTokens': 4096, 'wallSeconds': 600.0, 'callSeconds': 60.0})
+        self.assertEqual(settings['networkRetries'], 0)
+        self.assertEqual(calls[0]['timeout'], 60)
+        self.assertEqual(result['scoringStatus'], 'incomplete')
+        self.assertIsNone(result['combinedScore'])
+
+    def test_confirmation_scoring_does_not_widen_the_cumulative_judge_guard(self):
+        self.task = replace(self.task, task_id=CONFIRMATION_TASK_ID)
+        calls = []
+
+        def official(**kwargs):
+            for _ in range(5):
+                kwargs['judge_requester'](kwargs['judge_runtime'], large_prompt())
+
+        def transport(job):
+            calls.append(job)
+            return success()
+
+        with patch('eval.tracetrial.score_trial.score_layout', side_effect=official):
+            result = self.score(transport)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(result['error']['type'], 'JudgeBudgetExceeded')
+        self.assertTrue(result['judge']['budgetExhausted'])
+        self.assertLessEqual(result['judge']['totalRequestBytes'], 2 * 1024 * 1024)
 
     def test_official_parse_correction_is_preserved_and_budgeted(self):
         contents = iter(["invalid fixture JSON", '{"score":1,"reason":"fixture evidence"}',
