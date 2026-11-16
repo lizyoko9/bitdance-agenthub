@@ -110,7 +110,7 @@ class DriverContractTests(unittest.TestCase):
             self.assertEqual(json.loads((output/'artifacts/budget-outcome.json').read_text()), result['budgetOutcome'])
 
     def test_e6_private_pid_namespace_is_verified_before_actor_start_and_proof_is_scoped(self):
-        for pid_mode in ('private', 'host'):
+        for pid_mode in ('', 'host'):
             with self.subTest(pid_mode=pid_mode), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 task_id = driver.TIMEOUT_TASK_ID
@@ -149,17 +149,20 @@ class DriverContractTests(unittest.TestCase):
                      patch('eval.tracetrial.score_trial.score_retained_trial', return_value={'scoringStatus': 'completed'}):
                     arguments = dict(source=Path('/unused'), output=output, context=context, image='fixture-image',
                         actor_proxy='proxy', judge_proxy='', task_id=task_id, budget_file=plan_file)
-                    if pid_mode == 'private':
+                    if pid_mode == '':
                         driver.run_trial(**arguments)
                     else:
                         with self.assertRaisesRegex(RuntimeError, 'Actor apparatus failed'):
                             driver.run_trial(**arguments)
                 create = next(args for args, _ in calls if args[0] == 'create')
-                self.assertIn('--pid=private', create)
+                self.assertFalse(any(value.startswith('--pid=') for value in create))
                 lifecycle = json.loads((output/'artifacts/lifecycle.json').read_text())
-                if pid_mode == 'private':
+                if pid_mode == '':
                     stages = [row['stage'] for row in lifecycle]
                     self.assertLess(stages.index('pid_namespace_verified'), stages.index('actor_started'))
+                    proof = next(row for row in lifecycle if row['stage'] == 'pid_namespace_verified')
+                    self.assertEqual(proof['pidMode'], '')
+                    self.assertEqual(proof['normalizedPidMode'], 'private')
                     execution = next((args, kwargs) for args, kwargs in calls if args[0] == 'exec')
                     self.assertIn('AGENTHUB_PRIVATE_PID_NAMESPACE=private', execution[0])
                     self.assertEqual(execution[1]['timeout'], 155)

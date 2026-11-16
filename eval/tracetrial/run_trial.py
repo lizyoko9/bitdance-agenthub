@@ -408,18 +408,16 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
     failure = None
     try:
         create_arguments = ['create', '--network=bridge', '--cpus=2', '--memory=4g', '--pids-limit=512']
-        if task_id == TIMEOUT_TASK_ID:
-            create_arguments.append('--pid=private')
         created = docker(*create_arguments, '--mount',
             f'type=bind,source={layout.workspace_dir},target=/workspace', inspection['Id'])
         container_id = created.stdout.strip()
         lifecycle.append({'stage': 'created', 'containerId': container_id, 'at': time.time()})
         if task_id == TIMEOUT_TASK_ID:
             container = json.loads(docker('container', 'inspect', container_id).stdout)[0]
-            if container.get('Id') != container_id or container.get('HostConfig', {}).get('PidMode') != 'private':
+            if container.get('Id') != container_id or container.get('HostConfig', {}).get('PidMode') != '':
                 raise ValueError('E6 observation requires a verified fresh private Docker PID namespace')
             lifecycle.append({'stage': 'pid_namespace_verified', 'containerId': container_id,
-                'pidMode': 'private', 'source': 'docker_container_inspect', 'at': time.time()})
+                'pidMode': '', 'normalizedPidMode': 'private', 'source': 'docker_container_inspect', 'at': time.time()})
         docker('start', container_id)
         docker('cp', request_file, container_id + ':/state/request.json')
         docker('cp', plan_file, container_id + ':/state/budget-plan.json')
