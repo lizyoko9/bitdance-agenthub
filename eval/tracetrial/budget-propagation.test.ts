@@ -74,15 +74,15 @@ print(json.dumps(request))`
   return { directory, instruction, request: validateTraceTrialRequest(request) }
 }
 
-function resolvedE6Request() {
-  const directory = mkdtempSync(path.join(tmpdir(), 'agenthub-resolved-e6-'))
+function resolvedPinnedRequest(taskId: 'E6-timeout-error-channel-003' | 'L2-deploy-latency-001') {
+  const directory = mkdtempSync(path.join(tmpdir(), 'agenthub-resolved-task-'))
   scratch.push(directory)
   const cwd = path.join(directory, 'workspace')
   mkdirSync(cwd)
   const script = `import json,sys
 sys.path.insert(0, ${JSON.stringify(pinnedTaskSource)})
 from eval.tracetrial.run_trial import resolve_trial_task
-task, report, request = resolve_trial_task(${JSON.stringify(pinnedTaskSource)}, 'E6-timeout-error-channel-003')
+task, report, request = resolve_trial_task(${JSON.stringify(pinnedTaskSource)}, ${JSON.stringify(taskId)})
 assert report['status'] == 'supported', report['reasons']
 assert request['instruction'] == task.prompt
 print(json.dumps({'request': request, 'budgetPlan': report['budgetPlan'], 'runtime': report['declaredRuntime'], 'judge': report['judgeCoverage']}))`
@@ -224,7 +224,7 @@ describe('task-derived TraceTrial budget propagation without model calls', () =>
 
   it.skipIf(!existsSync(path.join(pinnedTaskSource, 'Task/E6-timeout-error-channel-003/task.yaml')))(
     'propagates the real pinned E6 TaskSpec through admission, TS, profile and SDK without model calls', async () => {
-      const { request, budgetPlan, runtime, judge } = resolvedE6Request()
+      const { request, budgetPlan, runtime, judge } = resolvedPinnedRequest('E6-timeout-error-channel-003')
       expect(request).toMatchObject({ taskId: 'E6-timeout-error-channel-003', timeoutMs: 120_000, maxToolCalls: 6, maxTurns: 7,
         requestLimits: { maxRequests: 7, maxRequestBytes: 262144, maxTotalRequestBytes: 1_835_008, maxCompletionTokens: 8192 } })
       expect(request.instruction).toContain('bash /workspace/tools/sleep_timeout.sh')
@@ -254,4 +254,46 @@ describe('task-derived TraceTrial budget propagation without model calls', () =>
       expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: { inputTokens: 70, outputTokens: 14 } })
     },
   )
+
+  it.skipIf(!existsSync(path.join(pinnedTaskSource, 'Task/L2-deploy-latency-001/task.yaml')))(
+    'propagates the real pinned L2 TaskSpec through all 140 tools and final SDK response without model calls', async () => {
+      const { request, budgetPlan, runtime, judge } = resolvedPinnedRequest('L2-deploy-latency-001')
+      expect(request).toMatchObject({ taskId: 'L2-deploy-latency-001', timeoutMs: 2_400_000, maxToolCalls: 140, maxTurns: 141,
+        requestLimits: { maxRequests: 141, maxRequestBytes: 262144, maxTotalRequestBytes: 36_962_304, maxCompletionTokens: 8192 } })
+      expect(request.instruction).toContain('A `submitted` response')
+      expect(budgetPlan.coverage.completeTaskTrajectory).toBe(true)
+      expect(runtime.timeout_sec).toBe(1800)
+      expect(judge).toMatchObject({ rubrics: 2, worstCaseRequests: 4 })
+      const observations: CustomRequestObservation[] = []
+      tools.execute.mockImplementation(async () => ({ ok: true, value: { content: 'x'.repeat(512) } }))
+      let turn = 0
+      fetchMock.mockImplementation(async () => modelResponse(++turn, turn <= request.maxToolCalls!))
+      const profile = await createIsolatedProfile(request, (observation) => observations.push(observation), { benchmark: 'tracetrial' })
+      const adapter = profileServices.register.mock.calls[0][0] as CustomAgentAdapter
+      const events: StreamEvent[] = []
+      try {
+        for await (const event of adapter.stream({
+          agentId: 'l2-budget-agent', conversationId: 'l2-budget-conversation', runId: 'l2-budget-run',
+          workspacePath: request.cwd, prompt: request.instruction, systemPrompt: 'Use the available test tool.',
+          apiKey: 'not-a-real-key', apiBaseUrl: null, modelId: request.modelId, toolNames: ['budget_probe'],
+          customConfig: { modelProvider: 'openai' },
+        }, new AbortController().signal)) events.push(event)
+      } finally {
+        profile.close()
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(141)
+      expect(tools.execute).toHaveBeenCalledTimes(140)
+      expect(events.filter((event) => event.type === 'tool.call')).toHaveLength(140)
+      expect(events.filter((event) => event.type === 'tool.result')).toHaveLength(140)
+      expect(observations).toHaveLength(141)
+      expect(observations.every((observation) => observation.status === 'completed')).toBe(true)
+      expect(observations.reduce((sum, observation) => sum+observation.bodyBytes, 0)).toBeLessThanOrEqual(36_962_304)
+      expect(Math.max(...observations.map((observation) => observation.bodyBytes))).toBeLessThanOrEqual(262144)
+      expect(sdk.clients).toHaveLength(141)
+      expect(sdk.clients.every((client) => client.provided && client.timeout === 2_400_000 && client.effectiveTimeout === 2_400_000)).toBe(true)
+      expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: { inputTokens: 1410, outputTokens: 282 } })
+      expect(profileServices.close).toHaveBeenCalledOnce()
+    },
+  )
+
 })

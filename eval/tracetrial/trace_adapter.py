@@ -8,7 +8,7 @@ from harness_tracer.summary import build_summary
 from harness_tracer.writer import EventWriter
 from tracetrial_bench.execution_capabilities import persist_execution_probe_evidence
 
-from .container_worker import TIMEOUT_TASK_ID
+from .container_worker import PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
 
 
 CAPABILITIES = ("native_exec_v1", "post_tool_v1")
@@ -18,7 +18,9 @@ TIMEOUT_OBSERVER_PROJECTION_VERSION = 'agenthub_timeout_observer_v1'
 
 
 def capabilities_for_task(task_id: str) -> tuple[str, ...]:
-    return CAPABILITIES + TIMEOUT_CAPABILITIES if task_id == TIMEOUT_TASK_ID else CAPABILITIES
+    if task_id == TIMEOUT_TASK_ID:
+        return CAPABILITIES + TIMEOUT_CAPABILITIES
+    return CAPABILITIES + ("process_containment_v1",) if task_id in PROCESS_OBSERVED_TASK_IDS else CAPABILITIES
 
 
 def _validate_process_receipt(receipt: Any) -> dict:
@@ -33,7 +35,7 @@ def _validate_process_receipt(receipt: Any) -> dict:
 
     def require(condition, detail):
         if not condition:
-            raise ValueError('Invalid E6 process containment receipt: ' + detail)
+            raise ValueError('Invalid AgentHub process containment receipt: ' + detail)
 
     def integer(value, minimum=0):
         return type(value) is int and value >= minimum
@@ -105,7 +107,7 @@ def _validate_process_receipt(receipt: Any) -> dict:
                 timestamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
                 require(timestamp.utcoffset() == timezone.utc.utcoffset(timestamp), 'non-UTC ' + key)
             except ValueError as error:
-                raise ValueError('Invalid E6 process containment receipt: invalid ' + key) from error
+                raise ValueError('Invalid AgentHub process containment receipt: invalid ' + key) from error
     if receipt['final_censuses_complete']:
         require(receipt['final_census_count'] == 2 and all(integer(value) for value in counts), 'incomplete final census evidence')
         records(receipt['residual_processes'], 'residual_processes')
@@ -127,14 +129,14 @@ def _validate_process_receipt(receipt: Any) -> dict:
 def _process_receipt_source(layout) -> tuple[dict, dict]:
     source = layout.agent_dir / 'native' / 'actor_process.json'
     if source.is_symlink():
-        raise ValueError('E6 process containment apparatus source must not be a symlink')
+        raise ValueError('AgentHub process containment apparatus source must not be a symlink')
     try:
         data = source.read_bytes()
         process = json.loads(data)
     except (OSError, UnicodeError, ValueError) as error:
-        raise ValueError('E6 process containment apparatus source is missing or invalid') from error
+        raise ValueError('AgentHub process containment apparatus source is missing or invalid') from error
     if type(process) is not dict or 'process_containment' not in process:
-        raise ValueError('E6 process containment apparatus receipt is missing')
+        raise ValueError('AgentHub process containment apparatus receipt is missing')
     receipt = _validate_process_receipt(process['process_containment'])
     return receipt, {'path': str(source.resolve()), 'sha256': hashlib.sha256(data).hexdigest(), 'field': 'process_containment'}
 
@@ -595,10 +597,10 @@ def emit_execution_evidence(task, layout, summary):
         "default_path_unchanged": task.execution_probe is None,
     }
     capability["compatible"] = not capability["missing"]
-    if task.task_id == TIMEOUT_TASK_ID:
+    if task.task_id in PROCESS_OBSERVED_TASK_IDS:
         receipt, source = _process_receipt_source(layout)
         if 'process_containment' in summary or 'agenthub_process_containment_source' in summary:
-            raise ValueError('E6 process containment summary already contains competing receipt evidence')
+            raise ValueError('AgentHub process containment summary already contains competing receipt evidence')
         summary['process_containment'] = receipt
         summary['agenthub_process_containment_source'] = source
     directory = layout.artifacts_dir / "execution_probe"

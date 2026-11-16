@@ -2,7 +2,7 @@ import json
 from tracetrial_bench.score_config import load_score_sheet
 
 from .budget_contract import build_budget_plan, budget_plan_digest, validate_budget_plan
-from .container_worker import APPROVED_TASK_IDS, GOVERNANCE_TASK_ID, MODEL, TIMEOUT_TASK_ID, validate_actor_request
+from .container_worker import APPROVED_TASK_IDS, GOVERNANCE_TASK_ID, MODEL, PROCESS_OBSERVED_TASK_IDS, validate_actor_request
 from .judge import MAX_JUDGE_REQUESTS
 from .trace_adapter import capabilities_for_task
 
@@ -48,7 +48,7 @@ def actor_settings(request, task, runtime, budget_plan=None):
             'compatibleShape': 'single_turn_workspace', 'stockHarnessExecuted': False},
         'networkLimitation': 'Task forbids network access; OS bridge matches the pinned official container runner',
         'credentialStorage': 'stdin to root recorder memory; unprivileged actor child receives placeholder only'}
-    if task.task_id == TIMEOUT_TASK_ID:
+    if task.task_id in PROCESS_OBSERVED_TASK_IDS:
         settings['processObservation'] = {'required': True, 'enabledByPolicy': True,
             'schema_version': 'agenthub-process-observation-v1', 'scope': 'isolated_container_pid_delta'}
     return settings

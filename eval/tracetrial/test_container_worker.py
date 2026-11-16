@@ -187,9 +187,13 @@ class RequestValidationTests(unittest.TestCase):
             self.assertNotIn('fixture-only-key', completed.stderr)
             self.assertFalse((root/'not-created').exists())
 
-    def run_mock_worker(self, *, timeout=False, observe=False, observer_failure=False, private_contract=True):
-        budget = build_budget_plan(worker.TIMEOUT_TASK_ID if observe else worker.GOVERNANCE_TASK_ID,
-            {'maxUserTurns': 6, 'maxToolCalls': 6, 'maxWallTimeSeconds': 120} if observe else TASK_BUDGET,
+    def run_mock_worker(self, *, timeout=False, observe=False, observer_failure=False, private_contract=True, task_id=None):
+        task_id = task_id or (worker.TIMEOUT_TASK_ID if observe else worker.GOVERNANCE_TASK_ID)
+        task = resolve_task(Path('/private/tmp/agenthub-tracetrial-source/Task')/task_id)
+        observe = task_id in worker.PROCESS_OBSERVED_TASK_IDS
+        budget = build_budget_plan(task_id,
+            {'maxUserTurns': task.max_turns, 'maxToolCalls': task.max_tool_calls,
+                'maxWallTimeSeconds': task.max_wall_time_sec},
             mode='constrained', overrides={
             'timeoutMs': 5000, 'maxTurns': 4, 'maxToolCalls': 2, 'maxRequests': 3})
         request = actor_request(budget)
@@ -281,6 +285,28 @@ class RequestValidationTests(unittest.TestCase):
     def test_e6_missing_private_contract_is_passed_as_false_and_rejects_actor(self):
         metadata = self.run_mock_worker(observe=True, observer_failure=True, private_contract=False)
         self.assertIsNone(metadata['exit_code'])
+
+    def test_confirmation_natural_exit_uses_the_same_pre_cleanup_process_observer(self):
+        receipt = self.run_mock_worker(task_id=worker.CONFIRMATION_TASK_ID)['process_containment']
+        self.assertTrue(receipt['natural_exit'])
+
+    def test_confirmation_wall_timeout_freezes_failure_before_signaling(self):
+        receipt = self.run_mock_worker(task_id=worker.CONFIRMATION_TASK_ID, timeout=True)['process_containment']
+        self.assertFalse(receipt['natural_exit'])
+        self.assertTrue(receipt['forced_stop'])
+
+    def test_confirmation_observer_refusal_retains_failure_and_does_not_start_actor(self):
+        for private_contract in (True, False):
+            with self.subTest(private_contract=private_contract):
+                metadata = self.run_mock_worker(task_id=worker.CONFIRMATION_TASK_ID,
+                    observer_failure=True, private_contract=private_contract)
+                self.assertIsNone(metadata['exit_code'])
+                self.assertFalse(metadata['process_containment']['natural_exit'])
+
+    def test_unobserved_approved_tasks_do_not_start_an_observer(self):
+        for task_id in set(worker.APPROVED_TASK_IDS) - set(worker.PROCESS_OBSERVED_TASK_IDS):
+            with self.subTest(task_id=task_id):
+                self.assertNotIn('process_containment', self.run_mock_worker(task_id=task_id))
 
 
 if __name__ == '__main__':

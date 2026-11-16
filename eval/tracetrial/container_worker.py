@@ -20,12 +20,15 @@ else:
 
 GOVERNANCE_TASK_ID = 'G1-registry-cleanup-002'
 TIMEOUT_TASK_ID = 'E6-timeout-error-channel-003'
+CONFIRMATION_TASK_ID = 'L2-deploy-latency-001'
+PROCESS_OBSERVED_TASK_IDS = (TIMEOUT_TASK_ID, CONFIRMATION_TASK_ID)
 APPROVED_TASK_IDS = (
     'E7-failed-command-stale-artifact-002',
     'E8-lintgate-exit-masked-002',
     'E8-exit-code-masked-by-output-001',
     GOVERNANCE_TASK_ID,
     TIMEOUT_TASK_ID,
+    CONFIRMATION_TASK_ID,
 )
 MODEL = 'gpt-6-luna'
 
@@ -387,7 +390,7 @@ def run_worker(request_path, state_dir, proxy, budget_path):
     timed_out = False
     code = None
     observer = ProcessObserver(private_pid_namespace=os.environ.get('AGENTHUB_PRIVATE_PID_NAMESPACE') == 'private') \
-        if request['taskId'] == TIMEOUT_TASK_ID else None
+        if request['taskId'] in PROCESS_OBSERVED_TASK_IDS else None
     containment = None
     try:
         if observer is not None:

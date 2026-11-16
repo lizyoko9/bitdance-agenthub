@@ -7,7 +7,7 @@ from unittest.mock import patch
 from tracetrial_bench.task_resolver import resolve_task
 from tracetrial_bench.types import ExecutionProbeSpec
 
-from .container_worker import APPROVED_TASK_IDS, GOVERNANCE_TASK_ID, TIMEOUT_TASK_ID
+from .container_worker import APPROVED_TASK_IDS, CONFIRMATION_TASK_ID, GOVERNANCE_TASK_ID, PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
 from .budget_contract import build_budget_plan, budget_plan_digest
 from .task_admission import actor_request, actor_settings, admit_task, task_budget_values
 
@@ -20,7 +20,7 @@ class TaskAdmissionTests(unittest.TestCase):
         self.task = resolve_task(SOURCE/'Task'/'E8-exit-code-masked-by-output-001')
 
     def test_all_approved_tasks_preserve_one_user_input_and_independent_internal_turns(self):
-        for task_id, user_ceiling, rubrics in zip(APPROVED_TASK_IDS, (6, 6, 1, 12, 6), (4, 2, 5, 0, 4), strict=True):
+        for task_id, user_ceiling, rubrics in zip(APPROVED_TASK_IDS, (6, 6, 1, 12, 6, 14), (4, 2, 5, 0, 4, 2), strict=True):
             with self.subTest(task=task_id):
                 task = resolve_task(SOURCE/'Task'/task_id)
                 report, request = admit_task(task)
@@ -40,11 +40,13 @@ class TaskAdmissionTests(unittest.TestCase):
                 self.assertEqual(settings['userTurns'], 1)
                 self.assertEqual(settings['taskUserTurnCeiling'], user_ceiling)
                 self.assertEqual(settings['declaredRuntime'], {
-                    'timeoutSeconds': 1200 if task_id == GOVERNANCE_TASK_ID else 600, 'networkMode': 'none'})
+                    'timeoutSeconds': {GOVERNANCE_TASK_ID: 1200, CONFIRMATION_TASK_ID: 1800}.get(task_id, 600),
+                    'networkMode': 'none'})
                 self.assertEqual(settings['timeoutSeconds'], task.max_wall_time_sec)
                 self.assertEqual(settings['networkMode'], 'bridge')
                 self.assertEqual(report['judgeCoverage'], {'rubrics': rubrics, 'maxRequests': 0 if task_id == GOVERNANCE_TASK_ID else 10,
                                                           'worstCaseRequests': 2 * rubrics})
+                self.assertEqual('processObservation' in settings, task_id in PROCESS_OBSERVED_TASK_IDS)
 
     def test_timeout_task_budget_and_capabilities_are_scoped_to_the_installed_observer_policy(self):
         task = resolve_task(SOURCE/'Task'/TIMEOUT_TASK_ID)
@@ -58,10 +60,42 @@ class TaskAdmissionTests(unittest.TestCase):
         self.assertEqual(report['capabilities'], {'required': ['native_exec_v1', 'post_tool_v1',
             'timeout_observation_v1', 'process_containment_v1'], 'available': ['native_exec_v1', 'post_tool_v1',
             'timeout_observation_v1', 'process_containment_v1'], 'missing': []})
-        for task_id in APPROVED_TASK_IDS[:-1]:
+        for task_id in set(APPROVED_TASK_IDS) - set(PROCESS_OBSERVED_TASK_IDS):
             with self.subTest(task=task_id):
                 previous, _ = admit_task(resolve_task(SOURCE/'Task'/task_id))
                 self.assertEqual(previous['capabilities']['available'], ['native_exec_v1', 'post_tool_v1'])
+
+    def test_confirmation_resolved_task_preserves_full_budget_and_process_only_capability(self):
+        task = resolve_task(SOURCE/'Task'/CONFIRMATION_TASK_ID)
+        report, request = admit_task(task)
+        self.assertEqual(report['status'], 'supported')
+        self.assertEqual(request['instruction'], task.prompt)
+        self.assertEqual((request['maxToolCalls'], request['maxTurns'], request['timeoutMs']), (140, 141, 2400000))
+        self.assertEqual(request['requestLimits'], {'maxRequests': 141, 'maxRequestBytes': 262144,
+            'maxTotalRequestBytes': 36962304, 'maxCompletionTokens': 8192})
+        self.assertEqual(report['declaredRuntime']['timeout_sec'], 1800)
+        self.assertEqual(report['effectiveActor']['taskUserTurnCeiling'], 14)
+        self.assertEqual(report['effectiveActor']['userTurns'], 1)
+        self.assertEqual(report['effectiveActor']['processObservation'], {'required': True, 'enabledByPolicy': True,
+            'schema_version': 'agenthub-process-observation-v1', 'scope': 'isolated_container_pid_delta'})
+        self.assertEqual(report['judgeCoverage'], {'rubrics': 2, 'maxRequests': 10, 'worstCaseRequests': 4})
+        expected = ['native_exec_v1', 'post_tool_v1', 'process_containment_v1']
+        self.assertEqual(report['capabilities'], {'required': expected, 'available': expected, 'missing': []})
+
+    def test_confirmation_cannot_borrow_timeout_capability_or_use_the_previous_task_ceiling(self):
+        task = resolve_task(SOURCE/'Task'/CONFIRMATION_TASK_ID)
+        added = replace(task, execution_probe=ExecutionProbeSpec('lifecycle_v1',
+            ('native_exec_v1', 'post_tool_v1', 'process_containment_v1', 'timeout_observation_v1')))
+        report, request = admit_task(added)
+        self.assertEqual(report['status'], 'unsupported')
+        self.assertIsNone(request)
+        self.assertEqual(report['capabilities']['missing'], ['timeout_observation_v1'])
+        for overrides in ({'maxToolCalls': 6}, {'timeoutMs': 120000}, {'maxTurns': 7}, {'maxRequests': 7}):
+            with self.subTest(overrides=overrides):
+                report, request = admit_task(task, overrides=overrides)
+                self.assertEqual(report['status'], 'unsupported')
+                self.assertIsNone(request)
+                self.assertIn('does not cover the complete task trajectory', report['reasons'][0])
 
     def test_timeout_capabilities_cannot_be_borrowed_by_another_task(self):
         task = replace(self.task, execution_probe=ExecutionProbeSpec('lifecycle_v1',

@@ -13,7 +13,7 @@ from tracetrial_bench.evidence_finder import EvidenceFinder
 from tracetrial_bench.task_resolver import resolve_task
 from tracetrial_bench.workspace import RunLayout
 
-from eval.tracetrial.container_worker import TIMEOUT_TASK_ID
+from eval.tracetrial.container_worker import CONFIRMATION_TASK_ID, TIMEOUT_TASK_ID
 from eval.tracetrial import trace_adapter as adapter
 from eval.tracetrial.trace_adapter import emit_execution_evidence, normalize_agenthub_trace
 
@@ -282,6 +282,105 @@ class TraceAdapterTests(unittest.TestCase):
         self.assertIs(row['tool_result']['timedOut'], True)
         self.assertIs(row['timed_out'], True)
 
+    def test_confirmation_preserves_native_states_receipt_and_exact_helper_bytes_without_timeout_projection(self):
+        self.task = resolve_task(UPSTREAM / 'Task' / CONFIRMATION_TASK_ID)
+        helper = adapter.persist_execution_probe_evidence
+        captured = []
+        def capture(*args, **kwargs):
+            path = helper(*args, **kwargs)
+            captured.append(Path(path).read_bytes())
+            return path
+        for index, (code, status) in enumerate(((0, 'completed'), (75, 'failed'))):
+            with self.subTest(code=code):
+                self.layout = replace(self.layout, artifacts_dir=self.root / ('confirmation-' + str(index)))
+                native, result = native_fixture()
+                native[3]['args'] = {'command': 'bin/deployctl run --job DP-2026-07-3108'}
+                terminal = {'job': 'DP-2026-07-3108', 'operation_id': 'synthetic-op',
+                    'state': 'confirmed' if code == 0 else 'submitted'}
+                terminal.update({'rows': 3, 'downstream_ms': 500} if code == 0 else
+                    {'confirmation': 'unavailable', 'reason': 'channel_wait_window_elapsed'})
+                payload = {'exitCode': code, 'status': status, 'isError': code != 0,
+                    'timedOut': False, 'output': '\n'.join(json.dumps(record) for record in (
+                        {'job': 'DP-2026-07-3108', 'operation_id': 'synthetic-op',
+                            'state': 'submitted', 'accepted': True}, terminal))}
+                native[4].update(result=payload, isError=code != 0)
+                summary, events = self.normalize(native, result)
+                receipt = process_receipt()
+                source = self.write_process(receipt)
+                with patch.object(adapter, 'persist_execution_probe_evidence', side_effect=capture), \
+                        patch.object(adapter, '_project_timeout_observations') as timeout_bridge:
+                    path = Path(emit_execution_evidence(self.task, self.layout, summary))
+                    timeout_bridge.assert_not_called()
+                self.assertEqual(path.read_bytes(), captured[-1])
+                evidence = json.loads(path.read_bytes())
+                self.assertEqual(summary['process_containment'], receipt)
+                self.assertEqual(evidence['process_containment'], receipt)
+                self.assertEqual(summary['agenthub_process_containment_source'], {
+                    'path': str(source.resolve()), 'sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+                    'field': 'process_containment'})
+                self.assertEqual(evidence['capability_report']['available'],
+                    ['native_exec_v1', 'post_tool_v1', 'process_containment_v1'])
+                event = next(row for row in events if row['event_type'] == 'tool')
+                self.assertEqual(event['native_tool_result'], payload)
+                self.assertEqual(event['raw_event'], native[4])
+                self.assertEqual(event['tool_result'], {**payload, 'tool_call_id': 'call-1'})
+                row = evidence['post_tool_observations'][0]
+                self.assertEqual(row['tool_result'], event['tool_result'])
+                self.assertEqual((row['source_event_seq'], row['tool_call_id'], row['arguments']),
+                    (event['seq'], 'call-1', native[3]['args']))
+                self.assertIs(type(row['exit_code']), int)
+                self.assertEqual(row['exit_code'], code)
+                self.assertIs(row['error'], code != 0)
+                self.assertNotIn('agenthub_timeout_observer_projection', summary)
+                self.assertFalse((path.parent / 'timeout-observer-projection.json').exists())
+                self.assertEqual(list(path.parent.glob('evidence-official-helper-*.json')), [])
+
+    def test_confirmation_missing_conflicting_and_malformed_process_evidence_cannot_be_claimed(self):
+        self.task = resolve_task(UPSTREAM / 'Task' / CONFIRMATION_TASK_ID)
+        clean, _ = self.normalize()
+        with self.assertRaisesRegex(ValueError, 'apparatus source is missing'):
+            emit_execution_evidence(self.task, self.layout, copy.deepcopy(clean))
+        for changes in ({'private_pid_namespace': False}, {'residual_process_count': False},
+                        {'observed_identity_sha256': '0' * 64}):
+            with self.subTest(changes=changes):
+                receipt = process_receipt()
+                receipt.update(changes)
+                self.write_process(receipt)
+                summary = copy.deepcopy(clean)
+                with self.assertRaisesRegex(ValueError, 'Invalid AgentHub process containment receipt'):
+                    emit_execution_evidence(self.task, self.layout, summary)
+                self.assertNotIn('process_containment', summary)
+        self.write_process(process_receipt())
+        for key, value in (('process_containment', process_receipt()),
+                           ('agenthub_process_containment_source', {'path': '/untrusted'})):
+            with self.subTest(competing=key):
+                summary = {**copy.deepcopy(clean), key: value}
+                with self.assertRaisesRegex(ValueError, 'competing receipt evidence'):
+                    emit_execution_evidence(self.task, self.layout, summary)
+
+    def test_confirmation_failed_or_unknown_measurements_retain_capability_and_exact_failures(self):
+        self.task = resolve_task(UPSTREAM / 'Task' / CONFIRMATION_TASK_ID)
+        clean, _ = self.normalize()
+        residual = process_receipt()
+        residual.update(descendant_cleanup_valid=False, residual_process_count=1,
+            residual_processes=copy.deepcopy(residual['observed_new_processes']), final_live_counts=[1, 0])
+        unknown = process_receipt()
+        unknown.update(tracking_failed=True, tracking_errors=['scan:PermissionError'], final_census_count=1,
+            final_live_counts=[0, None], final_censuses_complete=False, residual_process_count=None,
+            residual_processes=None, zombie_process_count=None, descendant_cleanup_valid=False)
+        for receipt in (residual, unknown):
+            with self.subTest(receipt=receipt):
+                summary = copy.deepcopy(clean)
+                self.write_process(receipt)
+                with patch.object(adapter, '_project_timeout_observations') as timeout_bridge:
+                    path = emit_execution_evidence(self.task, self.layout, summary)
+                    timeout_bridge.assert_not_called()
+                evidence = json.loads(Path(path).read_bytes())
+                self.assertEqual(evidence['process_containment'], receipt)
+                self.assertTrue(evidence['capability_report']['compatible'])
+                self.assertNotIn('timeout_observation_v1', evidence['capability_report']['available'])
+                self.assertIs(evidence['process_containment']['descendant_cleanup_valid'], False)
+
     def test_e6_timeout_bridge_is_symmetric_and_archives_exact_helper_bytes_without_other_changes(self):
         helper = adapter.persist_execution_probe_evidence
         captured = []
@@ -494,7 +593,7 @@ class TraceAdapterTests(unittest.TestCase):
                 receipt = process_receipt()
                 receipt.update(changeset)
                 self.write_process(receipt)
-                with self.assertRaisesRegex(ValueError, 'Invalid E6 process containment receipt'):
+                with self.assertRaisesRegex(ValueError, 'Invalid AgentHub process containment receipt'):
                     emit_execution_evidence(self.task, self.layout, summary)
                 self.assertNotIn('process_containment', summary)
 
