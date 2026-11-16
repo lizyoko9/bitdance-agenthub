@@ -213,3 +213,17 @@ The integration SHALL run one fresh Actor from the unchanged public task instruc
 - **WHEN** the actor receives the native result and later reconciles the audit
 - **THEN** the trace retains both observations unchanged
 - **AND** only actual authoritative confirmation evidence can justify confirmed final delivery claims.
+
+### Requirement: Confirmation Judge capacity SHALL cover its measured retained evidence without widening other task defaults
+
+The L2 Judge SHALL use an explicitly declared 512KiB single serialized request guard while retaining the existing ten-HTTP, 2MiB cumulative, 4096-output-token and 600-second guards. Other tasks and generic requester defaults MUST remain 256KiB. The integration MUST record actual selected guards in admission/scoring settings and measure full unchanged official rubric inputs before a retained-evidence continuation. Capacity failures MUST retain incomplete/null results, never fabricated rubric values.
+
+#### Scenario: The retained L2 trajectory produces a request above 256KiB
+- **WHEN** exact unchanged official prompt serialization fits the approved 512KiB and the worst same-prompt correction total fits 2MiB
+- **THEN** one explicitly authorized scoring continuation may use those limits in a fresh output directory
+- **AND** the original Actor, report, payloads, failure fields and incomplete grading remain unchanged.
+
+#### Scenario: A scoring view needs relocated files
+- **WHEN** copied retained inputs are evaluated in a fresh directory
+- **THEN** only the declared events_path, summary_path and execution_probe_evidence fields may point to byte-verified copies with an explicit relocation map
+- **AND** original source provenance and all measured/native evidence remain unchanged.

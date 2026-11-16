@@ -28,3 +28,11 @@ After the explicit recommendation to test L2, the user requested continuing. Pin
 ## Authorization
 
 The user explicitly selected the approved option to implement and run once, including 140 tools/2400 seconds, 141 turns/HTTP, 8192 output tokens, 256KiB/35.25MiB input guards, independent Judge bounds and the $5 non-hard planning reference. No further Actor run or paid rerun is authorized by this trial plan.
+
+## Approved retained-evidence Judge continuation
+
+The first Actor completed with exact final states. Initial Judge grading stopped before any HTTP because the first serialized body was 510941 bytes, above the approved 256KiB. Both full official rubric bodies were pure-rendered at 510941/510635 bytes, including exact equality with the saved first prompt. The pinned correction reasks the same prompt, so worst four requests total 2043152 bytes, within the unchanged 2MiB aggregate.
+
+The user explicitly approved raising L2-only per-request Judge capacity to 512KiB and one fresh retained-evidence grading attempt. Generic/older task defaults stay 256KiB; technical per-request maximum becomes 512KiB. Requests/output/aggregate/time bounds remain 10/4096/2MiB/600 seconds. No Actor rerun is authorized. Select the task-specific bound once and record it in admission and scoring settings.
+
+Create a fresh g512 scoring view with verified copies, excluding old grading outputs. Preserve original 135-file hashes and original summary bytes. Only derived summary events_path, summary_path and execution_probe_evidence point to copies, with an explicit before/after relocation map; all native/canonical payloads, gates, process receipt, original absolute provenance and lifecycle bytes remain exact. Rebuild the original invocation report through the pinned pure policy resolver. Re-render both unchanged rubric prompts after relocation and prove worst four serialized bodies still fit approved guards before starting Judge. Retain the original incomplete trial and label continuation outputs separately, with grader source/commit and actual usage; no score replaces the original record.
