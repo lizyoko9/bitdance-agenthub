@@ -2,9 +2,9 @@ import json
 from tracetrial_bench.score_config import load_score_sheet
 
 from .budget_contract import build_budget_plan, budget_plan_digest, validate_budget_plan
-from .container_worker import APPROVED_TASK_IDS, GOVERNANCE_TASK_ID, MODEL, validate_actor_request
+from .container_worker import APPROVED_TASK_IDS, GOVERNANCE_TASK_ID, MODEL, TIMEOUT_TASK_ID, validate_actor_request
 from .judge import MAX_JUDGE_REQUESTS
-from .trace_adapter import CAPABILITIES
+from .trace_adapter import capabilities_for_task
 
 
 def task_budget_values(task):
@@ -34,7 +34,7 @@ def actor_settings(request, task, runtime, budget_plan=None):
     plan = resolve_task_budget_plan(task, budget_plan)
     validate_actor_request(request, plan)
     declared_protocol = task.metadata.get('execution', {}).get('protocol')
-    return {'model': request['modelId'], 'reasoningEffort': 'none', 'userTurns': plan['actor']['userInputs'],
+    settings = {'model': request['modelId'], 'reasoningEffort': 'none', 'userTurns': plan['actor']['userInputs'],
         'taskUserTurnCeiling': task.max_turns, 'maxTurns': request['maxTurns'],
         'maxToolCalls': request['maxToolCalls'], **request['requestLimits'],
         'timeoutSeconds': request['timeoutMs'] / 1000, 'sdkRetries': 0, 'redirects': 'error',
@@ -48,6 +48,10 @@ def actor_settings(request, task, runtime, budget_plan=None):
             'compatibleShape': 'single_turn_workspace', 'stockHarnessExecuted': False},
         'networkLimitation': 'Task forbids network access; OS bridge matches the pinned official container runner',
         'credentialStorage': 'stdin to root recorder memory; unprivileged actor child receives placeholder only'}
+    if task.task_id == TIMEOUT_TASK_ID:
+        settings['processObservation'] = {'required': True, 'enabledByPolicy': True,
+            'schema_version': 'agenthub-process-observation-v1', 'scope': 'isolated_container_pid_delta'}
+    return settings
 
 def unsupported(task_id, reasons):
     return {'schemaVersion': 1, 'taskId': task_id, 'status': 'unsupported', 'score': None,
@@ -73,10 +77,11 @@ def admit_task(task, *, budget_plan=None, mode='task', overrides=None):
         if getattr(task, name) is not None:
             reasons.append('unsupported task setup: ' + name)
     required = list(task.execution_probe.requires) if task.execution_probe else []
-    missing = [capability for capability in required if capability not in CAPABILITIES]
+    available = capabilities_for_task(task.task_id)
+    missing = [capability for capability in required if capability not in available]
     if missing:
         reasons.append('missing execution capabilities: ' + ', '.join(missing))
-    report['capabilities'] = {'required': required, 'available': list(CAPABILITIES), 'missing': missing}
+    report['capabilities'] = {'required': required, 'available': list(available), 'missing': missing}
     execution = task.metadata.get('execution', {})
     runtime = {}
     expected_protocol = 'openclaw_native_v1' if governance else 'native_v1'

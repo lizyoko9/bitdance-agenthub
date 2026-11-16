@@ -59,7 +59,7 @@ class DriverContractTests(unittest.TestCase):
                 docker.assert_not_called()
 
     def test_driver_copies_the_reviewed_plan_and_uses_the_full_task_deadline(self):
-        task_id = driver.APPROVED_TASK_IDS[-1]
+        task_id = 'G1-registry-cleanup-002'
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             plan_file = self.plan_file(root, task_id)
@@ -108,6 +108,65 @@ class DriverContractTests(unittest.TestCase):
             self.assertEqual(protocol['budgetPlanSha256'], envelope['budgetPlanSha256'])
             self.assertEqual(result['budgetOutcome']['kind'], 'not_limited')
             self.assertEqual(json.loads((output/'artifacts/budget-outcome.json').read_text()), result['budgetOutcome'])
+
+    def test_e6_private_pid_namespace_is_verified_before_actor_start_and_proof_is_scoped(self):
+        for pid_mode in ('private', 'host'):
+            with self.subTest(pid_mode=pid_mode), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                task_id = driver.TIMEOUT_TASK_ID
+                plan_file = self.plan_file(root, task_id)
+                envelope = driver.read_budget_file(plan_file)
+                task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'),
+                    task_id, budget_plan=envelope['budgetPlan'])
+                context = root/'build'
+                context.mkdir()
+                (context/'build-manifest.json').write_text(json.dumps({'runtime': {'agenthubCommit': 'fixture'}}))
+                (context/'image.json').write_text(json.dumps({'id': 'fixture-image'}))
+                output, calls = root/'trial', []
+
+                def docker(*args, **kwargs):
+                    calls.append((args, kwargs))
+                    if args[:2] == ('image', 'inspect'):
+                        return SimpleNamespace(stdout=json.dumps([{'Id': 'fixture-image'}]), stderr='', returncode=0)
+                    if args[:2] == ('container', 'inspect'):
+                        return SimpleNamespace(stdout=json.dumps([{'Id': 'fixture-container', 'HostConfig': {'PidMode': pid_mode}}]), stderr='', returncode=0)
+                    if args[0] == 'create':
+                        return SimpleNamespace(stdout='fixture-container', stderr='', returncode=0)
+                    if args[:2] == ('cp', 'fixture-container:/state/.') and any(call[0][0] == 'exec' for call in calls):
+                        native = Path(args[2])
+                        (native/'trial').mkdir()
+                        (native/'trial/result.json').write_text(json.dumps({'runStatus': 'complete', 'terminationReason': 'completed'}))
+                        (native/'actor_process.json').write_text(json.dumps({'exit_code': 0, 'timed_out': False}))
+                    return SimpleNamespace(stdout='', stderr='', returncode=0)
+
+                with patch.dict(os.environ, {'OPENAI_API_KEY': 'fixture-only-key'}, clear=True), \
+                     patch.object(driver, 'resolve_trial_task', return_value=(task, report, request)), \
+                     patch.object(driver, 'verify_build_files'), patch.object(driver, 'verify_runtime_sources'), \
+                     patch.object(driver.subprocess, 'check_output', return_value='fixture-revision'), \
+                     patch.object(driver, 'docker', side_effect=docker), \
+                     patch('eval.tracetrial.trace_adapter.normalize_agenthub_trace', return_value={'structured_trace_status': 'available'}), \
+                     patch('eval.tracetrial.trace_adapter.emit_execution_evidence'), \
+                     patch('eval.tracetrial.score_trial.score_retained_trial', return_value={'scoringStatus': 'completed'}):
+                    arguments = dict(source=Path('/unused'), output=output, context=context, image='fixture-image',
+                        actor_proxy='proxy', judge_proxy='', task_id=task_id, budget_file=plan_file)
+                    if pid_mode == 'private':
+                        driver.run_trial(**arguments)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'Actor apparatus failed'):
+                            driver.run_trial(**arguments)
+                create = next(args for args, _ in calls if args[0] == 'create')
+                self.assertIn('--pid=private', create)
+                lifecycle = json.loads((output/'artifacts/lifecycle.json').read_text())
+                if pid_mode == 'private':
+                    stages = [row['stage'] for row in lifecycle]
+                    self.assertLess(stages.index('pid_namespace_verified'), stages.index('actor_started'))
+                    execution = next((args, kwargs) for args, kwargs in calls if args[0] == 'exec')
+                    self.assertIn('AGENTHUB_PRIVATE_PID_NAMESPACE=private', execution[0])
+                    self.assertEqual(execution[1]['timeout'], 155)
+                else:
+                    self.assertFalse(any(args[0] in ('start', 'exec') for args, _ in calls))
+                    self.assertNotIn('pid_namespace_verified', [row['stage'] for row in lifecycle])
+                    self.assertTrue((output/'artifacts/apparatus-failure.json').is_file())
 
     def test_preflight_admits_only_allowlisted_pinned_tasks_without_a_key_or_docker(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:

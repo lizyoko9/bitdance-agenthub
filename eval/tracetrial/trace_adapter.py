@@ -8,9 +8,250 @@ from harness_tracer.summary import build_summary
 from harness_tracer.writer import EventWriter
 from tracetrial_bench.execution_capabilities import persist_execution_probe_evidence
 
+from .container_worker import TIMEOUT_TASK_ID
+
 
 CAPABILITIES = ("native_exec_v1", "post_tool_v1")
+TIMEOUT_CAPABILITIES = ("timeout_observation_v1", "process_containment_v1")
 TOOL_RESULT_PROJECTION_VERSION = "agenthub_transport_v2"
+TIMEOUT_OBSERVER_PROJECTION_VERSION = 'agenthub_timeout_observer_v1'
+
+
+def capabilities_for_task(task_id: str) -> tuple[str, ...]:
+    return CAPABILITIES + TIMEOUT_CAPABILITIES if task_id == TIMEOUT_TASK_ID else CAPABILITIES
+
+
+def _validate_process_receipt(receipt: Any) -> dict:
+    fields = {'schema_version', 'scope', 'measurement_only', 'observer_did_signal', 'natural_actor_exit',
+        'forced_stop', 'tracking_failed', 'tracking_errors', 'baseline_verified', 'pid_namespace',
+        'private_pid_namespace', 'namespace_verification',
+        'baseline_processes', 'actor_identity', 'observed_new_processes', 'observed_new_process_count',
+        'observed_new_count_is_lower_bound', 'observed_identity_sha256', 'baseline_identity_sha256',
+        'sample_count', 'final_census_count', 'final_live_counts', 'final_censuses_complete',
+        'residual_process_count', 'residual_processes', 'zombie_process_count', 'sampling_interval_seconds',
+        'final_census_interval_seconds', 'started_at', 'frozen_at', 'descendant_cleanup_valid'}
+
+    def require(condition, detail):
+        if not condition:
+            raise ValueError('Invalid E6 process containment receipt: ' + detail)
+
+    def integer(value, minimum=0):
+        return type(value) is int and value >= minimum
+
+    def identities(records):
+        return sorted([[record['pid'], record['start_ticks']] for record in records])
+
+    def digest(records):
+        return hashlib.sha256(json.dumps(identities(records), separators=(',', ':')).encode('ascii')).hexdigest()
+
+    def records(value, name):
+        require(type(value) is list, name + ' must be a list')
+        for record in value:
+            require(type(record) is dict and set(record) == {'pid', 'start_ticks', 'ppid', 'pgid', 'sid', 'state', 'uids'},
+                    name + ' has invalid process fields')
+            require(integer(record['pid'], 1) and all(integer(record[key]) for key in ('start_ticks', 'ppid', 'pgid', 'sid')),
+                    name + ' has invalid process identities')
+            require(type(record['state']) is str and len(record['state']) == 1 and record['state'] in 'RSDZTtWXxKPI',
+                    name + ' has invalid process state')
+            require(type(record['uids']) is list and len(record['uids']) == 4 and all(integer(uid) for uid in record['uids']),
+                    name + ' has invalid process UIDs')
+        require(len({tuple(identity) for identity in identities(value)}) == len(value), name + ' has duplicate identities')
+
+    require(type(receipt) is dict and set(receipt) == fields, 'fields differ from the installed observer schema')
+    require(receipt['schema_version'] == 'agenthub-process-observation-v1'
+            and receipt['scope'] == 'isolated_container_pid_delta'
+            and receipt['namespace_verification'] == 'driver_private_pidns_and_self_proc', 'unknown schema, scope or namespace contract')
+    for key in ('measurement_only', 'observer_did_signal', 'natural_actor_exit', 'forced_stop', 'tracking_failed',
+                'baseline_verified', 'private_pid_namespace', 'observed_new_count_is_lower_bound',
+                'final_censuses_complete', 'descendant_cleanup_valid'):
+        require(type(receipt[key]) is bool, key + ' must be a boolean')
+    require(receipt['measurement_only'] is True and receipt['observer_did_signal'] is False
+            and receipt['observed_new_count_is_lower_bound'] is True, 'observer measurement contract changed')
+    require(type(receipt['tracking_errors']) is list and all(type(error) is str and error for error in receipt['tracking_errors']),
+            'tracking_errors must be a list of error codes')
+    require(receipt['tracking_failed'] or not receipt['tracking_errors'], 'tracking errors cannot claim success')
+    require(receipt['pid_namespace'] is None or (type(receipt['pid_namespace']) is str and receipt['pid_namespace']),
+            'invalid PID namespace')
+    for key in ('baseline_processes', 'observed_new_processes'):
+        records(receipt[key], key)
+    actor = receipt['actor_identity']
+    require(actor is None or (type(actor) is dict and set(actor) == {'pid', 'start_ticks'}
+            and integer(actor['pid'], 1) and integer(actor['start_ticks'])), 'invalid Actor identity')
+    if not receipt['private_pid_namespace']:
+        require(not receipt['baseline_verified'] and not receipt['descendant_cleanup_valid'] and actor is None
+                and receipt['pid_namespace'] is None and receipt['tracking_failed']
+                and not receipt['final_censuses_complete'] and receipt['final_census_count'] == 0,
+                'unverified private namespace cannot claim baseline or Actor evidence')
+    require(integer(receipt['observed_new_process_count'])
+            and receipt['observed_new_process_count'] == len(receipt['observed_new_processes']), 'observed count mismatch')
+    require(receipt['observed_identity_sha256'] == digest(receipt['observed_new_processes']), 'observed identity digest mismatch')
+    baseline_digest = receipt['baseline_identity_sha256']
+    require(baseline_digest is None or baseline_digest == digest(receipt['baseline_processes']), 'baseline identity digest mismatch')
+    if receipt['baseline_verified']:
+        require(len(receipt['baseline_processes']) == 2 and receipt['pid_namespace'] is not None
+                and baseline_digest is not None, 'verified baseline lacks its measured evidence')
+    require(integer(receipt['sample_count']) and integer(receipt['final_census_count'])
+            and receipt['final_census_count'] <= 2, 'invalid census counts')
+    counts = receipt['final_live_counts']
+    require(type(counts) is list and len(counts) == 2 and all(value is None or integer(value) for value in counts),
+            'invalid final live counts')
+    for key in ('sampling_interval_seconds', 'final_census_interval_seconds'):
+        require(type(receipt[key]) is float and receipt[key] == 0.01, 'observation interval differs from installed policy')
+    for key in ('started_at', 'frozen_at'):
+        value = receipt[key]
+        require(value is None and key == 'started_at' or type(value) is str, 'invalid ' + key)
+        if value is not None:
+            try:
+                timestamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                require(timestamp.utcoffset() == timezone.utc.utcoffset(timestamp), 'non-UTC ' + key)
+            except ValueError as error:
+                raise ValueError('Invalid E6 process containment receipt: invalid ' + key) from error
+    if receipt['final_censuses_complete']:
+        require(receipt['final_census_count'] == 2 and all(integer(value) for value in counts), 'incomplete final census evidence')
+        records(receipt['residual_processes'], 'residual_processes')
+        require(integer(receipt['residual_process_count']) and receipt['residual_process_count'] == len(receipt['residual_processes'])
+                and max(counts) <= receipt['residual_process_count'] <= sum(counts)
+                and integer(receipt['zombie_process_count']), 'invalid residual or zombie counts')
+        require(all(record['state'] != 'Z' for record in receipt['residual_processes']), 'live residuals include zombies')
+    else:
+        require(all(receipt[key] is None for key in ('residual_process_count', 'residual_processes', 'zombie_process_count')),
+                'unknown final census must retain null residual counts')
+    require(not (receipt['natural_actor_exit'] and receipt['forced_stop']), 'forced stop cannot claim natural Actor exit')
+    if receipt['descendant_cleanup_valid']:
+        require(receipt['natural_actor_exit'] and actor is not None and not receipt['forced_stop'] and not receipt['tracking_failed']
+                and receipt['baseline_verified'] and receipt['final_censuses_complete'] and receipt['residual_process_count'] == 0,
+                'cleanup validity contradicts its measurements')
+    return receipt
+
+
+def _process_receipt_source(layout) -> tuple[dict, dict]:
+    source = layout.agent_dir / 'native' / 'actor_process.json'
+    if source.is_symlink():
+        raise ValueError('E6 process containment apparatus source must not be a symlink')
+    try:
+        data = source.read_bytes()
+        process = json.loads(data)
+    except (OSError, UnicodeError, ValueError) as error:
+        raise ValueError('E6 process containment apparatus source is missing or invalid') from error
+    if type(process) is not dict or 'process_containment' not in process:
+        raise ValueError('E6 process containment apparatus receipt is missing')
+    receipt = _validate_process_receipt(process['process_containment'])
+    return receipt, {'path': str(source.resolve()), 'sha256': hashlib.sha256(data).hexdigest(), 'field': 'process_containment'}
+
+
+def _project_timeout_observations(evidence_path: Path, summary: dict) -> None:
+    raw = evidence_path.read_bytes()
+    raw_hash = hashlib.sha256(raw).hexdigest()
+    archive = evidence_path.with_name('evidence-official-helper-' + raw_hash + '.json')
+    if archive.exists():
+        if archive.is_symlink() or archive.read_bytes() != raw:
+            raise ValueError('E6 timeout observer raw helper archive conflicts with its source')
+    else:
+        with archive.open('xb') as stream:
+            stream.write(raw)
+    audit = {'version': TIMEOUT_OBSERVER_PROJECTION_VERSION, 'status': 'rejected', 'rows': [],
+        'raw_helper_evidence': {'path': str(archive.resolve()), 'sha256': raw_hash},
+        'gate_decisions': 'unchanged official helper evaluation projection; no production gate execution asserted'}
+
+    def require(condition, detail):
+        if not condition:
+            raise ValueError('E6 timeout observer correlation rejected: ' + detail)
+
+    def exact(left, right):
+        return json.dumps(left, sort_keys=True, separators=(',', ':'), allow_nan=False) == json.dumps(
+            right, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+    try:
+        evidence = json.loads(raw)
+        require(type(evidence) is dict, 'helper evidence is not an object')
+        canonical_path = Path(summary['events_path'])
+        native_path = Path(summary['agenthub_native_sources']['events'])
+        require(not canonical_path.is_symlink() and not native_path.is_symlink(), 'trace sources must not be symlinks')
+        canonical_data, native_data = canonical_path.read_bytes(), native_path.read_bytes()
+        native_hash = hashlib.sha256(native_data).hexdigest()
+        require(native_hash == summary['agenthub_native_sources']['events_sha256'], 'native source hash changed')
+        audit['canonical_trace'] = {'path': str(canonical_path.resolve()), 'sha256': hashlib.sha256(canonical_data).hexdigest()}
+        audit['native_source'] = {'path': str(native_path.resolve()), 'sha256': native_hash}
+        require(evidence.get('source_trace') == str(canonical_path), 'helper source trace differs')
+        canonical = json.loads(canonical_data)
+        require(type(canonical) is list and all(type(event) is dict and type(event.get('seq')) is int for event in canonical),
+                'canonical event identities are invalid')
+        require(len({event['seq'] for event in canonical}) == len(canonical), 'canonical event seq is not unique')
+        tools = {event['seq']: event for event in canonical if event.get('event_type') == 'tool'}
+        diagnostics = []
+        native = _read_events(native_data, diagnostics)
+        require(not diagnostics, 'native source cannot be read completely')
+        calls, results = {}, {}
+        for line, event in native:
+            kind = event['type']
+            if kind not in ('tool.call', 'tool.result'):
+                continue
+            identifier = _identifier(event, 'callId')
+            target = calls if kind == 'tool.call' else results
+            require(identifier is not None and identifier not in target, 'native call/result identity is missing or duplicated')
+            target[identifier] = (line, event)
+        rows = evidence.get('post_tool_observations')
+        require(type(rows) is list and len(rows) == len(tools) == len(calls) == len(results),
+                'post/canonical/native tool counts differ')
+        require(set(calls) == set(results), 'native calls and results do not match')
+        seen_seq, seen_ids = set(), set()
+        for row in rows:
+            require(type(row) is dict and type(row.get('source_event_seq')) is int, 'post row seq is invalid')
+            seq, identifier = row['source_event_seq'], row.get('tool_call_id')
+            require(seq in tools and seq not in seen_seq and type(identifier) is str and identifier
+                    and identifier in calls and identifier not in seen_ids, 'post row identity is missing, mismatched or duplicated')
+            seen_seq.add(seq)
+            seen_ids.add(identifier)
+            event = tools[seq]
+            call_line, call = calls[identifier]
+            result_line, result = results[identifier]
+            require(call_line < result_line and call.get('messageId') == result.get('messageId'), 'native result precedes or mismatches call')
+            expected_call = {'tool_call_id': identifier, 'tool_name': call.get('toolName'), 'arguments': call.get('args')}
+            require(exact(event.get('tool_call'), expected_call) and exact(event.get('native_tool_call'), call)
+                    and exact(event.get('raw_event'), result) and 'result' in result
+                    and exact(event.get('native_tool_result'), result['result']), 'canonical payload differs from native source')
+            require(exact(event.get('source_refs'), [{'path': str(native_path.resolve()), 'line': call_line},
+                    {'path': str(native_path.resolve()), 'line': result_line}])
+                    and exact(event.get('native_call_source'), {'path': str(native_path.resolve()), 'line': call_line}),
+                    'canonical source line references differ')
+            payload = result['result']
+            projected = dict(payload) if type(payload) is dict else {'value': payload}
+            derived = {} if type(payload) is dict else {'value': 'raw_event.result'}
+            if 'tool_call_id' in projected:
+                require(exact(projected['tool_call_id'], identifier), 'native payload has conflicting call ID')
+            else:
+                projected['tool_call_id'] = identifier
+                derived['tool_call_id'] = 'raw_event.callId'
+            require(exact(event.get('tool_result'), projected) and exact(event.get('tool_result_projection'),
+                    {'version': TOOL_RESULT_PROJECTION_VERSION, 'derived_fields': derived}), 'canonical result projection differs')
+            require(exact(row.get('arguments'), call.get('args')) and exact(row.get('tool_name'), call.get('toolName'))
+                    and exact(row.get('tool_result'), projected)
+                    and ('raw_event' not in row or exact(row['raw_event'], result)),
+                    'post row arguments/result differ from canonical/native source')
+            require(type(row.get('timed_out')) is bool, 'original helper timeout value is not boolean')
+            entry = {'source_event_seq': seq, 'tool_call_id': identifier, 'original_helper_value': row['timed_out'],
+                'mapped_value': row['timed_out'], 'status': 'not_applicable', 'reason': 'source_missing',
+                'source': {'path': str(native_path.resolve()), 'sha256': native_hash, 'raw_line': result_line, 'pointers': []}}
+            audit['rows'].append(entry)
+            aliases = [key for key in ('timedOut', 'timed_out') if type(payload) is dict and key in payload]
+            if aliases:
+                entry['source']['pointers'] = ['/result/' + key for key in aliases]
+                entry.update(mapped_value=None, status='rejected', reason='native_timeout_alias_invalid')
+                require(all(type(payload[key]) is bool for key in aliases), 'native timeout alias is not a strict boolean')
+                require(all(payload[key] is payload[aliases[0]] for key in aliases), 'native timeout aliases conflict')
+                row['timed_out'] = payload[aliases[0]]
+                entry.update(mapped_value=row['timed_out'], status='mapped', reason='strict_native_boolean')
+        audit['status'] = 'projected'
+        _write_json(evidence_path, evidence)
+    except (OSError, KeyError, UnicodeError, ValueError, TypeError) as error:
+        audit['error'] = str(error) if isinstance(error, ValueError) else type(error).__name__
+        raise ValueError('E6 timeout observer apparatus failed: ' + audit['error']) from error
+    finally:
+        audit_path = evidence_path.with_name('timeout-observer-projection.json')
+        _write_json(audit_path, audit)
+        summary['agenthub_timeout_observer_projection'] = {**audit, 'path': str(audit_path.resolve()),
+            'sha256': hashlib.sha256(audit_path.read_bytes()).hexdigest()}
+        _write_json(Path(summary['summary_path']), summary)
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -345,14 +586,21 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
 
 def emit_execution_evidence(task, layout, summary):
     required = list(task.execution_probe.requires) if task.execution_probe is not None else []
+    available = capabilities_for_task(task.task_id)
     capability = {
         "schema_version": "harnessbench_execution_capabilities_v1", "harness": "agenthub",
         "probe_version": task.execution_probe.version if task.execution_probe is not None else None,
-        "required": required, "available": list(CAPABILITIES),
-        "missing": [name for name in required if name not in CAPABILITIES],
+        "required": required, "available": list(available),
+        "missing": [name for name in required if name not in available],
         "default_path_unchanged": task.execution_probe is None,
     }
     capability["compatible"] = not capability["missing"]
+    if task.task_id == TIMEOUT_TASK_ID:
+        receipt, source = _process_receipt_source(layout)
+        if 'process_containment' in summary or 'agenthub_process_containment_source' in summary:
+            raise ValueError('E6 process containment summary already contains competing receipt evidence')
+        summary['process_containment'] = receipt
+        summary['agenthub_process_containment_source'] = source
     directory = layout.artifacts_dir / "execution_probe"
     directory.mkdir(parents=True, exist_ok=True)
     _write_json(directory / "capabilities.json", capability)
@@ -360,6 +608,10 @@ def emit_execution_evidence(task, layout, summary):
         raise ValueError("AgentHub trace adapter lacks required capabilities: " + ", ".join(capability["missing"]))
     evidence = persist_execution_probe_evidence(task, harness="agenthub", layout=layout,
                                               trace_summary=summary, capability=capability)
+    if task.task_id == TIMEOUT_TASK_ID:
+        if evidence is None:
+            raise ValueError('E6 timeout observer apparatus did not produce official helper evidence')
+        _project_timeout_observations(Path(evidence), summary)
     summary["execution_probe_evidence"] = evidence
     _write_json(layout.artifacts_dir / "trace" / "agenthub" / "summary.json", summary)
     return evidence

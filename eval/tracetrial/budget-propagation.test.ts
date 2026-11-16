@@ -45,6 +45,7 @@ vi.mock('@/server/tools/registry', () => ({
 }))
 
 const scratch: string[] = []
+const pinnedTaskSource = process.env.AGENTHUB_TRACETRIAL_TEST_SOURCE ?? '/private/tmp/agenthub-tracetrial-source'
 const safeEnvironment = (): NodeJS.ProcessEnv => ({
   NODE_ENV: process.env.NODE_ENV ?? 'test',
   ...Object.fromEntries(Object.entries(process.env).filter(([name]) =>
@@ -71,6 +72,25 @@ print(json.dumps(request))`
     env: { ...safeEnvironment(), PYTHONDONTWRITEBYTECODE: '1' },
   }))
   return { directory, instruction, request: validateTraceTrialRequest(request) }
+}
+
+function resolvedE6Request() {
+  const directory = mkdtempSync(path.join(tmpdir(), 'agenthub-resolved-e6-'))
+  scratch.push(directory)
+  const cwd = path.join(directory, 'workspace')
+  mkdirSync(cwd)
+  const script = `import json,sys
+sys.path.insert(0, ${JSON.stringify(pinnedTaskSource)})
+from eval.tracetrial.run_trial import resolve_trial_task
+task, report, request = resolve_trial_task(${JSON.stringify(pinnedTaskSource)}, 'E6-timeout-error-channel-003')
+assert report['status'] == 'supported', report['reasons']
+assert request['instruction'] == task.prompt
+print(json.dumps({'request': request, 'budgetPlan': report['budgetPlan'], 'runtime': report['declaredRuntime'], 'judge': report['judgeCoverage']}))`
+  const resolved = JSON.parse(execFileSync('python3', ['-B', '-c', script], {
+    cwd: path.resolve('.'), encoding: 'utf8', timeout: 10_000,
+    env: { ...safeEnvironment(), PYTHONDONTWRITEBYTECODE: '1' },
+  })) as { request: Record<string, unknown>; budgetPlan: { coverage: { completeTaskTrajectory: boolean } }; runtime: { timeout_sec: number }; judge: { rubrics: number; worstCaseRequests: number } }
+  return { ...resolved, request: validateTraceTrialRequest({ ...resolved.request, cwd, outputDir: path.join(directory, 'trial') }) }
 }
 
 function modelResponse(turn: number, tool: boolean): Response {
@@ -201,4 +221,37 @@ describe('task-derived TraceTrial budget propagation without model calls', () =>
     expect(bodies.every((body) => body.reasoning_effort === 'none' && body.max_completion_tokens === 8192)).toBe(true)
     expect(bodies.at(-1).messages.filter((message: { role: string }) => message.role === 'tool')).toHaveLength(80)
   })
+
+  it.skipIf(!existsSync(path.join(pinnedTaskSource, 'Task/E6-timeout-error-channel-003/task.yaml')))(
+    'propagates the real pinned E6 TaskSpec through admission, TS, profile and SDK without model calls', async () => {
+      const { request, budgetPlan, runtime, judge } = resolvedE6Request()
+      expect(request).toMatchObject({ taskId: 'E6-timeout-error-channel-003', timeoutMs: 120_000, maxToolCalls: 6, maxTurns: 7,
+        requestLimits: { maxRequests: 7, maxRequestBytes: 262144, maxTotalRequestBytes: 1_835_008, maxCompletionTokens: 8192 } })
+      expect(request.instruction).toContain('bash /workspace/tools/sleep_timeout.sh')
+      expect(budgetPlan.coverage.completeTaskTrajectory).toBe(true)
+      expect(runtime.timeout_sec).toBe(600)
+      expect(judge).toMatchObject({ rubrics: 4, worstCaseRequests: 8 })
+      let turn = 0
+      fetchMock.mockImplementation(async () => modelResponse(++turn, turn <= request.maxToolCalls!))
+      const profile = await createIsolatedProfile(request, () => {}, { benchmark: 'tracetrial' })
+      const adapter = profileServices.register.mock.calls[0][0] as CustomAgentAdapter
+      const events: StreamEvent[] = []
+      try {
+        for await (const event of adapter.stream({
+          agentId: 'e6-budget-agent', conversationId: 'e6-budget-conversation', runId: 'e6-budget-run',
+          workspacePath: request.cwd, prompt: request.instruction, systemPrompt: 'Use the available test tool.',
+          apiKey: 'not-a-real-key', apiBaseUrl: null, modelId: request.modelId, toolNames: ['budget_probe'],
+          customConfig: { modelProvider: 'openai' },
+        }, new AbortController().signal)) events.push(event)
+      } finally {
+        profile.close()
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(7)
+      expect(tools.execute).toHaveBeenCalledTimes(6)
+      expect(events.filter((event) => event.type === 'tool.result')).toHaveLength(6)
+      expect(sdk.clients).toHaveLength(7)
+      expect(sdk.clients.every((client) => client.provided && client.timeout === 120_000 && client.effectiveTimeout === 120_000)).toBe(true)
+      expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: { inputTokens: 70, outputTokens: 14 } })
+    },
+  )
 })

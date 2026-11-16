@@ -13,7 +13,7 @@ import tarfile
 import time
 import uuid
 
-from .container_worker import APPROVED_TASK_IDS
+from .container_worker import APPROVED_TASK_IDS, TIMEOUT_TASK_ID
 from .budget_contract import budget_plan_digest, validate_budget_plan
 from .budget_outcome import classify_budget_outcome
 from .task_admission import actor_request, actor_settings, admit_task, unsupported
@@ -407,10 +407,19 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
         'sourceTaskHashesBefore': hashes_before, 'priceEstimateUsd': None, 'hardDollarCap': False})
     failure = None
     try:
-        created = docker('create', '--network=bridge', '--cpus=2', '--memory=4g', '--pids-limit=512',
-            '--mount', f'type=bind,source={layout.workspace_dir},target=/workspace', inspection['Id'])
+        create_arguments = ['create', '--network=bridge', '--cpus=2', '--memory=4g', '--pids-limit=512']
+        if task_id == TIMEOUT_TASK_ID:
+            create_arguments.append('--pid=private')
+        created = docker(*create_arguments, '--mount',
+            f'type=bind,source={layout.workspace_dir},target=/workspace', inspection['Id'])
         container_id = created.stdout.strip()
         lifecycle.append({'stage': 'created', 'containerId': container_id, 'at': time.time()})
+        if task_id == TIMEOUT_TASK_ID:
+            container = json.loads(docker('container', 'inspect', container_id).stdout)[0]
+            if container.get('Id') != container_id or container.get('HostConfig', {}).get('PidMode') != 'private':
+                raise ValueError('E6 observation requires a verified fresh private Docker PID namespace')
+            lifecycle.append({'stage': 'pid_namespace_verified', 'containerId': container_id,
+                'pidMode': 'private', 'source': 'docker_container_inspect', 'at': time.time()})
         docker('start', container_id)
         docker('cp', request_file, container_id + ':/state/request.json')
         docker('cp', plan_file, container_id + ':/state/budget-plan.json')
@@ -420,8 +429,9 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
         with marker.open('x') as stream:
             json.dump({'at': time.time(), 'containerId': container_id, 'automaticRerun': False}, stream)
         lifecycle.append({'stage': 'actor_started', 'at': time.time()})
+        namespace_environment = ('--env', 'AGENTHUB_PRIVATE_PID_NAMESPACE=private') if task_id == TIMEOUT_TASK_ID else ()
         result = docker('exec', '--interactive', '--user=0', '--env', f'ACTOR_UID={os.getuid()}',
-            '--env', f'ACTOR_GID={os.getgid()}', container_id, 'python3',
+            '--env', f'ACTOR_GID={os.getgid()}', *namespace_environment, container_id, 'python3',
             '/opt/agenthub-eval/container_worker.py', '/state/request.json', '/state', actor_proxy, '/state/budget-plan.json',
             environment=environment, input_text=key,
             timeout=request['timeoutMs'] / 1000 + settings['cleanupGraceSeconds'], check=False)

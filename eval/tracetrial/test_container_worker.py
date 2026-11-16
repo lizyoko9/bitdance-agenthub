@@ -187,8 +187,10 @@ class RequestValidationTests(unittest.TestCase):
             self.assertNotIn('fixture-only-key', completed.stderr)
             self.assertFalse((root/'not-created').exists())
 
-    def run_mock_worker(self, *, timeout=False):
-        budget = plan(mode='constrained', overrides={
+    def run_mock_worker(self, *, timeout=False, observe=False, observer_failure=False, private_contract=True):
+        budget = build_budget_plan(worker.TIMEOUT_TASK_ID if observe else worker.GOVERNANCE_TASK_ID,
+            {'maxUserTurns': 6, 'maxToolCalls': 6, 'maxWallTimeSeconds': 120} if observe else TASK_BUDGET,
+            mode='constrained', overrides={
             'timeoutMs': 5000, 'maxTurns': 4, 'maxToolCalls': 2, 'maxRequests': 3})
         request = actor_request(budget)
         with tempfile.TemporaryDirectory() as folder:
@@ -201,29 +203,60 @@ class RequestValidationTests(unittest.TestCase):
             recorder.public_summary.return_value = {}
             child = Mock(pid=99)
             child.wait.side_effect = [subprocess.TimeoutExpired('fixture', 5), 0] if timeout else [0]
+            order = []
+            observer = Mock()
+            if observer_failure:
+                observer.start.side_effect = RuntimeError('fixture observation refused')
+            def freeze(**kwargs):
+                order.append('freeze')
+                return {'fixture_receipt': True, **kwargs}
+            observer.freeze.side_effect = freeze
+            recorder.stop.side_effect = lambda: order.append('recorder_stop')
             with patch('tracetrial_bench.provider_request_recorder.ProviderRequestRecorderProxy', return_value=recorder), \
                  patch.object(worker.os, 'geteuid', return_value=0), \
                  patch.object(worker.sys, 'stdin') as stdin, \
-                 patch.dict(worker.os.environ, {'PATH': '/fixture/bin', 'ACTOR_UID': '501', 'ACTOR_GID': '20'}, clear=True), \
+                 patch.dict(worker.os.environ, {'PATH': '/fixture/bin', 'ACTOR_UID': '501', 'ACTOR_GID': '20',
+                     **({'AGENTHUB_PRIVATE_PID_NAMESPACE': 'private'} if private_contract else {})}, clear=True), \
                  patch.object(worker.subprocess, 'Popen', return_value=child) as popen, \
                  patch.object(worker.os, 'killpg') as kill, \
+                 patch.object(worker, 'ProcessObserver', return_value=observer) as make_observer, \
                  patch.object(worker.time, 'monotonic', return_value=100), \
                  patch.object(worker.Path, 'mkdir'):
                 stdin.read.return_value = 'fixture-only-key'
-                self.assertEqual(worker.run_worker(request_file, state, '', budget_file), 124 if timeout else 0)
-                self.assertEqual(child.wait.call_args_list[0].kwargs['timeout'], 5)
+                kill.side_effect = lambda *args: order.append('kill')
+                if observer_failure:
+                    with self.assertRaisesRegex(RuntimeError, 'observation refused'):
+                        worker.run_worker(request_file, state, '', budget_file)
+                    popen.assert_not_called()
+                else:
+                    self.assertEqual(worker.run_worker(request_file, state, '', budget_file), 124 if timeout else 0)
+                    self.assertEqual(child.wait.call_args_list[0].kwargs['timeout'], 5)
+                    self.assertNotIn('fixture-only-key', json.dumps(popen.call_args.kwargs['env']))
+                    self.assertNotIn('AGENTHUB_PRIVATE_PID_NAMESPACE', popen.call_args.kwargs['env'])
+                    self.assertEqual(popen.call_args.kwargs['user'], 501)
+                    self.assertEqual(popen.call_args.kwargs['group'], 20)
                 self.assertEqual(recorder._opener.deadline, 105)
                 self.assertEqual(recorder._opener.settings, request)
                 self.assertEqual(kill.call_count, int(timeout))
-                self.assertNotIn('fixture-only-key', json.dumps(popen.call_args.kwargs['env']))
-                self.assertEqual(popen.call_args.kwargs['user'], 501)
-                self.assertEqual(popen.call_args.kwargs['group'], 20)
+                if observe:
+                    make_observer.assert_called_once_with(private_pid_namespace=private_contract)
+                    observer.start.assert_called_once_with()
+                    if not observer_failure:
+                        observer.bind_actor.assert_called_once_with(99)
+                    observer.freeze.assert_called_once_with(**({'natural_exit': False, 'forced_stop': True}
+                        if timeout else {'natural_exit': not observer_failure}))
+                    self.assertEqual(order, ['freeze', 'kill', 'recorder_stop'] if timeout else ['freeze', 'recorder_stop'])
+                else:
+                    make_observer.assert_not_called()
             metadata = json.loads((state/'actor_process.json').read_text())
             self.assertEqual(metadata['budget_plan_digest'], budget_plan_digest(budget))
             self.assertEqual(metadata['budget_mode'], 'constrained')
             self.assertEqual(metadata['effective_limits'], {name: request[name]
                 for name in ('timeoutMs', 'maxTurns', 'maxToolCalls', 'requestLimits')})
             self.assertNotIn('fixture-only-key', (state/'actor_process.json').read_text())
+            self.assertEqual('process_containment' in metadata, observe)
+            if observe:
+                self.assertTrue(metadata['process_containment']['fixture_receipt'])
             return metadata
 
     def test_worker_uses_plan_deadline_and_records_exact_plan_digest_without_a_rejection_on_success(self):
@@ -231,6 +264,23 @@ class RequestValidationTests(unittest.TestCase):
 
     def test_worker_wall_timeout_records_structured_budget_rejection(self):
         self.assertEqual(self.run_mock_worker(timeout=True)['budget_rejection']['limit'], 'wall_time')
+
+    def test_e6_natural_exit_freezes_receipt_before_recorder_cleanup(self):
+        self.assertTrue(self.run_mock_worker(observe=True)['process_containment']['natural_exit'])
+
+    def test_e6_wall_timeout_freezes_forced_failure_before_first_signal_without_overwriting(self):
+        receipt = self.run_mock_worker(observe=True, timeout=True)['process_containment']
+        self.assertFalse(receipt['natural_exit'])
+        self.assertTrue(receipt['forced_stop'])
+
+    def test_e6_observer_start_failure_persists_receipt_without_starting_actor(self):
+        metadata = self.run_mock_worker(observe=True, observer_failure=True)
+        self.assertIsNone(metadata['exit_code'])
+        self.assertFalse(metadata['process_containment']['natural_exit'])
+
+    def test_e6_missing_private_contract_is_passed_as_false_and_rejects_actor(self):
+        metadata = self.run_mock_worker(observe=True, observer_failure=True, private_contract=False)
+        self.assertIsNone(metadata['exit_code'])
 
 
 if __name__ == '__main__':
