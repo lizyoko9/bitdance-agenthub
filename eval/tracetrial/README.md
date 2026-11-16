@@ -22,6 +22,8 @@
 
 [2026-11-16 L2 状态确认](results/2026-11-16-l2-confirmation.md)：一次 Actor 正确交付 11 confirmed/1 submitted；首轮 Judge 因体积 guard 中断，经单独批准在保留证据上补评为 67.5824/fail（Harness 12/13、Agent 3/7），未重跑 Actor。报告严格格式和恢复提示各有扣分；另发现生产 usage 的缓存字段解析/累计缺口，未在本轮修复。
 
+[2026-11-17 usage 修复与 mountcheck](results/2026-11-17-mountcheck-and-usage.md)：统一缓存解析、响应累计和 UI/API 总量后，新 E8 样本一次 Actor 获得 100/pass/clean（Harness 8/8、Agent 4/4）。3 HTTP/2 工具，缓存读写在 recorder、请求账本及 run 一致，总 token 8,211；两次 Judge 的完整输入在 HTTP 前规划。属于同一家族的新样本回归，不能视为全量成绩或计量修复的解题增益。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，初次接入见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)，本轮扩展及批准预算见 [`expand-tracetrial-native-cases`](../../openspec/changes/expand-tracetrial-native-cases/design.md)。
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
