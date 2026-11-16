@@ -23,3 +23,15 @@ The opt-in evaluation observer MUST verify an exclusive PID namespace baseline, 
 #### Scenario: A final census cannot be completed reliably
 - **WHEN** permissions, malformed records, identity races or baseline drift prevent reliable measurement
 - **THEN** tracking failure is explicit and an unknown residual count is not reported as zero or successful cleanup.
+
+### Requirement: Timeout observer serialization SHALL preserve native field provenance
+
+An E6-only versioned evaluation bridge MAY map a uniquely correlated strict native boolean `timedOut` into the flat observer `timed_out`. It MUST archive the unmodified helper evidence and retain original values, source file hashes/pointers and row identity. True and false MUST use the same rule; missing values MUST NOT be inferred and malformed/conflicting aliases MUST be rejected. Native/canonical payloads, other observer fields and helper-derived gate decisions MUST remain unchanged and MUST NOT be presented as newly executed production behavior.
+
+#### Scenario: Native camelCase timeout is true
+- **WHEN** the pinned helper fails to recognize its name but native identity and strict boolean value are unambiguous
+- **THEN** the evaluation observation may carry that same true value with explicit projection provenance while raw helper evidence and native bytes remain available.
+
+#### Scenario: Native timeout alias is false or malformed
+- **WHEN** the bridge evaluates the source
+- **THEN** false remains false and malformed or conflicting fields cannot be converted into a successful timeout observation.
