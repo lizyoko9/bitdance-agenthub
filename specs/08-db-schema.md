@@ -190,7 +190,7 @@ agent_runs {
   status              text NOT NULL     // 'queued'|'running'|'complete'|'failed'|'aborted'
   error               text              // failed 时存错误概要
   parent_run_id       text              // Orchestrator 派出的子 run 指向父 run
-  usage               text JSON         // RunUsage：{ inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, lastInputTokens?, model? }；null = 该 run 未上报（mock / 中途失败）
+  usage               text JSON         // RunUsage：{ inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, inputTokensIncludeCache?, lastInputTokens?, model? }；null = 该 run 未上报（mock / 中途失败）
   started_at          int  NOT NULL
   finished_at         int               // null = 仍在 running
 }
@@ -374,3 +374,5 @@ app_settings ──(独立，无外键)── 单行表，与任何业务表都�
 | AppSettings | `'singleton'` | 不用 nanoid，固定字面量 |
 
 ID 生成器统一在 `src/server/ids.ts`，nanoid 长度 12，URL-safe alphabet。`app_settings.id` 不走 nanoid，由 `settings-service.SINGLETON_ID` 直接写入。
+
+RunUsage / MessageUsage 的可选 inputTokensIncludeCache 标记随原 usage JSON 持久化；新 Custom 为 true，旧无标记数据按旧口径消费。不新增 SQL 列、不迁移或推断历史记录；详细规则见 Spec 05。

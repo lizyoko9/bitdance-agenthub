@@ -270,14 +270,19 @@ const result = await toolRegistry.execute(name, args, ctx)
 **字段映射**（OpenAI 协议 → 我们的 `RunUsage`）：
 - `prompt_tokens` → `inputTokens`
 - `completion_tokens` → `outputTokens`
-- `prompt_cache_hit_tokens` (DeepSeek) / `cached_tokens` (OpenAI) → `cacheReadTokens`
-- DeepSeek 不报 cache_creation；保持 0
+- `cacheReadTokens` 依次取首个合法值：`prompt_tokens_details.cached_tokens`、`prompt_cache_hit_tokens`、`cached_tokens`、`cached_input_tokens`、`cache_read_input_tokens`、`prompt_tokens_details.cache_read_tokens`、`input_tokens_details.cached_tokens`、`input_tokens_details.cache_read_tokens`。
+- `cacheCreationTokens` 依次取 `cache_creation_input_tokens`、`cache_write_input_tokens`、`prompt_tokens_details.cache_write_tokens/cache_creation_tokens`、`input_tokens_details.cache_write_tokens/cache_creation_tokens`。
+- 合法值为非负安全整数；显式 0 有效，不对别名相加。请求观察的缺失/坏值保留 null；生产 RunUsage/MessageUsage 现有数值字段保持缺失为 0 的兼容契约。
+- RequestTracker 与普通 Custom stream 共用解析及每响应 snapshot：后续已知值覆盖同字段（有效 0 可覆盖正数），缺失/坏值不擦除已知值；一个响应只向跨 turn 总量累加一次，重复 final chunk 不双计。
+- 新 Custom run/message JSON 增加可选 `inputTokensIncludeCache: true`，`inputTokens` 仍保留原始 `prompt_tokens`。该标记不代表观测完整；旧记录不回写，也不按当前 Agent provider 反推历史。
 
 **字段映射**（Anthropic SDK → 我们的 `RunUsage`）：
 - `input_tokens` → `inputTokens`
 - `output_tokens` → `outputTokens`
 - `cache_creation_input_tokens` → `cacheCreationTokens`
 - `cache_read_input_tokens` → `cacheReadTokens`
+
+消费端逐条计算完整 prompt：标记为 true 时取 inputTokens，否则沿旧规则加 cacheReadTokens 与可用 cacheCreationTokens。总 token=完整 prompt+output，缓存仅为其中明细；消息、会话、分组及 usage summary API 使用同一纯函数。聚合 inputTokens 统一表示完整 prompt，命中率使用该分母且不对零/矛盾计数制造百分比。旧记录兼容不等于修复所有历史 unknown。
 
 `lastInputTokens` 取本次 run 的 input prompt 长度，UI 用作「当前 context 大小」仪表。`model` 字段记录实际使用模型，按模型聚合用。
 

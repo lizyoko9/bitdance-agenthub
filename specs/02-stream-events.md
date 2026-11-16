@@ -71,6 +71,7 @@ type StreamEvent = BaseEvent & (
 
   // —— Token usage 计量（adapter 在 run 结束前 emit）——
   | { type: 'run.usage', runId: string, usage: RunUsageEvent }
+  | { type: 'message.usage', messageId: string, usage: MessageUsageEvent }
 
   // —— 心跳 ——
   | { type: 'heartbeat' }
@@ -79,10 +80,18 @@ type StreamEvent = BaseEvent & (
 interface RunUsageEvent {
   inputTokens: number
   outputTokens: number
-  cacheCreationTokens: number    // Anthropic prompt cache 写入
-  cacheReadTokens: number        // Anthropic prompt cache 命中；DeepSeek prompt_cache_hit_tokens 也映射到这
+  cacheCreationTokens: number    // provider 报告的 cache 写入
+  cacheReadTokens: number        // provider 报告的 cache 命中
+  inputTokensIncludeCache?: boolean // true 表示 inputTokens 已包含缓存明细；旧记录未标记沿原规则
   lastInputTokens?: number       // 最近一次 input prompt 长度，UI 用作 ctx 仪表
   model?: string                 // 实际使用的模型 id
+}
+
+interface MessageUsageEvent {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  inputTokensIncludeCache?: boolean
 }
 
 interface PendingWrite {

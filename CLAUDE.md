@@ -333,6 +333,8 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 
 Custom tool loop 的轮数优先使用构造参数 `maxTurns`，其次读取 `AGENTHUB_CUSTOM_MAX_TURNS`，默认 32；有效值为 `1..10000` 的整数。模型主动停止与达到上限分别沿完成和 `iteration_limit` 失败路径记录，详见 Spec 05。评测的 trial 共享请求预算与单 run 轮数分别配置，首轮 smoke 的八请求默认额度不构成全局上限。
 
+Custom usage 的请求观察与生产 run/message 共用 cache alias 解析及每响应 snapshot；新 Custom 的 usage JSON 带可选 inputTokensIncludeCache=true，避免缓存明细与完整 prompt 双计。旧数值结构和历史记录保留兼容，不新增 SQL 列；请求 unknown 仍为 null。UI/API 按每条记录的标记统一计算 prompt/total，详见 Spec 02/05/08/09。
+
 Custom adapter 的可选 `toolPolicy.beforeTool` 在发布 `tool.call` 前检查额度，避免事件消费者先触发副作用。TraceTrial 的 task 模式从 TaskSpec 解析工具/时间及相容的模型、HTTP、字节额度，host/worker共用已留档的预算计划；较小配置须显式 constrained。所有 run 共用该 trial 的闭包计数；不传该策略时普通应用和 Terminal-Bench 既有工具行为不变。达到工具额度沿 `budget_exhausted` 失败路径保留已有 usage，不修饰被测工具的 `exitCode` / `isError`。评测 SDK 请求 timeout 显式继承有效总时限，普通调用省略该选项时保持 SDK 默认。
 
 `eval/tracetrial/diagnose_g1.py` 是独立的保留证据识别诊断：原识别、Python 删除识别、原生目录观察适配分开对照，零 Actor/模型请求。只能写全新诊断目录，保留原始报告、轨迹、官方源码与分数；识别扩展结果必须标 nonofficial，不能通过补字段、改报告或放松严格规则冒充框架改进。
