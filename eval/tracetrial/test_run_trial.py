@@ -171,6 +171,102 @@ class DriverContractTests(unittest.TestCase):
                     self.assertNotIn('pid_namespace_verified', [row['stage'] for row in lifecycle])
                     self.assertTrue((output/'artifacts/apparatus-failure.json').is_file())
 
+    def test_confirmation_driver_preserves_full_deadline_namespace_and_container_evidence(self):
+        for mode in ('success', 'actor_nonzero', 'foreign_namespace', 'actor_copy_remove_exceptions'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder).resolve()
+                task_id = driver.CONFIRMATION_TASK_ID
+                plan_file = self.plan_file(root, task_id)
+                plan = driver.read_budget_file(plan_file)
+                task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'),
+                    task_id, budget_plan=plan['budgetPlan'])
+                context = root / 'build'
+                context.mkdir()
+                (context / 'build-manifest.json').write_text(json.dumps({'runtime': {'agenthubCommit': 'fixture'}}))
+                (context / 'image.json').write_text(json.dumps({'id': 'fixture-image'}))
+                output, calls = root / 'trial', []
+
+                def docker(*args, **kwargs):
+                    calls.append((args, kwargs))
+                    if args[:2] == ('image', 'inspect'):
+                        return SimpleNamespace(stdout=json.dumps([{'Id': 'fixture-image'}]), stderr='', returncode=0)
+                    if args[0] == 'create':
+                        return SimpleNamespace(stdout='fixture-container', stderr='', returncode=0)
+                    if args[:2] == ('container', 'inspect'):
+                        pid_mode = 'host' if mode == 'foreign_namespace' else ''
+                        return SimpleNamespace(stdout=json.dumps([{'Id': 'fixture-container',
+                            'HostConfig': {'PidMode': pid_mode}}]), stderr='', returncode=0)
+                    if mode == 'actor_copy_remove_exceptions':
+                        if args[0] == 'exec':
+                            raise subprocess.TimeoutExpired(['docker', 'exec'], 2435)
+                        if args[:2] == ('cp', 'fixture-container:/state/.'):
+                            raise OSError('copy failed after actor timeout')
+                        if args[0] == 'rm':
+                            raise PermissionError('removal failed after copy')
+                    if args[:2] == ('cp', 'fixture-container:/state/.') and mode in ('success', 'actor_nonzero'):
+                        native = Path(args[2])
+                        for name in driver.REQUIRED_NATIVE_ARCHIVES:
+                            path = native / name
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            path.write_text('{}\n')
+                        (native / 'trial/result.json').write_text(json.dumps({'runStatus': 'failed' if mode == 'actor_nonzero' else 'complete',
+                            'terminationReason': 'provider_error' if mode == 'actor_nonzero' else 'completed'}))
+                        (native / 'actor_process.json').write_text(json.dumps({'exit_code': 1 if mode == 'actor_nonzero' else 0,
+                            'timed_out': False}))
+                    if args[0] == 'exec' and mode == 'actor_nonzero':
+                        return SimpleNamespace(stdout='', stderr='', returncode=1)
+                    return SimpleNamespace(stdout='', stderr='', returncode=0)
+
+                with patch.dict(os.environ, {'OPENAI_API_KEY': 'fixture-only-key'}, clear=True), \
+                     patch.object(driver, 'resolve_trial_task', return_value=(task, report, request)), \
+                     patch.object(driver, 'verify_build_files'), patch.object(driver, 'verify_runtime_sources'), \
+                     patch.object(driver.subprocess, 'check_output', return_value='fixture-revision'), \
+                     patch.object(driver, 'docker', side_effect=docker), \
+                     patch('eval.tracetrial.trace_adapter.normalize_agenthub_trace', return_value={'structured_trace_status': 'available'}), \
+                     patch('eval.tracetrial.trace_adapter.emit_execution_evidence'), \
+                     patch('eval.tracetrial.score_trial.score_retained_trial', return_value={'scoringStatus': 'completed'}) as score:
+                    arguments = dict(source=Path('/unused'), output=output, context=context,
+                        image='fixture-image', actor_proxy='proxy', judge_proxy='', task_id=task_id, budget_file=plan_file)
+                    if mode in ('success', 'actor_nonzero'):
+                        driver.run_trial(**arguments)
+                        score.assert_called_once()
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'Actor apparatus failed') as raised:
+                            driver.run_trial(**arguments)
+                        score.assert_not_called()
+                        expected = ValueError if mode == 'foreign_namespace' else subprocess.TimeoutExpired
+                        self.assertIsInstance(raised.exception.__cause__, expected)
+                lifecycle_file = output / 'artifacts/lifecycle.json'
+                lifecycle = json.loads(lifecycle_file.read_text())
+                projected = json.loads((output / 'artifacts/container_lifecycle.json').read_text())
+                self.assertEqual(projected['source']['sha256'], driver.hashlib.sha256(lifecycle_file.read_bytes()).hexdigest())
+                self.assertTrue(all(row['containerId'] == 'fixture-container' for row in lifecycle))
+                self.assertEqual(lifecycle[-2]['source'], 'fixture-container:/state/.')
+                self.assertEqual(lifecycle[-2]['destination'], str(output / 'agent/native'))
+                self.assertEqual([row['stage'] for row in lifecycle[-2:]], ['evidence_copied', 'removed'])
+                if mode in ('success', 'actor_nonzero'):
+                    execution = next((args, kwargs) for args, kwargs in calls if args[0] == 'exec')
+                    self.assertIn('AGENTHUB_PRIVATE_PID_NAMESPACE=private', execution[0])
+                    self.assertEqual(execution[1]['timeout'], 2435)
+                    self.assertEqual(projected['archive_status'], 'complete')
+                    self.assertEqual(projected['cleanup_status'], 'complete')
+                    self.assertIsNone(projected['error_type'])
+                    protocol = json.loads((output / 'artifacts/protocol.json').read_text())
+                    self.assertEqual(protocol['actor']['sdkRequestTimeoutMs'], 2400000)
+                    metadata = json.loads((output / 'agent/native/actor_process.json').read_text())
+                    native_result = json.loads((output / 'agent/native/trial/result.json').read_text())
+                    self.assertEqual(metadata['exit_code'], 1 if mode == 'actor_nonzero' else 0)
+                    self.assertEqual(native_result['runStatus'], 'failed' if mode == 'actor_nonzero' else 'complete')
+                elif mode == 'foreign_namespace':
+                    self.assertFalse(any(args[0] in ('start', 'exec') for args, _ in calls))
+                    self.assertEqual(projected['error_type'], 'ValueError')
+                else:
+                    self.assertEqual(projected['error_type'], 'TimeoutExpired')
+                    apparatus = json.loads((output / 'artifacts/apparatus-failure.json').read_text())
+                    self.assertEqual(apparatus['type'], 'TimeoutExpired')
+                    self.assertEqual([error['error_type'] for error in apparatus['secondary_errors']],
+                        ['OSError', 'PermissionError'])
+
     def test_preflight_admits_only_allowlisted_pinned_tasks_without_a_key_or_docker(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:
             for task_id in driver.APPROVED_TASK_IDS:

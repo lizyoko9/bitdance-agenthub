@@ -7,13 +7,14 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import time
 import uuid
 
-from .container_worker import APPROVED_TASK_IDS, TIMEOUT_TASK_ID
+from .container_worker import APPROVED_TASK_IDS, CONFIRMATION_TASK_ID, PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
 from .budget_contract import budget_plan_digest, validate_budget_plan
 from .budget_outcome import classify_budget_outcome
 from .task_admission import actor_request, actor_settings, admit_task, unsupported
@@ -31,6 +32,13 @@ REFRESH_CONTROLLER_FILES = ('eval/tracetrial/run_trial.py', 'eval/tracetrial/Doc
     'eval/tracetrial/score_trial.py', 'eval/tracetrial/judge.py',
     'eval/tracetrial/budget_contract.py', 'eval/tracetrial/budget_outcome.py',
     'eval/terminalbench/prepare-runtime.py')
+REQUIRED_NATIVE_ARCHIVES = ('actor_process.json', 'provider_summary.json', 'upstream_requests.jsonl',
+    'trial/events.jsonl', 'trial/result.json', 'trial/manifest.json', 'trial/requests.jsonl',
+    'recorder/provider_requests/events.jsonl')
+
+
+class ContainerLifecycleEvidenceError(RuntimeError):
+    pass
 
 
 def write_json(path, payload):
@@ -346,6 +354,145 @@ def read_optional_json(path):
         return None
 
 
+def _record_container_error(state, stage, exception):
+    if state['primary'] is None:
+        state['primary'] = exception
+    state['errors'].append({'stage': stage, 'error_type': type(exception).__name__})
+
+
+def _native_archive_manifest(native):
+    files, errors = [], []
+    native = Path(native).absolute()
+    for name in REQUIRED_NATIVE_ARCHIVES:
+        path = native / name
+        try:
+            if any(parent.is_symlink() for parent in (path, *path.parents)):
+                raise ValueError('archive symlink or ancestor')
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError('archive is not regular')
+            with path.open('rb') as stream:
+                opened = os.fstat(stream.fileno())
+                data = stream.read()
+                after = os.fstat(stream.fileno())
+            identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+            if identity(before) != identity(opened) or identity(opened) != identity(after) or len(data) != after.st_size:
+                raise ValueError('archive changed while reading')
+            files.append({'path': str(path), 'relative_path': name, 'bytes': len(data),
+                'sha256': hashlib.sha256(data).hexdigest()})
+        except (OSError, ValueError) as exception:
+            errors.append({'path': name, 'error_type': type(exception).__name__})
+    return {'required_files': list(REQUIRED_NATIVE_ARCHIVES), 'files': files, 'errors': errors}
+
+
+def container_lifecycle_projection(source, native, errors=None):
+    source = Path(source)
+    raw = source.read_bytes()
+    rows = json.loads(raw)
+    if source.is_symlink() or type(rows) is not list or any(type(row) is not dict for row in rows):
+        raise ContainerLifecycleEvidenceError('Invalid original lifecycle stage file')
+    names = ('created', 'pid_namespace_verified', 'actor_started', 'actor_exited', 'evidence_copied', 'removed')
+    indices = {name: [index for index, row in enumerate(rows) if row.get('stage') == name] for name in names}
+    validation = []
+    created = rows[indices['created'][0]] if len(indices['created']) == 1 else {}
+    container = created.get('containerId')
+    identity_ok = type(container) is str and bool(container)
+    if type(created.get('exitCode')) is not int or created['exitCode'] != 0 or created.get('errorType'):
+        identity_ok = False
+        validation.append('create_not_verified')
+    for name in names:
+        if len(indices[name]) > 1:
+            identity_ok = False
+            validation.append('ambiguous_' + name)
+        for index in indices[name]:
+            if rows[index].get('containerId') != container:
+                identity_ok = False
+                validation.append('container_mismatch_' + name)
+    if not identity_ok:
+        validation.append('unverified_container_identity')
+    order = [index for name in names for index in indices[name]]
+    if order != sorted(order):
+        identity_ok = False
+        validation.append('conflicting_stage_order')
+    archive = _native_archive_manifest(native)
+    copy = rows[indices['evidence_copied'][0]] if len(indices['evidence_copied']) == 1 else None
+    removed = rows[indices['removed'][0]] if len(indices['removed']) == 1 else None
+    archive_ok = identity_ok and copy is not None and type(copy.get('exitCode')) is int and copy['exitCode'] == 0 \
+        and not copy.get('errorType') and copy.get('source') == container + ':/state/.' \
+        and copy.get('destination') == str(Path(native).absolute()) and not archive['errors']
+    cleanup_ok = identity_ok and removed is not None and type(removed.get('exitCode')) is int \
+        and removed['exitCode'] == 0 and not removed.get('errorType')
+    if not archive_ok:
+        validation.append('archive_not_verified')
+    if not cleanup_ok:
+        validation.append('cleanup_not_verified')
+    all_errors = [{'stage': row.get('operation') if row.get('stage') == 'driver_error' else row.get('stage'),
+                   'error_type': row['errorType'], 'source_stage_index': index}
+                  for index, row in enumerate(rows) if type(row.get('errorType')) is str and row['errorType']]
+    source_errors = [{key: value for key, value in error.items() if key != 'source_stage_index'} for error in all_errors]
+    if errors is not None and list(errors) != source_errors:
+        validation.append('driver_error_sequence_mismatch')
+    if validation:
+        all_errors.append({'stage': 'lifecycle_validation', 'error_type': 'ContainerLifecycleEvidenceError'})
+    return {'schema_version': 'agenthub_container_lifecycle_projection_v1', 'producer': 'agenthub',
+        'task_id': CONFIRMATION_TASK_ID, 'container_id': container if type(container) is str else None,
+        'source': {'path': str(source.resolve()), 'sha256': hashlib.sha256(raw).hexdigest()},
+        'stage_indices': indices, 'archive_validation': archive, 'validation_errors': validation,
+        'archive_status': 'complete' if archive_ok else ('not_started' if copy is None else 'failed'),
+        'cleanup_status': 'complete' if cleanup_ok else ('not_started' if removed is None else 'failed'),
+        'error_type': all_errors[0]['error_type'] if all_errors else None,
+        'primary_error': all_errors[0] if all_errors else None, 'secondary_errors': all_errors[1:]}
+
+
+def finish_confirmation_container(container, native, lifecycle, artifacts, state):
+    try:
+        if container:
+            for stage, arguments, extra in (
+                ('evidence_copied', ('cp', container + ':/state/.', native),
+                 {'source': container + ':/state/.', 'destination': str(Path(native).absolute())}),
+                ('removed', ('rm', '--force', container), {}),
+            ):
+                row = {'stage': stage, 'containerId': container, 'startedAt': time.time(), **extra}
+                try:
+                    result = docker(*arguments, timeout=60 if stage == 'evidence_copied' else 120, check=False)
+                    row['exitCode'] = result.returncode
+                    if result.returncode:
+                        raise ContainerLifecycleEvidenceError('Docker ' + stage + ' returned nonzero')
+                except Exception as exception:
+                    row['errorType'] = type(exception).__name__
+                    _record_container_error(state, stage, exception)
+                finally:
+                    row['at'] = time.time()
+                    lifecycle.append(row)
+    finally:
+        source = Path(artifacts) / 'lifecycle.json'
+        source_written = False
+        try:
+            write_json(source, lifecycle)
+            source_written = True
+        except Exception as exception:
+            _record_container_error(state, 'lifecycle_persistence', exception)
+        try:
+            if not source_written:
+                raise ContainerLifecycleEvidenceError('Original lifecycle source was not persisted')
+            projection = container_lifecycle_projection(source, native, state['errors'])
+            if projection['validation_errors'] and state['primary'] is None:
+                _record_container_error(state, 'lifecycle_validation',
+                    ContainerLifecycleEvidenceError('Container lifecycle evidence was incomplete'))
+        except Exception as exception:
+            _record_container_error(state, 'lifecycle_projection', exception)
+            projection = {'schema_version': 'agenthub_container_lifecycle_projection_v1', 'producer': 'agenthub',
+                'task_id': CONFIRMATION_TASK_ID, 'container_id': container,
+                'source': {'path': str(source.absolute()), 'sha256': None}, 'stage_indices': {},
+                'archive_status': 'failed', 'cleanup_status': 'failed',
+                'error_type': state['errors'][0]['error_type'], 'primary_error': state['errors'][0],
+                'secondary_errors': state['errors'][1:], 'validation_errors': ['source_unavailable']}
+        try:
+            write_json(Path(artifacts) / 'container_lifecycle.json', projection)
+        except Exception as exception:
+            _record_container_error(state, 'projection_persistence', exception)
+
+
 def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_id=TASK_ID, budget_file=None):
     from tracetrial_bench.runner_policy import resolve_harness_invocation
     from tracetrial_bench.workspace import (prepare_run_dir, snapshot_workspace, persist_scoring_inputs,
@@ -406,46 +553,72 @@ def run_trial(*, source, output, context, image, actor_proxy, judge_proxy, task_
         'budgetPlan': plan, 'budgetPlanSha256': budget_plan_digest(plan),
         'sourceTaskHashesBefore': hashes_before, 'priceEstimateUsd': None, 'hardDollarCap': False})
     failure = None
+    confirmation = task_id == CONFIRMATION_TASK_ID
+    container_errors = {'primary': None, 'errors': []}
+    active_stage = 'create'
     try:
         create_arguments = ['create', '--network=bridge', '--cpus=2', '--memory=4g', '--pids-limit=512']
         created = docker(*create_arguments, '--mount',
             f'type=bind,source={layout.workspace_dir},target=/workspace', inspection['Id'])
         container_id = created.stdout.strip()
-        lifecycle.append({'stage': 'created', 'containerId': container_id, 'at': time.time()})
-        if task_id == TIMEOUT_TASK_ID:
+        lifecycle.append({'stage': 'created', 'containerId': container_id, 'at': time.time(),
+            **({'exitCode': created.returncode} if confirmation else {})})
+        active_stage = 'pid_namespace_verification'
+        if task_id in PROCESS_OBSERVED_TASK_IDS:
             container = json.loads(docker('container', 'inspect', container_id).stdout)[0]
             if container.get('Id') != container_id or container.get('HostConfig', {}).get('PidMode') != '':
-                raise ValueError('E6 observation requires a verified fresh private Docker PID namespace')
+                raise ValueError('Process observation requires a verified fresh private Docker PID namespace')
             lifecycle.append({'stage': 'pid_namespace_verified', 'containerId': container_id,
                 'pidMode': '', 'normalizedPidMode': 'private', 'source': 'docker_container_inspect', 'at': time.time()})
+        active_stage = 'start'
         docker('start', container_id)
+        active_stage = 'request_copy'
         docker('cp', request_file, container_id + ':/state/request.json')
+        active_stage = 'budget_copy'
         docker('cp', plan_file, container_id + ':/state/budget-plan.json')
         # The privileged recorder receives the key over stdin; tools run as the unprivileged image user.
         environment = docker_environment()
         marker = layout.artifacts_dir / 'actor-started.json'
         with marker.open('x') as stream:
             json.dump({'at': time.time(), 'containerId': container_id, 'automaticRerun': False}, stream)
-        lifecycle.append({'stage': 'actor_started', 'at': time.time()})
-        namespace_environment = ('--env', 'AGENTHUB_PRIVATE_PID_NAMESPACE=private') if task_id == TIMEOUT_TASK_ID else ()
+        lifecycle.append({'stage': 'actor_started', 'at': time.time(),
+            **({'containerId': container_id} if confirmation else {})})
+        active_stage = 'actor'
+        namespace_environment = ('--env', 'AGENTHUB_PRIVATE_PID_NAMESPACE=private') if task_id in PROCESS_OBSERVED_TASK_IDS else ()
         result = docker('exec', '--interactive', '--user=0', '--env', f'ACTOR_UID={os.getuid()}',
             '--env', f'ACTOR_GID={os.getgid()}', *namespace_environment, container_id, 'python3',
             '/opt/agenthub-eval/container_worker.py', '/state/request.json', '/state', actor_proxy, '/state/budget-plan.json',
             environment=environment, input_text=key,
             timeout=request['timeoutMs'] / 1000 + settings['cleanupGraceSeconds'], check=False)
         (native / 'worker.log').write_text((result.stdout + result.stderr).replace(key, '[REDACTED]'))
-        lifecycle.append({'stage': 'actor_exited', 'exitCode': result.returncode, 'at': time.time()})
+        lifecycle.append({'stage': 'actor_exited', 'exitCode': result.returncode, 'at': time.time(),
+            **({'containerId': container_id} if confirmation else {})})
     except Exception as exception:
         failure = type(exception).__name__
+        if confirmation:
+            _record_container_error(container_errors, active_stage, exception)
+            lifecycle.append({'stage': 'driver_error', 'operation': active_stage, 'containerId': container_id,
+                'errorType': type(exception).__name__, 'at': time.time()})
     finally:
-        if container_id:
+        if confirmation:
+            finish_confirmation_container(container_id, native, lifecycle, layout.artifacts_dir, container_errors)
+        elif container_id:
             try:
                 copied = docker('cp', container_id + ':/state/.', native, timeout=60, check=False)
                 lifecycle.append({'stage': 'evidence_copied', 'exitCode': copied.returncode, 'at': time.time()})
             finally:
                 removed = docker('rm', '--force', container_id, check=False)
                 lifecycle.append({'stage': 'removed', 'exitCode': removed.returncode, 'at': time.time()})
-        write_json(layout.artifacts_dir / 'lifecycle.json', lifecycle)
+        if not confirmation:
+            write_json(layout.artifacts_dir / 'lifecycle.json', lifecycle)
+    if confirmation and container_errors['primary'] is not None:
+        try:
+            write_json(layout.artifacts_dir / 'apparatus-failure.json', {'stage': 'container',
+                'type': container_errors['errors'][0]['error_type'], 'primary_error': container_errors['errors'][0],
+                'secondary_errors': container_errors['errors'][1:]})
+        except Exception as exception:
+            _record_container_error(container_errors, 'apparatus_failure_persistence', exception)
+        raise RuntimeError('Actor apparatus failed; evidence retained, no automatic actor rerun') from container_errors['primary']
     budget_outcome = classify_budget_outcome(plan,
         read_optional_json(native / 'trial/result.json'), read_optional_json(native / 'actor_process.json'))
     write_json(layout.artifacts_dir / 'budget-outcome.json', budget_outcome)
