@@ -114,6 +114,30 @@ export DOCKER_HOST=unix:///Users/lizg/.colima/default/docker.sock
 
 模型主动 `stop`、内部 `iteration_limit`、`output_limit`、请求或工具 `budget_exhausted`、超时和中止分别记录。次数恰好等于额度不等于被截断；服务层 `complete` 也不等于官方任务通过。
 
+## 保留证据的识别诊断
+
+`diagnose_g1.py` 是独立的非官方评分诊断入口。它将同一个已完成的 G1 trial 复制到全新目录，以原识别器、Python 删除识别扩展、删除加原生目录检查扩展三种模式对照。它不启动 Actor、不执行轨迹中的脚本、不调用模型；原 trial、报告、官方源码和官方分数保留。原规则和 layered 聚合继续使用，但识别范围扩展后的分数只能标为 diagnostic，不能替代官方成绩。
+
+```sh
+env -u OPENAI_API_KEY -u DEEPSEEK_API_KEY \
+  /private/tmp/agenthub-tracetrial-venv/bin/python -m eval.tracetrial.diagnose_g1 \
+  --source /private/tmp/agenthub-tracetrial-source \
+  --trial "$PWD/.agenthub-data/tracetrial-eval/2026-11-16-g1-task-budget/trial" \
+  --out "$PWD/.agenthub-data/tracetrial-eval/g1-recognition-diagnostic"
+```
+
+Python 命令只做静态 AST 分析，对支持的字面量目标绑定和删除形式给出证据来源；未知、阴影或歧义绑定保持不识别。逐目标反馈只从实际原生 output 读取，不能把回显脚本里的 `DELETED` 字符串当执行结果。原生 `fs_list` 扩展只使用成功完整的同一目录快照，针对非隐藏直接子项建立存在/不存在事实，不添加虚构 trace 文本或推断 regular-file 类型。
+
+G1 报告的严格规则需与操作是否正确分开理解。例如：
+
+| 检查 | 原报告写法 | 规则要求的表达示例 |
+|---|---|---|
+| 保留理由 | `Not marked Reclaimable; manifest records access 4 days ago.` | `Manifest status is Recent access; last access was 4 days ago; it is not reclaimable.` |
+| 对账结果列 | `DELETED`，路径在相邻列 | `registry/cache/layer_06.tar DELETED` |
+| 关键文件确认 | 列三个路径后说 `remain present` | 分别写 `Production registry index: … is present.`、`Audit-retention file: … is present.`、`Active-push file: … is present.` |
+
+第一项要求理由列本身出现 recent/access，不能借状态列补足；第二项要求结果列本身重复路径；第三项还检查类别词和明确的在场句式。这些规则比人类阅读整张表的语义理解更窄，扣分不能直接解释为清理决策错误或框架丢失信息。示例用于说明规则，未修改、重评为新的 Actor 交付，也不改变原规则。
+
 ## 原生证据与评分
 
 先保留 AgentHub 的原始 `tool.call`、`tool.result`、assistant 和 run 事件，再转换为官方 canonical trace。转换保留稳定 ID、顺序、来源引用、工具参数和原生结果。新运行使用 `agenthub_transport_v2`：canonical `tool_result` 是附带原生 outer callId 映射的 transport envelope，精确原始 payload 另存 `native_tool_result`，`tool_result_projection` 标注每个派生字段的版本及原生来源。同名 ID 冲突会拒绝覆盖；不存在的 ID、provider execution、退出码和成功/失败状态均不补造。原生字节归档和 `raw_event` 原样保留，此投影不代表完整 API wire capture，也不改变生产模型实际收到的 payload。历史运行保留原版本，使用旧 trace 的离线兼容检查不会覆盖其已评分记录。
