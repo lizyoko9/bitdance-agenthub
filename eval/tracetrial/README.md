@@ -147,7 +147,7 @@ E6 的 TaskSpec 为 6 工具/120 秒，runtime 文件另外声明 600 秒；有�
 
 Observer 仅在这个任务启用。它要求新容器的独占 PID namespace，baseline 恰为已核验的 PID1 `sleep infinity` 和 root Worker。以 PID+start ticks 绑定身份，对 Actor 启动后的全部新 PID 做只读观测，不按 UID、父进程或进程组过滤，因此 detached/reparented/换 UID 的存活进程仍会被计入。
 
-Driver 显式设置并通过 Docker inspect 验证 private PID mode 后，才把隔离合同传给 root Worker；Worker 另外核对自身 namespace 与 `/proc/self` 映射。实际无凭据探针确认默认权限下不能读取另一 UID 的 PID1 namespace 链接，因此没有声称进行该比较，也不新增 SYS_PTRACE。
+Driver 使用 Docker 默认的独立 PID namespace 创建新容器，并通过 inspect 确认实际 PidMode 为默认空值、没有共享 host/container namespace 后，才把隔离合同传给 root Worker；Worker 另外核对自身 namespace 与 `/proc/self` 映射。`private` 是这里的归一化语义，不是受支持的 `--pid=private` 参数。实际无凭据探针确认默认权限下不能读取另一 UID 的 PID1 namespace 链接，因此没有声称进行该比较，也不新增 SYS_PTRACE。参见 [Docker PID namespace 参数](https://docs.docker.com/reference/cli/docker/container/run/)。
 
 正常 Actor 结束后固定做两次最终普查，live 残留按身份并集统计；首轮存在残留、次轮消失也不洗成成功。Z 状态单独记录，不算 live。任何权限、解析、身份或 baseline 漂移错误均保留为 tracking failure，未知数量为 null。外层总超时会在首个 Worker killpg 前冻结强制停止的失败记录，之后容器清理不会覆写它。
 
