@@ -14,6 +14,8 @@
 
 [2026-11-16 G1 治理诊断](results/2026-11-16-g1-governance.md)：一次 Actor 在六工具额度耗尽后终止，未开始删除或报告。修复接入对原生 snapshot/诊断时间戳的过严假设后，保留数据的首次官方评分为 6.25/fail（Harness 1/8、Agent 0/9），零 Judge 请求、无 Actor 重跑。静态归因链与零删除轨迹不匹配，删除反馈机制尚未测成。
 
+[2026-11-16 G1 完整任务预算试跑](results/2026-11-16-g1-task-budget.md)：预算修复后一次 Actor 用 14 HTTP、18 工具、约 46 秒主动结束，无预算拒绝；六目标删除正确、27 保护文件不变并产出报告。官方仍为 29.1667/fail（Harness 2/8、Agent 3/9）：删除识别器未覆盖 Python `os.remove`，多项删除检查使用了空记录；报告的保留理由也未满足一项严格规则。原分和静态归因保留，未改评分器或重跑。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，初次接入见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)，本轮扩展及批准预算见 [`expand-tracetrial-native-cases`](../../openspec/changes/expand-tracetrial-native-cases/design.md)。
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
