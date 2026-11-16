@@ -9,7 +9,10 @@ import type { DeployStatusRecord, ModelProvider, StreamEvent } from '@/shared/ty
 
 import { resolveCustomProviderClientConfig } from './custom-provider-client'
 import { CustomAgentTerminationError, resolveCustomMaxTurns, resolveCustomRequestTimeoutMs } from './custom-agent-limits'
-import { CustomRequestTracker, type CustomAgentAdapterOptions, type CustomRequestStatus } from './custom-request-policy'
+import {
+  CustomRequestTracker, mergeCustomRequestUsage, readCustomRequestUsage,
+  type CustomAgentAdapterOptions, type CustomRequestStatus,
+} from './custom-request-policy'
 import type { AdapterAttachment, AdapterInput, AgentPlatformAdapter } from './types'
 
 /**
@@ -93,6 +96,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
       lastInputTokens: 0,
+      inputTokensIncludeCache: true,
     }
 
     while (turn < this.maxTurns) {
@@ -147,28 +151,15 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
       let finishReason: string | null = null
       // 本 turn 单条 message 的 usage（per-message）；与 runUsage 同时维护
-      const msgUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+      const msgUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, inputTokensIncludeCache: true }
+      let responseUsage = readCustomRequestUsage(null)
 
       let requestStatus: CustomRequestStatus = 'interrupted'
       try {
         for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
           if (signal.aborted) return
           request?.observeChunk(chunk)
-          // Final usage chunk (stream_options.include_usage)：choices 通常空，只携 usage。
-          // DeepSeek 还附带 prompt_cache_hit_tokens / prompt_cache_miss_tokens。
-          const usage = (chunk as { usage?: Record<string, number> | null }).usage
-          if (usage) {
-            const inp = usage.prompt_tokens ?? 0
-            const out = usage.completion_tokens ?? 0
-            const cached = usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? 0
-            msgUsage.inputTokens += inp
-            msgUsage.outputTokens += out
-            msgUsage.cacheReadTokens += cached
-            runUsage.inputTokens += inp
-            runUsage.outputTokens += out
-            runUsage.cacheReadTokens += cached
-            runUsage.lastInputTokens = inp
-          }
+          if (chunk.usage) responseUsage = mergeCustomRequestUsage(responseUsage, chunk.usage)
           const choice = chunk.choices[0]
           if (!choice) continue
           // DeepSeek V4/R1 等 thinking-mode 模型在 delta 上加了 reasoning_content
@@ -239,6 +230,15 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       } finally {
         request?.finish(signal.aborted ? 'aborted' : requestStatus)
       }
+
+      msgUsage.inputTokens = responseUsage.inputTokens ?? 0
+      msgUsage.outputTokens = responseUsage.outputTokens ?? 0
+      msgUsage.cacheReadTokens = responseUsage.cacheReadTokens ?? 0
+      runUsage.inputTokens += msgUsage.inputTokens
+      runUsage.outputTokens += msgUsage.outputTokens
+      runUsage.cacheReadTokens += msgUsage.cacheReadTokens
+      runUsage.cacheCreationTokens += responseUsage.cacheCreationTokens ?? 0
+      if (responseUsage.inputTokens !== null) runUsage.lastInputTokens = responseUsage.inputTokens
 
       if (thinkingPartIndex >= 0) {
         yield baseEvent(input, { type: 'part.end', messageId, partIndex: thinkingPartIndex })

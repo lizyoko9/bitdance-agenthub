@@ -456,6 +456,7 @@ export interface RunUsageEvent {
   outputTokens: number
   cacheCreationTokens: number
   cacheReadTokens: number
+  inputTokensIncludeCache?: boolean
   lastInputTokens?: number
   model?: string
 }
@@ -465,6 +466,7 @@ export interface MessageUsageEvent {
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
+  inputTokensIncludeCache?: boolean
 }
 
 // 简化版 Artifact，用于事件 payload（与 DB 行结构一致）

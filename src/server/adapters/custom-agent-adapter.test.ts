@@ -363,4 +363,115 @@ describe('Custom adapter optional request policy', () => {
     expect(observations).toHaveLength(1)
     expect(observations[0]).toMatchObject({ status: 'aborted', usageComplete: false })
   })
+
+  it.each([false, true])('counts split/repeated usage once per response with observer=%s', async (observed) => {
+    const observations: CustomRequestObservation[] = []
+    fetchMock.mockResolvedValueOnce(response([
+      chunk([{ index: 0, delta: { tool_calls: [{ index: 0, id: 'cache-tool', type: 'function',
+        function: { name: 'bash', arguments: '{"command":"pwd"}' } }] }, finish_reason: 'tool_calls' }]),
+      chunk([], { prompt_tokens: 100, input_tokens_details: { cache_creation_tokens: 30 } }),
+      chunk([], { completion_tokens: 20, prompt_tokens_details: { cached_tokens: 40, cache_write_tokens: 30 },
+        completion_tokens_details: { reasoning_tokens: 0 } }),
+      chunk([], { prompt_tokens: 100, completion_tokens: 20,
+        prompt_tokens_details: { cached_tokens: 40, cache_write_tokens: 30 } }),
+      chunk([], { prompt_tokens: null, cache_write_input_tokens: -1 }),
+    ])).mockResolvedValueOnce(response([
+      chunk([{ index: 0, delta: { content: 'Done' }, finish_reason: 'stop' }]),
+      chunk([], { prompt_tokens: 60, completion_tokens: 10, prompt_cache_hit_tokens: 9,
+        cache_write_input_tokens: 5, completion_tokens_details: { reasoning_tokens: 0 } }),
+      chunk([], { prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } }),
+      chunk([], { prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } }),
+    ]))
+    const adapter = new CustomAgentAdapter(observed
+      ? createEvalRequestPolicy({}, (value) => observations.push(value)) : {})
+    const events = await consume(adapter, input({ toolNames: ['bash'] }))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(tools.execute).toHaveBeenCalledOnce()
+    expect(events.filter((event) => event.type === 'message.usage').map((event) => event.usage)).toEqual([
+      { inputTokens: 100, outputTokens: 20, cacheReadTokens: 40, inputTokensIncludeCache: true },
+      { inputTokens: 60, outputTokens: 10, cacheReadTokens: 0, inputTokensIncludeCache: true },
+    ])
+    expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: {
+      inputTokens: 160, outputTokens: 30, cacheReadTokens: 40, cacheCreationTokens: 30,
+      lastInputTokens: 60, inputTokensIncludeCache: true,
+    } })
+    if (observed) {
+      expect(observations).toHaveLength(2)
+      expect(observations.map((observation) => observation.usage)).toEqual([
+        { inputTokens: 100, outputTokens: 20, cacheReadTokens: 40, cacheCreationTokens: 30, reasoningTokens: 0 },
+        { inputTokens: 60, outputTokens: 10, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 },
+      ])
+      expect(observations.every((observation) => observation.usageComplete)).toBe(true)
+    } else expect(observations).toHaveLength(0)
+  })
+
+  it('retains a previous known prompt length when the later response has no input observation', async () => {
+    const observations: CustomRequestObservation[] = []
+    fetchMock.mockResolvedValueOnce(response([
+      chunk([{ index: 0, delta: { tool_calls: [{ index: 0, id: 'unknown-input-tool', type: 'function',
+        function: { name: 'bash', arguments: '{}' } }] }, finish_reason: 'tool_calls' }]),
+      chunk([], { prompt_tokens: 11, completion_tokens: 3 }),
+    ])).mockResolvedValueOnce(response([
+      chunk([{ index: 0, delta: { content: 'Done' }, finish_reason: 'stop' }]),
+      chunk([], { completion_tokens: 4, cache_write_input_tokens: 20 }),
+    ]))
+    const events = await consume(new CustomAgentAdapter(createEvalRequestPolicy({}, (value) => observations.push(value))),
+      input({ toolNames: ['bash'] }))
+    expect(observations[1]).toMatchObject({ usageComplete: false, usage: {
+      inputTokens: null, outputTokens: 4, cacheReadTokens: null, cacheCreationTokens: 20,
+    } })
+    expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: {
+      inputTokens: 11, outputTokens: 7, cacheReadTokens: 0, cacheCreationTokens: 20,
+      lastInputTokens: 11, inputTokensIncludeCache: true,
+    } })
+  })
+
+  it('keeps request unknowns null while preserving numeric production compatibility when usage is absent', async () => {
+    const observations: CustomRequestObservation[] = []
+    const events = await consume(new CustomAgentAdapter(createEvalRequestPolicy({}, (value) => observations.push(value))))
+    expect(observations[0]).toMatchObject({ usageComplete: false,
+      usage: { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null, reasoningTokens: null } })
+    expect(events.filter((event) => event.type === 'message.usage')).toHaveLength(0)
+    expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: {
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+      lastInputTokens: 0, inputTokensIncludeCache: true,
+    } })
+  })
+
+  it('preserves available cache counters before reporting an output-limit failure', async () => {
+    fetchMock.mockResolvedValue(response([
+      chunk([{ index: 0, delta: { content: 'Truncated' }, finish_reason: 'length' }]),
+      chunk([], { prompt_tokens: 40, completion_tokens: 7,
+        prompt_tokens_details: { cached_tokens: 10, cache_creation_tokens: 5 } }),
+    ]))
+    const events: StreamEvent[] = []
+    const run = async () => {
+      for await (const event of new CustomAgentAdapter().stream(input(), new AbortController().signal)) events.push(event)
+    }
+    await expect(run()).rejects.toMatchObject({ code: 'output_limit' })
+    expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: {
+      inputTokens: 40, outputTokens: 7, cacheReadTokens: 10, cacheCreationTokens: 5, inputTokensIncludeCache: true,
+    } })
+  })
+
+  it('retains an already observed cache snapshot if a consumer aborts a partial stream', async () => {
+    const controller = new AbortController()
+    const observations: CustomRequestObservation[] = []
+    fetchMock.mockResolvedValue(response([
+      chunk([], { prompt_tokens: 100, completion_tokens: 20,
+        prompt_tokens_details: { cached_tokens: 40, cache_write_tokens: 30 } }),
+      chunk([{ index: 0, delta: { content: 'Partial' }, finish_reason: null }]),
+      chunk([{ index: 0, delta: { content: 'Not consumed' }, finish_reason: 'stop' }]),
+    ]))
+    const adapter = new CustomAgentAdapter(createEvalRequestPolicy({}, (value) => observations.push(value)))
+    for await (const event of adapter.stream(input(), controller.signal)) {
+      if (event.type === 'part.delta') {
+        controller.abort()
+        break
+      }
+    }
+    expect(observations).toHaveLength(1)
+    expect(observations[0]).toMatchObject({ status: 'aborted', usageComplete: true,
+      usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 40, cacheCreationTokens: 30 } })
+  })
 })

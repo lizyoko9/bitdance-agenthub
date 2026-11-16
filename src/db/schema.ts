@@ -157,6 +157,7 @@ export interface MessageUsage {
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
+  inputTokensIncludeCache?: boolean
 }
 
 // ─── Artifacts ───────────────────────────────────────────────
@@ -248,14 +249,16 @@ export const agentRuns = sqliteTable(
   (t) => [index('idx_runs_parent').on(t.parentRunId)],
 )
 
-/** RunUsage —— 一次 run 累计的 token 用量。所有字段 0+ 整数；不返回的字段 0 不是 null（聚合好处理）。 */
+/** RunUsage —— 一次 run 累计的 token 用量。token 计数字段为 0+ 整数；不返回的计数字段为 0，而不是 null。 */
 export interface RunUsage {
   inputTokens: number
   outputTokens: number
-  /** Anthropic prompt caching: 写入缓存的 tokens（贵） */
+  /** 模型上报的缓存写入数量 */
   cacheCreationTokens: number
-  /** Anthropic prompt caching: 命中缓存的 tokens（便宜）；DeepSeek 的 prompt_cache_hit_tokens 也映射到这里 */
+  /** 模型上报的缓存命中数量 */
   cacheReadTokens: number
+  /** true 表示 inputTokens 已包含缓存明细；缺省保留旧记录的独立缓存口径 */
+  inputTokensIncludeCache?: boolean
   /** 用于上下文窗口仪表的最近一次「input prompt 长度」（不是累计），方便 UI 显示 ctx X/200k */
   lastInputTokens?: number
   /** 实际使用的模型 id；不同 run 可能不同（agent 配置改过 / 第三方网关动态路由），用来归类 */

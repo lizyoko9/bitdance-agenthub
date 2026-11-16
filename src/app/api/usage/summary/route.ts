@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { db, schema } from '@/db/client'
 import type { RunUsage } from '@/db/schema'
+import { getPromptTokenTotal, getTokenTotal } from '@/shared/token-usage'
 
 /** GET /api/usage/summary —— 全局 token 用量聚合（今日 / 本周 / 全部 + per-agent / per-model / per-conversation top）。 */
 
@@ -44,13 +45,11 @@ function empty(): UsageBucket {
 }
 
 function accumulate(b: UsageBucket, u: RunUsage) {
-  b.inputTokens += u.inputTokens
+  b.inputTokens += getPromptTokenTotal(u)
   b.outputTokens += u.outputTokens
   b.cacheReadTokens += u.cacheReadTokens
   b.cacheCreationTokens += u.cacheCreationTokens
-  // totalTokens = 所有处理过的 token（含 cache 读写）；与 ChatPanel UsageBadge 口径一致
-  b.totalTokens +=
-    u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens
+  b.totalTokens += getTokenTotal(u)
   b.runs++
 }
 

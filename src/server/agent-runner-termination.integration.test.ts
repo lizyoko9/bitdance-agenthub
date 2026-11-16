@@ -53,14 +53,16 @@ afterAll(() => {
   if (dataDir) rmSync(dataDir, { recursive: true, force: true })
 })
 
-function modelResponse(toolCall: boolean): Response {
+function modelResponse(toolCall: boolean, usage: Record<string, unknown> = {
+  prompt_tokens: 12, completion_tokens: 3, total_tokens: 15,
+}): Response {
   const payload = { id: 'fixture-completion', object: 'chat.completion.chunk', created: 1, model: 'fixture-model' }
   const choice = toolCall
     ? { delta: { tool_calls: [{ index: 0, id: 'fixture-call', type: 'function', function: { name: 'fs_list', arguments: '{}' } }] }, finish_reason: 'tool_calls' }
     : { delta: { content: 'The task is finished.' }, finish_reason: 'stop' }
   const chunks = [
     { ...payload, choices: [{ index: 0, ...choice }] },
-    { ...payload, choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } },
+    { ...payload, choices: [], usage },
   ]
   return new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n', {
     headers: { 'content-type': 'text/event-stream' },
@@ -97,6 +99,26 @@ async function runConversation(maxTurns: number) {
 }
 
 describe('AgentRunner termination propagation through conversation services', () => {
+  it('persists inclusive-input semantics and known cache counters through normal usage events', async () => {
+    fetchMock.mockResolvedValueOnce(modelResponse(false, { prompt_tokens: 100, completion_tokens: 10,
+      total_tokens: 110, prompt_tokens_details: { cached_tokens: 60, cache_write_tokens: 20 } }))
+    const result = await runConversation(1)
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(result.end.status).toBe('complete')
+    expect(result.run?.usage).toMatchObject({ inputTokens: 100, outputTokens: 10,
+      cacheReadTokens: 60, cacheCreationTokens: 20, inputTokensIncludeCache: true })
+    expect(result.messages).toHaveLength(1)
+    expect(result.messages[0].usage).toEqual({ inputTokens: 100, outputTokens: 10,
+      cacheReadTokens: 60, inputTokensIncludeCache: true })
+    expect(result.events.find((event) => event.type === 'run.usage')).toMatchObject({
+      usage: result.run?.usage,
+    })
+    expect(result.events.find((event) => event.type === 'message.usage')).toMatchObject({
+      usage: result.messages[0].usage,
+    })
+  })
+
   it('persists iteration exhaustion as failed, publishes the reason, and shows it in the conversation', async () => {
     fetchMock.mockImplementation(async () => modelResponse(true))
     const result = await runConversation(1)

@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { compactConversation } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { getModelLimits } from '@/shared/model-registry'
+import { getCacheHitRate } from '@/shared/token-usage'
 import { useAppStore, useConversationUsageTotal } from '@/stores/app-store'
 
 /**
@@ -25,6 +26,7 @@ export function UsageBadge({ conversationId }: { conversationId: string }) {
   const [compacting, setCompacting] = useState(false)
 
   if (total.runCount === 0) return null
+  const cacheHitRate = getCacheHitRate(total.inputTokens, total.cacheReadTokens, total.cacheCreationTokens)
 
   // 取本会话内 contextWindow 最大的 agent 作为可见上限。详见 specs/13-conversation-context.md。
   const contextWindow = (() => {
@@ -71,38 +73,38 @@ export function UsageBadge({ conversationId }: { conversationId: string }) {
 
         <div className="space-y-1">
           <RowWithHint
-            label="新 Input"
+            label="Input（含缓存）"
             value={total.inputTokens}
             highlight
-            tip="按正常 input 单价 (1×) 计费"
+            tip="总输入数量；缓存读写是其中的明细，不重复相加"
           />
           <RowWithHint
             label="Output"
             value={total.outputTokens}
             highlight
-            tip="按 output 单价计费 (通常 4-5× input)"
+            tip="模型生成的 token 数量"
           />
           {total.cacheCreationTokens > 0 && (
             <RowWithHint
               label="Cache 写入"
               value={total.cacheCreationTokens}
               dim
-              tip="按 1.25× input 单价计费 (略贵)"
+              tip="模型上报的缓存写入数量，已包含在总输入中"
             />
           )}
           {total.cacheReadTokens > 0 && (
             <RowWithHint
               label="Cache 命中"
               value={total.cacheReadTokens}
-              tip="按 0.1× input 单价计费 (便宜 90%)"
+              tip="模型上报的缓存命中数量，已包含在总输入中"
               className="text-emerald-600"
             />
           )}
           <div className="my-1 border-t" />
           <Row label="实际 Prompt"
-            value={total.inputTokens + total.cacheCreationTokens + total.cacheReadTokens}
+            value={total.inputTokens}
             bold
-            hint="新+写入+命中"
+            hint="输入总量，含缓存"
           />
           {contextWindow > 0 ? (
             <ContextRow used={total.lastInputTokens} ceiling={contextWindow} />
@@ -119,29 +121,22 @@ export function UsageBadge({ conversationId }: { conversationId: string }) {
             <Archive className="size-3" />
             {compacting ? '正在压缩...' : '压缩上下文'}
           </button>
-          {/* Cache 命中率：cacheRead / (input + cacheRead + cacheCreation) */}
-          {total.cacheReadTokens > 0 && (
+          {total.cacheReadTokens > 0 && cacheHitRate !== null && (
             <div
               className="flex items-baseline justify-between gap-3 text-emerald-600"
-              title="按 input 数量算的命中率；实际省钱比略低（cache 读仍算 10% 价）"
+              title="缓存命中数量占已记录输入总量的比例"
             >
               <span className="truncate">Cache 命中率</span>
               <span className="shrink-0 font-mono">
-                {Math.round(
-                  (total.cacheReadTokens * 100) /
-                    (total.inputTokens + total.cacheCreationTokens + total.cacheReadTokens),
-                )}
+                {Math.round(cacheHitRate * 100)}
                 %
-                <span className="ml-1 text-[10px] text-muted-foreground">
-                  (省 ~{Math.round((total.cacheReadTokens * 90) / 100 / 1000)}k input 计费)
-                </span>
               </span>
             </div>
           )}
         </div>
 
         <div className="mt-2 border-t pt-2 text-[10px] text-muted-foreground">
-          所有 token 都计费，速率不同。详见各行 tooltip。Pin 消息可避免被预算自动截断。
+          按模型上报的 token 统计；缓存是输入明细。Pin 消息可避免被预算自动截断。
         </div>
 
         {Object.keys(total.byAgent).length > 1 && (
@@ -209,7 +204,7 @@ function Row({
   )
 }
 
-/** 带 tooltip 的版本，hover 显示计费速率说明 */
+/** 带 tooltip 的版本，hover 解释计量字段 */
 function RowWithHint({
   label,
   value,

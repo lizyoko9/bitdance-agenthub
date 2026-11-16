@@ -66,22 +66,45 @@ export interface CustomAgentAdapterOptions {
 }
 
 const numberOrNull = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
 
 function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
 export function readCustomRequestUsage(value: unknown): CustomRequestUsage {
   const usage = record(value)
+  const promptDetails = record(usage.prompt_tokens_details)
+  const inputDetails = record(usage.input_tokens_details)
   return {
     inputTokens: numberOrNull(usage.prompt_tokens),
     outputTokens: numberOrNull(usage.completion_tokens),
-    cacheReadTokens: numberOrNull(record(usage.prompt_tokens_details).cached_tokens)
+    cacheReadTokens: numberOrNull(promptDetails.cached_tokens)
       ?? numberOrNull(usage.prompt_cache_hit_tokens)
-      ?? numberOrNull(usage.cached_tokens),
-    cacheCreationTokens: numberOrNull(usage.cache_creation_input_tokens),
+      ?? numberOrNull(usage.cached_tokens)
+      ?? numberOrNull(usage.cached_input_tokens)
+      ?? numberOrNull(usage.cache_read_input_tokens)
+      ?? numberOrNull(promptDetails.cache_read_tokens)
+      ?? numberOrNull(inputDetails.cached_tokens)
+      ?? numberOrNull(inputDetails.cache_read_tokens),
+    cacheCreationTokens: numberOrNull(usage.cache_creation_input_tokens)
+      ?? numberOrNull(usage.cache_write_input_tokens)
+      ?? numberOrNull(promptDetails.cache_write_tokens)
+      ?? numberOrNull(promptDetails.cache_creation_tokens)
+      ?? numberOrNull(inputDetails.cache_write_tokens)
+      ?? numberOrNull(inputDetails.cache_creation_tokens),
     reasoningTokens: numberOrNull(record(usage.completion_tokens_details).reasoning_tokens),
+  }
+}
+
+export function mergeCustomRequestUsage(previous: CustomRequestUsage, value: unknown): CustomRequestUsage {
+  const next = readCustomRequestUsage(value)
+  return {
+    inputTokens: next.inputTokens ?? previous.inputTokens,
+    outputTokens: next.outputTokens ?? previous.outputTokens,
+    cacheReadTokens: next.cacheReadTokens ?? previous.cacheReadTokens,
+    cacheCreationTokens: next.cacheCreationTokens ?? previous.cacheCreationTokens,
+    reasoningTokens: next.reasoningTokens ?? previous.reasoningTokens,
   }
 }
 
@@ -151,7 +174,7 @@ export class CustomRequestTracker {
     observation.responseModel = chunk.model ?? observation.responseModel
     observation.systemFingerprint = chunk.system_fingerprint ?? observation.systemFingerprint
     if (chunk.usage) {
-      observation.usage = readCustomRequestUsage(chunk.usage)
+      observation.usage = mergeCustomRequestUsage(observation.usage, chunk.usage)
       observation.usageComplete = observation.usage.inputTokens !== null && observation.usage.outputTokens !== null
     }
   }

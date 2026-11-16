@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 
 import type { AgentRunRow, AgentRow, ArtifactRow, AttachmentRow, ConversationWithMeta, MessageRow } from '@/db/schema'
+import { getPromptTokenTotal, getTokenTotal } from '@/shared/token-usage'
 import type {
   DispatchPlanItem,
   DispatchTaskStatus,
@@ -1021,7 +1022,8 @@ function areMessageUsageEqual(a: MessageRow['usage'], b: MessageRow['usage']): b
   return (
     a.inputTokens === b.inputTokens &&
     a.outputTokens === b.outputTokens &&
-    a.cacheReadTokens === b.cacheReadTokens
+    a.cacheReadTokens === b.cacheReadTokens &&
+    a.inputTokensIncludeCache === b.inputTokensIncludeCache
   )
 }
 
@@ -1239,6 +1241,7 @@ export const useUnreadCount = (conversationId: string): number =>
 
 /** 累计该会话所有 run 的 token 用量 + 上次 run 的 input prompt 长度（用于 ctx 仪表）+ per-agent 拆分。 */
 export interface ConversationUsageTotal {
+  /** 已按每条记录的语义归一化、包含缓存明细的总输入 */
   inputTokens: number
   outputTokens: number
   cacheCreationTokens: number
@@ -1246,9 +1249,9 @@ export interface ConversationUsageTotal {
   totalTokens: number
   /** 最近一次有 usage 的 run 的 input prompt token 数（context window 仪表用） */
   lastInputTokens: number
-  /** key = agentId，value = 该 agent 的累计 input+output tokens */
+  /** key = agentId，value = 该 agent 的累计总 prompt+output tokens */
   byAgent: Record<string, number>
-  /** key = modelId，value = 累计 input+output tokens */
+  /** key = modelId，value = 累计总 prompt+output tokens */
   byModel: Record<string, number>
   /** 累计了多少个有 usage 的 run（用于显示 "N 次响应"） */
   runCount: number
@@ -1286,17 +1289,17 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
         const u = run.usage
         if (!u) continue
         hasRunUsage = true
-        result.inputTokens += u.inputTokens
+        result.inputTokens += getPromptTokenTotal(u)
         result.outputTokens += u.outputTokens
         result.cacheCreationTokens += u.cacheCreationTokens
         result.cacheReadTokens += u.cacheReadTokens
         result.runCount++
-        const sub = u.inputTokens + u.outputTokens
+        const sub = getTokenTotal(u)
         result.byAgent[run.agentId] = (result.byAgent[run.agentId] ?? 0) + sub
         if (u.model) result.byModel[u.model] = (result.byModel[u.model] ?? 0) + sub
         if (run.startedAt > latestRunWithUsage) {
           latestRunWithUsage = run.startedAt
-          result.lastInputTokens = u.lastInputTokens ?? u.inputTokens
+          result.lastInputTokens = u.lastInputTokens ?? getPromptTokenTotal(u)
         }
       }
     }
@@ -1310,14 +1313,14 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
         const m = messages[mid]
         if (!m || !m.usage || m.role !== 'agent') continue
         const u = m.usage
-        result.inputTokens += u.inputTokens
+        result.inputTokens += getPromptTokenTotal(u)
         result.outputTokens += u.outputTokens
         result.cacheReadTokens += u.cacheReadTokens
         if (m.runId && !seenRuns.has(m.runId)) {
           seenRuns.add(m.runId)
           result.runCount++
         }
-        const sub = u.inputTokens + u.outputTokens
+        const sub = getTokenTotal(u)
         if (m.agentId) {
           result.byAgent[m.agentId] = (result.byAgent[m.agentId] ?? 0) + sub
           const modelId = agents[m.agentId]?.modelId
@@ -1325,13 +1328,12 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
         }
         if (m.createdAt > latestMsgCreatedAt) {
           latestMsgCreatedAt = m.createdAt
-          result.lastInputTokens = u.inputTokens
+          result.lastInputTokens = getPromptTokenTotal(u)
         }
       }
     }
 
-    result.totalTokens =
-      result.inputTokens + result.outputTokens + result.cacheCreationTokens + result.cacheReadTokens
+    result.totalTokens = result.inputTokens + result.outputTokens
     return result
   }, [runs, messageIds, messages, agents])
 }
