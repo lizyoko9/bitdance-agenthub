@@ -1,6 +1,6 @@
 # TraceTrial-Bench × AgentHub
 
-本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的五个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
+本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的六个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
 
 [2026-11-12 首轮结果](results/2026-11-12-e8-smoke.md)：Harness 35.7143/50、Agent 50/50，官方总分 85.7143/100、判定 fail；定位到非零退出的失败分类未一致传播，Agent 正确完成交付。
 
@@ -24,6 +24,7 @@
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
 |---|---|---|---:|
+| `L2-deploy-latency-001` | 已受理与下游确认的状态、晚确认对账及交付；真实归档/清理观测 | 14 / 1 | 2 |
 | `E6-timeout-error-channel-003` | 原生命令超时、失败/部分输出与 post-tool 反馈；隔离容器清理观测 | 6 / 1 | 4 |
 | `E7-failed-command-stale-artifact-002` | 失败命令留下成功样产物，后续观察与参考消费者的拒绝 | 6 / 1 | 4 |
 | `E8-lintgate-exit-masked-002` | 模型可见退出码/失败分类与 post-tool 观察一致性 | 6 / 1 | 2 |
@@ -50,6 +51,7 @@ E8 给原生执行工具一个输出成功文本、实际非零退出的命令�
 
 | 当前 task 模式 | 工具 / 秒 | 内部模型轮数 / HTTP | 累计请求 body |
 |---|---:|---:|---:|
+| L2 | 140 / 2400 | 141 / 141 | 36,962,304 bytes |
 | E6 / E7 / 两个 E8 | 6 / 120 | 7 / 7 | 1,835,008 bytes |
 | G1 registry | 80 / 1200 | 81 / 81 | 21,233,664 bytes |
 
@@ -188,3 +190,13 @@ TraceTrial manifest 明确写入 `benchmark=tracetrial` 与固定 `sourceRevisio
 固定版本任务 profile 写着 `network_mode=none`，但上游 Docker runtime 实际硬编码并校验 `bridge`。首轮匹配该版本行为，同时保留 task prompt 禁止任务相关网络操作的要求；这不是操作系统层面的断网隔离。仅使用显式选择的既有临时传输代理，不修改全局 Docker、Colima 或代理配置。容器内 loopback 模型 recorder 必须通过 `NO_PROXY` 排除，避免本地请求误走环境代理。
 
 报告必须区分原生执行失败、接入失败、judge 失败、Harness 分数和 Agent 分数。单题可以展示特定执行反馈机制的可复核证据；它不能给出框架总体正确率、全量 benchmark Macro、官方排行榜成绩或多 Agent 协作收益。actor 模型仍影响完成任务的行为，LLM judge 仍有不确定性，未覆盖的机制也不应推定通过。
+
+## L2 的状态确认与容器生命周期证据
+
+`L2-deploy-latency-001` 使用 TaskSpec 的 140 工具/2400 秒，实际一条原始输入，派生 141 内部轮次/HTTP、256KiB 单次、36,962,304 bytes 累计和 8192 输出 tokens；runtime 的 1800 秒独立记录。两个官方 rubric 均参与 Judge，含一次纠正最多四次逻辑请求，仍受独立十次 HTTP 等 guard 约束。
+
+该题只复用 E6 已有的只读进程 observer、receipt/schema 和来源 hash，声明 `native_exec_v1/post_tool_v1/process_containment_v1`；E6 timeout 能力及字段桥接保持仅作用于 E6。生产 Bash 的既有默认超时/输出限制仍是受测行为。
+
+L2 的 `artifacts/container_lifecycle.json` 是显式 AgentHub projection，不代表执行了 stock runtime。它保留原 `lifecycle.json`、源路径/hash和带容器 ID 的 stage 引用；仅实际复制成功且必需原生文件通过 regular/non-symlink/hash 校验时记录 archive complete，仅同容器实际删除成功时记录 cleanup complete。缺失、非零、异常或冲突保留失败，第一项 apparatus 异常与后续清理异常分别留档。预期的通道 exit75/工具失败不会变成容器异常；live0 也不能替代复制或删除证据。
+
+无模型 preflight 检查通道需要的标准命令和 `/dev/urandom` 可用，但不执行 `deployctl` 或任务 fixture。原始 prompt、通道、保护输入、评分代码和分数不改；接入完成不等于已获得真实试跑成绩，结果须另见各次报告。
