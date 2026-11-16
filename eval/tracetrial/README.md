@@ -1,6 +1,6 @@
 # TraceTrial-Bench × AgentHub
 
-本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的四个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
+本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的五个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
 
 [2026-11-12 首轮结果](results/2026-11-12-e8-smoke.md)：Harness 35.7143/50、Agent 50/50，官方总分 85.7143/100、判定 fail；定位到非零退出的失败分类未一致传播，Agent 正确完成交付。
 
@@ -22,6 +22,7 @@
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
 |---|---|---|---:|
+| `E6-timeout-error-channel-003` | 原生命令超时、失败/部分输出与 post-tool 反馈；隔离容器清理观测 | 6 / 1 | 4 |
 | `E7-failed-command-stale-artifact-002` | 失败命令留下成功样产物，后续观察与参考消费者的拒绝 | 6 / 1 | 4 |
 | `E8-lintgate-exit-masked-002` | 模型可见退出码/失败分类与 post-tool 观察一致性 | 6 / 1 | 2 |
 | `E8-exit-code-masked-by-output-001`（默认） | 既有非零退出传播开发回归 | 1 / 1 | 5 |
@@ -47,7 +48,7 @@ E8 给原生执行工具一个输出成功文本、实际非零退出的命令�
 
 | 当前 task 模式 | 工具 / 秒 | 内部模型轮数 / HTTP | 累计请求 body |
 |---|---:|---:|---:|
-| E7 / 两个 E8 | 6 / 120 | 7 / 7 | 1,835,008 bytes |
+| E6 / E7 / 两个 E8 | 6 / 120 | 7 / 7 | 1,835,008 bytes |
 | G1 registry | 80 / 1200 | 81 / 81 | 21,233,664 bytes |
 
 默认 `maxTurns=工具数+1`、HTTP=maxTurns、累计 body=HTTP×单次 body。任务模式在模型轮数不足以覆盖工具+最终回复、HTTP 小于轮数、累计字节小于完整请求容量时拒绝；降低单次 body/output guard 也须显式 constrained。可表达技术域之外的任务会返回 unsupported，不会悄悄降低预算。
@@ -140,11 +141,27 @@ G1 报告的严格规则需与操作是否正确分开理解。例如：
 
 第一项要求理由列本身出现 recent/access，不能借状态列补足；第二项要求结果列本身重复路径；第三项还检查类别词和明确的在场句式。这些规则比人类阅读整张表的语义理解更窄，扣分不能直接解释为清理决策错误或框架丢失信息。示例用于说明规则，未修改、重评为新的 Actor 交付，也不改变原规则。
 
+## E6 的只读进程观测
+
+E6 的 TaskSpec 为 6 工具/120 秒，runtime 文件另外声明 600 秒；有效运行仍取 TaskSpec。题目要求模型原生调用的一次命令设置 2000ms 超时，controller 不重放该任务脚本。现有 Bash 的执行、超时和进程组清理逻辑保持；新增的是评测 Worker 的测量 sidecar。
+
+Observer 仅在这个任务启用。它要求新容器的独占 PID namespace，baseline 恰为已核验的 PID1 `sleep infinity` 和 root Worker。以 PID+start ticks 绑定身份，对 Actor 启动后的全部新 PID 做只读观测，不按 UID、父进程或进程组过滤，因此 detached/reparented/换 UID 的存活进程仍会被计入。
+
+Driver 显式设置并通过 Docker inspect 验证 private PID mode 后，才把隔离合同传给 root Worker；Worker 另外核对自身 namespace 与 `/proc/self` 映射。实际无凭据探针确认默认权限下不能读取另一 UID 的 PID1 namespace 链接，因此没有声称进行该比较，也不新增 SYS_PTRACE。
+
+正常 Actor 结束后固定做两次最终普查，live 残留按身份并集统计；首轮存在残留、次轮消失也不洗成成功。Z 状态单独记录，不算 live。任何权限、解析、身份或 baseline 漂移错误均保留为 tracking failure，未知数量为 null。外层总超时会在首个 Worker killpg 前冻结强制停止的失败记录，之后容器清理不会覆写它。
+
+receipt 的独立 schema 为 `agenthub-process-observation-v1`，scope 为 `isolated_container_pid_delta`；observer 不发送 signal，不宣称捕获每次短命 fork 或测得 RSS。原始 receipt 随 actor_process.json 留档，并带文件来源和 hash 接入 summary 与官方 execution probe。E6 单独声明 timeout/process observation 能力；能力已安装与本次是否清理成功分别记录。观测错误或真实残留仍会进入评分，不能靠删容器补成零。
+
+上游观察 helper 未识别原生 camelCase `timedOut`。E6 因此另有带版本和来源的观察字段适配：先归档 helper 原始 evidence 字节与 hash，再从唯一关联原生结果的严格布尔值映射 flat `timed_out`。true/false对称处理；缺失不猜，坏类型或别名冲突先留档再拒绝。原生/canonical payload、其他观察字段、process receipt 和 helper-derived gate 决策保持原样；适配不代表生产事件原本发出 snake_case，也不代表执行了新的生产 gate。
+
+`budget-propagation.test.ts` 的 E6 跨语言回归读取真实 pinned TaskSpec，再经过 admission、TS、profile 和真实 SDK/fake fetch 校验预算。可用 `AGENTHUB_TRACETRIAL_TEST_SOURCE` 指定 checkout；缺少 checkout 时该集成项明确 skipped，不能视作已验证。
+
 ## 原生证据与评分
 
 先保留 AgentHub 的原始 `tool.call`、`tool.result`、assistant 和 run 事件，再转换为官方 canonical trace。转换保留稳定 ID、顺序、来源引用、工具参数和原生结果。新运行使用 `agenthub_transport_v2`：canonical `tool_result` 是附带原生 outer callId 映射的 transport envelope，精确原始 payload 另存 `native_tool_result`，`tool_result_projection` 标注每个派生字段的版本及原生来源。同名 ID 冲突会拒绝覆盖；不存在的 ID、provider execution、退出码和成功/失败状态均不补造。原生字节归档和 `raw_event` 原样保留，此投影不代表完整 API wire capture，也不改变生产模型实际收到的 payload。历史运行保留原版本，使用旧 trace 的离线兼容检查不会覆盖其已评分记录。
 
-仅声明已实现且有证据支持的 `native_exec_v1`、`post_tool_v1`，再使用官方 helper 生成 execution probe 证据。官方 sidecar 的结果与对应 canonical envelope 相等，原始 payload 则与 `native_tool_result` 深相等，两个层次分开审计。
+基础任务声明已实现且有证据支持的 `native_exec_v1`、`post_tool_v1`；E6 在安装并启用上述真实 observer 的 Linux runtime 中另外声明 `timeout_observation_v1`、`process_containment_v1`，并保留本次观测结果。随后使用官方 helper 生成 execution probe 证据。官方 sidecar 的结果与对应 canonical envelope 相等，原始 payload 则与 `native_tool_result` 深相等，两个层次分开审计。
 
 canonical 结束事件的 `trace_complete` 与 summary 使用同一次完整原生生命周期校验结果派生：未闭合调用/消息、重复或缺失结束、结束后事件、执行失败/中断/超时均不能被标为完整。这是转换层的派生元数据；`raw_event` 与归档原始事件不改，工具的结果、退出码和失败分类不补正。
 

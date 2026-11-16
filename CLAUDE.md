@@ -329,7 +329,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `README.md` — 自建代码诊断集、编排对照组和报告入口
 - `terminalbench/README.md` — 固定 Terminal-Bench 任务的独立环境验证与有界模型 smoke 运行方式；headless CLI 复用 Application Services、AgentRunner 和工具
 - `terminalbench/requirements.txt` — `Harbor==0.25.0`，安装在独立 Python 评测环境，不加入应用 pnpm dependencies；Linux 运行包复用现有 lockfile，不复制宿主 node_modules、DB 或凭据文件
-- `tracetrial/README.md` — 固定 TraceTrial-Bench E7/E8/G1 四题 allowlist 的自定义 AgentHub 接入、付费前准入、共享有效预算、带原生 payload 来源的 canonical transport envelope 与 Harness/Agent 分层评分；G1 是零 rubric 的官方确定性评分，每题独立运行，复用 headless Application Services，Python 依赖安装在独立环境
+- `tracetrial/README.md` — 固定 TraceTrial-Bench E6/E7/E8/G1 五题 allowlist 的自定义 AgentHub 接入、付费前准入、共享有效预算、带原生 payload 来源的 canonical transport envelope 与 Harness/Agent 分层评分；E6 另有只读隔离 PID namespace 观测，G1 是零 rubric 的官方确定性评分，每题独立运行，复用 headless Application Services，Python 依赖安装在独立环境
 
 Custom tool loop 的轮数优先使用构造参数 `maxTurns`，其次读取 `AGENTHUB_CUSTOM_MAX_TURNS`，默认 32；有效值为 `1..10000` 的整数。模型主动停止与达到上限分别沿完成和 `iteration_limit` 失败路径记录，详见 Spec 05。评测的 trial 共享请求预算与单 run 轮数分别配置，首轮 smoke 的八请求默认额度不构成全局上限。
 
