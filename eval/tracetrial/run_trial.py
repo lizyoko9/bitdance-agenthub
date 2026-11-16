@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REFRESH_CONTROLLER_FILES = ('eval/tracetrial/run_trial.py', 'eval/tracetrial/Dockerfile.refresh',
     'eval/tracetrial/refresh-runtime.py', 'eval/tracetrial/container_worker.py',
     'eval/tracetrial/task_admission.py', 'eval/tracetrial/trace_adapter.py',
-    'eval/tracetrial/score_trial.py', 'eval/tracetrial/judge.py',
+    'eval/tracetrial/score_trial.py', 'eval/tracetrial/judge.py', 'eval/tracetrial/judge_plan.py',
     'eval/tracetrial/budget_contract.py', 'eval/tracetrial/budget_outcome.py',
     'eval/terminalbench/prepare-runtime.py')
 REQUIRED_NATIVE_ARCHIVES = ('actor_process.json', 'provider_summary.json', 'upstream_requests.jsonl',

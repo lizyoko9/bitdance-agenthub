@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -7,12 +8,12 @@ from unittest.mock import patch
 from tracetrial_bench.task_resolver import resolve_task
 from tracetrial_bench.types import ExecutionProbeSpec
 
-from .container_worker import APPROVED_TASK_IDS, CONFIRMATION_TASK_ID, GOVERNANCE_TASK_ID, PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
+from .container_worker import APPROVED_TASK_IDS, CONFIRMATION_TASK_ID, GOVERNANCE_TASK_ID, MOUNTCHECK_TASK_ID, PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
 from .budget_contract import build_budget_plan, budget_plan_digest
 from .task_admission import actor_request, actor_settings, admit_task, task_budget_values
 
 
-SOURCE = Path('/private/tmp/agenthub-tracetrial-source')
+SOURCE = Path(os.environ.get('AGENTHUB_TRACETRIAL_TEST_SOURCE', '/private/tmp/agenthub-tracetrial-source'))
 
 
 class TaskAdmissionTests(unittest.TestCase):
@@ -20,7 +21,7 @@ class TaskAdmissionTests(unittest.TestCase):
         self.task = resolve_task(SOURCE/'Task'/'E8-exit-code-masked-by-output-001')
 
     def test_all_approved_tasks_preserve_one_user_input_and_independent_internal_turns(self):
-        for task_id, user_ceiling, rubrics in zip(APPROVED_TASK_IDS, (6, 6, 1, 12, 6, 14), (4, 2, 5, 0, 4, 2), strict=True):
+        for task_id, user_ceiling, rubrics in zip(APPROVED_TASK_IDS, (6, 6, 1, 12, 6, 14, 6), (4, 2, 5, 0, 4, 2, 2), strict=True):
             with self.subTest(task=task_id):
                 task = resolve_task(SOURCE/'Task'/task_id)
                 report, request = admit_task(task)
@@ -48,6 +49,35 @@ class TaskAdmissionTests(unittest.TestCase):
                                                           'worstCaseRequests': 2 * rubrics})
                 self.assertEqual('processObservation' in settings, task_id in PROCESS_OBSERVED_TASK_IDS)
 
+    def test_mountcheck_keeps_task_budget_and_observes_terminal_without_process_or_claude_capabilities(self):
+        task = resolve_task(SOURCE / 'Task' / MOUNTCHECK_TASK_ID)
+        report, request = admit_task(task)
+        self.assertEqual(report['status'], 'supported')
+        self.assertEqual(request['instruction'], task.prompt)
+        self.assertEqual((request['maxToolCalls'], request['maxTurns'], request['timeoutMs']), (6, 7, 120000))
+        self.assertEqual(request['requestLimits'], {'maxRequests': 7, 'maxRequestBytes': 262144,
+            'maxTotalRequestBytes': 1835008, 'maxCompletionTokens': 8192})
+        self.assertEqual(report['declaredRuntime']['timeout_sec'], 600)
+        expected = ['native_exec_v1', 'post_tool_v1', 'native_terminal_completion_v1']
+        self.assertEqual(report['capabilities'], {'required': expected, 'available': expected, 'missing': []})
+        self.assertNotIn('processObservation', report['effectiveActor'])
+        self.assertEqual(report['judgeCoverage'], {'rubrics': 2, 'maxRequests': 10, 'worstCaseRequests': 4})
+        self.assertEqual(report['judgeLimits']['maxRequestBytes'], 256 * 1024)
+        for capability in ('claude_completed_tool_turn_soft_exit_v1', 'process_containment_v1'):
+            added = replace(task, execution_probe=ExecutionProbeSpec('lifecycle_v1', (*expected, capability)))
+            rejected, request = admit_task(added)
+            self.assertEqual(rejected['status'], 'unsupported')
+            self.assertEqual(rejected['capabilities']['missing'], [capability])
+            self.assertIsNone(request)
+
+    def test_native_terminal_observation_cannot_be_borrowed_by_another_task(self):
+        task = replace(self.task, execution_probe=ExecutionProbeSpec('lifecycle_v1',
+            ('native_exec_v1', 'post_tool_v1', 'native_terminal_completion_v1')))
+        report, request = admit_task(task)
+        self.assertEqual(report['status'], 'unsupported')
+        self.assertIsNone(request)
+        self.assertEqual(report['capabilities']['missing'], ['native_terminal_completion_v1'])
+
     def test_timeout_task_budget_and_capabilities_are_scoped_to_the_installed_observer_policy(self):
         task = resolve_task(SOURCE/'Task'/TIMEOUT_TASK_ID)
         report, request = admit_task(task)
@@ -60,7 +90,7 @@ class TaskAdmissionTests(unittest.TestCase):
         self.assertEqual(report['capabilities'], {'required': ['native_exec_v1', 'post_tool_v1',
             'timeout_observation_v1', 'process_containment_v1'], 'available': ['native_exec_v1', 'post_tool_v1',
             'timeout_observation_v1', 'process_containment_v1'], 'missing': []})
-        for task_id in set(APPROVED_TASK_IDS) - set(PROCESS_OBSERVED_TASK_IDS):
+        for task_id in set(APPROVED_TASK_IDS) - set(PROCESS_OBSERVED_TASK_IDS) - {MOUNTCHECK_TASK_ID}:
             with self.subTest(task=task_id):
                 previous, _ = admit_task(resolve_task(SOURCE/'Task'/task_id))
                 self.assertEqual(previous['capabilities']['available'], ['native_exec_v1', 'post_tool_v1'])

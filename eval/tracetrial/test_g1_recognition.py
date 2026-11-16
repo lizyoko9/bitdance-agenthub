@@ -1,3 +1,4 @@
+import os
 import copy
 import importlib.util
 import json
@@ -9,7 +10,7 @@ import unittest
 from .g1_recognition import MODES, _python_targets, install_recognition
 
 
-SOURCE = Path('/private/tmp/agenthub-tracetrial-source/Task/G1-registry-cleanup-002/verifier/score.py')
+SOURCE = Path(os.environ.get('AGENTHUB_TRACETRIAL_TEST_SOURCE', '/private/tmp/agenthub-tracetrial-source')) / 'Task/G1-registry-cleanup-002/verifier/score.py'
 PRODUCER = {'version': 'agenthub_fs_list_complete_v1', 'runtimeArchiveSha256': 'a' * 64,
     'fsServiceSha256': '8a30e6a55a080211276cc891a8e639b8c551b7f5727157e47568f1b30c4d4e45',
     'fsListSha256': '4a4162975dea08d6588312a952c9ad9cdf9a3573055bedad2edb95ce88d9c3b2'}

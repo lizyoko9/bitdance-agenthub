@@ -15,9 +15,11 @@ from . import run_trial as driver
 from .run_trial import actor_request, checked_source, directory_hashes, docker_environment, verify_build_files, TASK_ID
 
 
+SOURCE = Path(os.environ.get('AGENTHUB_TRACETRIAL_TEST_SOURCE', '/private/tmp/agenthub-tracetrial-source'))
+
 class DriverContractTests(unittest.TestCase):
     def plan_file(self, folder, task_id=TASK_ID, **options):
-        report = driver.preflight_task(Path('/private/tmp/agenthub-tracetrial-source'), task_id, **options)
+        report = driver.preflight_task(SOURCE, task_id, **options)
         path = Path(folder) / 'budget.json'
         driver.write_budget_file(report, path)
         return path
@@ -38,7 +40,7 @@ class DriverContractTests(unittest.TestCase):
             self.assertEqual(envelope['taskId'], TASK_ID)
             self.assertEqual(envelope['budgetPlan']['actor']['maxToolCalls'], 6)
             with self.assertRaises(FileExistsError):
-                driver.write_budget_file(driver.preflight_task(Path('/private/tmp/agenthub-tracetrial-source')), plan)
+                driver.write_budget_file(driver.preflight_task(SOURCE), plan)
             envelope['budgetPlan']['actor']['maxToolCalls'] = 5
             plan.write_text(json.dumps(envelope))
             with self.assertRaises(ValueError):
@@ -52,7 +54,7 @@ class DriverContractTests(unittest.TestCase):
             plan.write_text(json.dumps(envelope))
             with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:
                 with self.assertRaisesRegex(ValueError, 'task inputs changed'):
-                    driver.run_trial(source=Path('/private/tmp/agenthub-tracetrial-source'),
+                    driver.run_trial(source=SOURCE,
                         output=Path(folder)/'trial', context=Path('/unused'), image='unused',
                         actor_proxy='', judge_proxy='', budget_file=plan)
                 self.assertFalse((Path(folder)/'trial').exists())
@@ -64,7 +66,7 @@ class DriverContractTests(unittest.TestCase):
             root = Path(folder)
             plan_file = self.plan_file(root, task_id)
             envelope = driver.read_budget_file(plan_file)
-            task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'),
+            task, report, request = driver.resolve_trial_task(SOURCE,
                 task_id, budget_plan=envelope['budgetPlan'])
             context = root/'build'
             context.mkdir()
@@ -116,7 +118,7 @@ class DriverContractTests(unittest.TestCase):
                 task_id = driver.TIMEOUT_TASK_ID
                 plan_file = self.plan_file(root, task_id)
                 envelope = driver.read_budget_file(plan_file)
-                task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'),
+                task, report, request = driver.resolve_trial_task(SOURCE,
                     task_id, budget_plan=envelope['budgetPlan'])
                 context = root/'build'
                 context.mkdir()
@@ -178,7 +180,7 @@ class DriverContractTests(unittest.TestCase):
                 task_id = driver.CONFIRMATION_TASK_ID
                 plan_file = self.plan_file(root, task_id)
                 plan = driver.read_budget_file(plan_file)
-                task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'),
+                task, report, request = driver.resolve_trial_task(SOURCE,
                     task_id, budget_plan=plan['budgetPlan'])
                 context = root / 'build'
                 context.mkdir()
@@ -270,7 +272,7 @@ class DriverContractTests(unittest.TestCase):
     def test_preflight_admits_only_allowlisted_pinned_tasks_without_a_key_or_docker(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:
             for task_id in driver.APPROVED_TASK_IDS:
-                report = driver.preflight_task(Path('/private/tmp/agenthub-tracetrial-source'), task_id)
+                report = driver.preflight_task(SOURCE, task_id)
                 self.assertEqual(report['taskId'], task_id)
                 self.assertEqual(report['status'], 'supported')
                 self.assertIsNone(report['score'])
@@ -331,7 +333,7 @@ class DriverContractTests(unittest.TestCase):
             self.assertEqual(json.loads(output.getvalue()), report)
 
     def test_existing_or_symlink_run_directory_is_rejected_before_key_or_docker(self):
-        task, report, request = driver.resolve_trial_task(Path('/private/tmp/agenthub-tracetrial-source'))
+        task, report, request = driver.resolve_trial_task(SOURCE)
         with tempfile.TemporaryDirectory() as folder:
             plan = self.plan_file(folder)
             link = Path(folder)/'dangling'
@@ -347,7 +349,7 @@ class DriverContractTests(unittest.TestCase):
                 docker.assert_not_called()
 
     def test_public_actor_request_contains_no_private_grading_inputs(self):
-        source = checked_source(Path('/private/tmp/agenthub-tracetrial-source'))
+        source = checked_source(SOURCE)
         task = resolve_task(source / 'Task' / TASK_ID)
         request = actor_request(task)
         self.assertEqual(request['instruction'], (task.task_dir/'prompt.md').read_text())
@@ -427,7 +429,7 @@ class DriverContractTests(unittest.TestCase):
              patch.object(driver, 'require_committed_sources', return_value=revision), \
              patch.object(driver, 'inspect_reuse_image', return_value=inspection), \
              patch.object(driver, 'retain_baseline_manifest', side_effect=retain):
-            context = driver.prepare_build(Path('/private/tmp/agenthub-tracetrial-source'), Path(folder)/'build', reuse_image=reference)
+            context = driver.prepare_build(SOURCE, Path(folder)/'build', reuse_image=reference)
             value = json.loads((context/'build-manifest.json').read_text())
             self.assertEqual(value['baseImage']['reference'], reference)
             self.assertEqual(value['baseImage']['runtimeCommit'], 'synthetic-baseline')
@@ -443,7 +445,7 @@ class DriverContractTests(unittest.TestCase):
 
     def test_default_preparation_keeps_original_clean_build(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(driver, 'inspect_reuse_image') as inspect:
-            context = driver.prepare_build(Path('/private/tmp/agenthub-tracetrial-source'), Path(folder)/'build')
+            context = driver.prepare_build(SOURCE, Path(folder)/'build')
             value = json.loads((context/'build-manifest.json').read_text())
             inspect.assert_not_called()
             self.assertNotIn('baseImage', value)

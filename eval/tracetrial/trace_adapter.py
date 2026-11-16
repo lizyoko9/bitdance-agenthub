@@ -8,7 +8,7 @@ from harness_tracer.summary import build_summary
 from harness_tracer.writer import EventWriter
 from tracetrial_bench.execution_capabilities import persist_execution_probe_evidence
 
-from .container_worker import PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
+from .container_worker import MOUNTCHECK_TASK_ID, PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
 
 
 CAPABILITIES = ("native_exec_v1", "post_tool_v1")
@@ -18,6 +18,8 @@ TIMEOUT_OBSERVER_PROJECTION_VERSION = 'agenthub_timeout_observer_v1'
 
 
 def capabilities_for_task(task_id: str) -> tuple[str, ...]:
+    if task_id == MOUNTCHECK_TASK_ID:
+        return CAPABILITIES + ("native_terminal_completion_v1",)
     if task_id == TIMEOUT_TASK_ID:
         return CAPABILITIES + TIMEOUT_CAPABILITIES
     return CAPABILITIES + ("process_containment_v1",) if task_id in PROCESS_OBSERVED_TASK_IDS else CAPABILITIES

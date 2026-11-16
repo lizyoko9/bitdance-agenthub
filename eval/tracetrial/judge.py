@@ -34,6 +34,14 @@ def judge_request_limits(task_id: str) -> dict[str, int | float]:
             "wallSeconds": MAX_WALL_SECONDS, "callSeconds": MAX_CALL_SECONDS}
 
 
+def serialize_judge_body(prompt: str) -> str:
+    if not isinstance(prompt, str):
+        raise ValueError("Judge prompt must be text")
+    payload = {"model": JUDGE_MODEL, "messages": [{"role": "user", "content": prompt}],
+               "reasoning_effort": "none", "max_completion_tokens": MAX_COMPLETION_TOKENS, "temperature": 0}
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 class JudgeRequestError(RuntimeError):
     pass
 
@@ -198,9 +206,7 @@ class BoundedJudgeRequester:
         if not math.isfinite(float(runtime.timeout)) or float(runtime.timeout) <= 0:
             raise ValueError("Judge runtime timeout must be finite and positive")
         url = _api_url(runtime.base_url)
-        payload = {"model": JUDGE_MODEL, "messages": [{"role": "user", "content": prompt}],
-                   "reasoning_effort": "none", "max_completion_tokens": MAX_COMPLETION_TOKENS, "temperature": 0}
-        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        body = serialize_judge_body(prompt)
         body_bytes = len(body.encode("utf-8"))
         remaining = self.deadline - self.clock()
         if self.exhausted or len(self.requests) >= self.max_requests:

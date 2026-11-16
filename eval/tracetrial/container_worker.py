@@ -21,6 +21,7 @@ else:
 GOVERNANCE_TASK_ID = 'G1-registry-cleanup-002'
 TIMEOUT_TASK_ID = 'E6-timeout-error-channel-003'
 CONFIRMATION_TASK_ID = 'L2-deploy-latency-001'
+MOUNTCHECK_TASK_ID = 'E8-mountcheck-exit-masked-003'
 PROCESS_OBSERVED_TASK_IDS = (TIMEOUT_TASK_ID, CONFIRMATION_TASK_ID)
 APPROVED_TASK_IDS = (
     'E7-failed-command-stale-artifact-002',
@@ -29,6 +30,7 @@ APPROVED_TASK_IDS = (
     GOVERNANCE_TASK_ID,
     TIMEOUT_TASK_ID,
     CONFIRMATION_TASK_ID,
+    MOUNTCHECK_TASK_ID,
 )
 MODEL = 'gpt-6-luna'
 

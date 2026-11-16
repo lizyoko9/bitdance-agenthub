@@ -13,12 +13,12 @@ from tracetrial_bench.evidence_finder import EvidenceFinder
 from tracetrial_bench.task_resolver import resolve_task
 from tracetrial_bench.workspace import RunLayout
 
-from eval.tracetrial.container_worker import CONFIRMATION_TASK_ID, TIMEOUT_TASK_ID
+from eval.tracetrial.container_worker import CONFIRMATION_TASK_ID, MOUNTCHECK_TASK_ID, TIMEOUT_TASK_ID
 from eval.tracetrial import trace_adapter as adapter
 from eval.tracetrial.trace_adapter import emit_execution_evidence, normalize_agenthub_trace
 
 
-UPSTREAM = Path(os.environ.get("TRACETRIAL_SOURCE", "/private/tmp/agenthub-tracetrial-source"))
+UPSTREAM = Path(os.environ.get("AGENTHUB_TRACETRIAL_TEST_SOURCE", os.environ.get("TRACETRIAL_SOURCE", "/private/tmp/agenthub-tracetrial-source")))
 TASK_DIR = UPSTREAM / "Task" / "E8-exit-code-masked-by-output-001"
 
 
@@ -178,6 +178,59 @@ class TraceAdapterTests(unittest.TestCase):
         self.assertEqual(summary["agenthub_actor_usage"]["observedRequests"], 2)
         self.assertEqual(summary["token_usage"]["call_count"], 0)
         self.assertEqual(summary["token_usage"]["input_tokens"], "unknown")
+
+    def test_mountcheck_terminal_observation_keeps_failure_payload_and_installed_capability(self):
+        self.task = resolve_task(UPSTREAM / 'Task' / MOUNTCHECK_TASK_ID)
+        native, result = native_fixture()
+        native[3]['args']['command'] = 'bash /workspace/tools/mount_check.sh'
+        native[4].update(isError=True, result={'exitCode': 23, 'isError': True, 'status': 'failed',
+            'output': 'STATUS: OK\nRESULT: complete\n',
+            'failure': {'kind': 'nonzero_exit', 'message': 'Command exited with code 23.'}})
+        before = copy.deepcopy(native)
+        summary, events = self.normalize(native, result)
+        with patch.object(adapter, '_process_receipt_source', side_effect=AssertionError('no process observer')), \
+             patch.object(adapter, '_project_timeout_observations', side_effect=AssertionError('no timeout bridge')):
+            evidence = emit_execution_evidence(self.task, self.layout, summary)
+        self.assertTrue(summary['trace_complete'])
+        self.assertEqual(summary['status'], 'finished')
+        self.assertEqual(events[-1]['event_type'], 'run_finished')
+        tools = [event for event in events if event['event_type'] == 'tool']
+        self.assertEqual(tools[0]['native_tool_result'], before[4]['result'])
+        self.assertNotIn('provider_executed', tools[0]['tool_call'])
+        self.assertNotIn('process_containment', summary)
+        self.assertEqual(native, before)
+        self.assertTrue(Path(evidence).is_file())
+        capability = json.loads((self.layout.artifacts_dir / 'execution_probe/capabilities.json').read_text())
+        self.assertEqual(capability['available'], ['native_exec_v1', 'post_tool_v1', 'native_terminal_completion_v1'])
+
+    def test_mountcheck_failed_missing_terminal_and_open_call_are_not_repaired(self):
+        self.task = resolve_task(UPSTREAM / 'Task' / MOUNTCHECK_TASK_ID)
+        template = self.layout
+        for kind in ('failed_root', 'missing_terminal', 'missing_result'):
+            with self.subTest(kind=kind):
+                self.layout = RunLayout(**{name: self.root / kind / path.relative_to(self.root)
+                    for name, path in vars(template).items()})
+                native, result = native_fixture()
+                if kind == 'failed_root':
+                    native[-1].update(status='failed', error='iteration_limit: no final answer')
+                    result.update(runStatus='failed', terminationReason='iteration_limit', error=native[-1]['error'])
+                    result['runs'][0]['status'] = 'failed'
+                    self.actor_metadata['exit_code'] = 1
+                elif kind == 'missing_terminal':
+                    native.pop()
+                else:
+                    del native[4]
+                before = copy.deepcopy(native)
+                summary, events = self.normalize(native, result)
+                emit_execution_evidence(self.task, self.layout, summary)
+                self.assertFalse(summary['trace_complete'])
+                self.assertEqual(native, before)
+                self.assertEqual(adapter.capabilities_for_task(self.task.task_id),
+                    ('native_exec_v1', 'post_tool_v1', 'native_terminal_completion_v1'))
+                if kind == 'failed_root':
+                    self.assertEqual(summary['status'], 'failed')
+                    self.assertEqual(summary['error_type'], 'iteration_limit')
+                self.actor_metadata['exit_code'] = 0
 
     def test_duplicate_result_is_not_counted_twice(self):
         native, result = native_fixture()

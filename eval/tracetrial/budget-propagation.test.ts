@@ -74,7 +74,7 @@ print(json.dumps(request))`
   return { directory, instruction, request: validateTraceTrialRequest(request) }
 }
 
-function resolvedPinnedRequest(taskId: 'E6-timeout-error-channel-003' | 'L2-deploy-latency-001') {
+function resolvedPinnedRequest(taskId: 'E6-timeout-error-channel-003' | 'L2-deploy-latency-001' | 'E8-mountcheck-exit-masked-003') {
   const directory = mkdtempSync(path.join(tmpdir(), 'agenthub-resolved-task-'))
   scratch.push(directory)
   const cwd = path.join(directory, 'workspace')
@@ -239,6 +239,40 @@ describe('task-derived TraceTrial budget propagation without model calls', () =>
       try {
         for await (const event of adapter.stream({
           agentId: 'e6-budget-agent', conversationId: 'e6-budget-conversation', runId: 'e6-budget-run',
+          workspacePath: request.cwd, prompt: request.instruction, systemPrompt: 'Use the available test tool.',
+          apiKey: 'not-a-real-key', apiBaseUrl: null, modelId: request.modelId, toolNames: ['budget_probe'],
+          customConfig: { modelProvider: 'openai' },
+        }, new AbortController().signal)) events.push(event)
+      } finally {
+        profile.close()
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(7)
+      expect(tools.execute).toHaveBeenCalledTimes(6)
+      expect(events.filter((event) => event.type === 'tool.result')).toHaveLength(6)
+      expect(sdk.clients).toHaveLength(7)
+      expect(sdk.clients.every((client) => client.provided && client.timeout === 120_000 && client.effectiveTimeout === 120_000)).toBe(true)
+      expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: { inputTokens: 70, outputTokens: 14 } })
+    },
+  )
+
+
+  it.skipIf(!existsSync(path.join(pinnedTaskSource, 'Task/E8-mountcheck-exit-masked-003/task.yaml')))(
+    'propagates the real pinned mountcheck TaskSpec through admission, TS, profile and SDK without model calls', async () => {
+      const { request, budgetPlan, runtime, judge } = resolvedPinnedRequest('E8-mountcheck-exit-masked-003')
+      expect(request).toMatchObject({ taskId: 'E8-mountcheck-exit-masked-003', timeoutMs: 120_000, maxToolCalls: 6, maxTurns: 7,
+        requestLimits: { maxRequests: 7, maxRequestBytes: 262144, maxTotalRequestBytes: 1_835_008, maxCompletionTokens: 8192 } })
+      expect(request.instruction).toContain('bash /workspace/tools/mount_check.sh')
+      expect(budgetPlan.coverage.completeTaskTrajectory).toBe(true)
+      expect(runtime.timeout_sec).toBe(600)
+      expect(judge).toMatchObject({ rubrics: 2, worstCaseRequests: 4 })
+      let turn = 0
+      fetchMock.mockImplementation(async () => modelResponse(++turn, turn <= request.maxToolCalls!))
+      const profile = await createIsolatedProfile(request, () => {}, { benchmark: 'tracetrial' })
+      const adapter = profileServices.register.mock.calls[0][0] as CustomAgentAdapter
+      const events: StreamEvent[] = []
+      try {
+        for await (const event of adapter.stream({
+          agentId: 'mount-budget-agent', conversationId: 'mount-budget-conversation', runId: 'mount-budget-run',
           workspacePath: request.cwd, prompt: request.instruction, systemPrompt: 'Use the available test tool.',
           apiKey: 'not-a-real-key', apiBaseUrl: null, modelId: request.modelId, toolNames: ['budget_probe'],
           customConfig: { modelProvider: 'openai' },

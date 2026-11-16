@@ -17,6 +17,8 @@ from . import container_worker as worker
 from .budget_contract import build_budget_plan, budget_plan_digest
 
 
+SOURCE = Path(os.environ.get('AGENTHUB_TRACETRIAL_TEST_SOURCE', '/private/tmp/agenthub-tracetrial-source'))
+
 TASK_BUDGET = {'maxUserTurns': 12, 'maxToolCalls': 80, 'maxWallTimeSeconds': 1200}
 
 
@@ -134,7 +136,7 @@ class RequestValidationTests(unittest.TestCase):
     def test_worker_accepts_full_task_plan_and_exact_request_for_each_allowed_id(self):
         for task_id in worker.APPROVED_TASK_IDS:
             with self.subTest(task=task_id):
-                task = resolve_task(Path('/private/tmp/agenthub-tracetrial-source/Task')/task_id)
+                task = resolve_task((SOURCE / 'Task')/task_id)
                 budget = build_budget_plan(task_id, {'maxUserTurns': task.max_turns,
                     'maxToolCalls': task.max_tool_calls, 'maxWallTimeSeconds': task.max_wall_time_sec})
                 request = actor_request(budget)
@@ -189,7 +191,7 @@ class RequestValidationTests(unittest.TestCase):
 
     def run_mock_worker(self, *, timeout=False, observe=False, observer_failure=False, private_contract=True, task_id=None):
         task_id = task_id or (worker.TIMEOUT_TASK_ID if observe else worker.GOVERNANCE_TASK_ID)
-        task = resolve_task(Path('/private/tmp/agenthub-tracetrial-source/Task')/task_id)
+        task = resolve_task((SOURCE / 'Task')/task_id)
         observe = task_id in worker.PROCESS_OBSERVED_TASK_IDS
         budget = build_budget_plan(task_id,
             {'maxUserTurns': task.max_turns, 'maxToolCalls': task.max_tool_calls,

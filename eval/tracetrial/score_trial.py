@@ -13,7 +13,8 @@ from tracetrial_bench.llm_judge import JudgeRuntime
 from tracetrial_bench.score_config import load_score_sheet
 from tracetrial_bench.scoring import score_layout
 
-from .container_worker import GOVERNANCE_TASK_ID
+from .container_worker import GOVERNANCE_TASK_ID, MOUNTCHECK_TASK_ID
+from .judge_plan import PlannedJudgeRequester
 from .judge import (BoundedJudgeRequester, JUDGE_MODEL, JudgeRequestError, MAX_JUDGE_REQUESTS,
                     TOKEN_FIELDS, _api_url, _minimal_environment, judge_request_limits)
 
@@ -146,6 +147,9 @@ def score_retained_trial(
                      "environment": "minimal allowlist; provider credentials removed"},
     }
     (sidecars / "settings.json").write_text(json.dumps(_safe(settings, judge_key), indent=2) + "\n")
+    scoring_requester = (PlannedJudgeRequester(task=task, layout=layout, trace_summary=trace_summary,
+        requester=requester, plan_path=sidecars / 'judge-input-plan.json')
+        if task.task_id == MOUNTCHECK_TASK_ID else requester)
     outcome = None
     error = None
     try:
@@ -154,12 +158,14 @@ def score_retained_trial(
                                    invocation_report=invocation_report, simulator_evidence=None,
                                    harness="agenthub", model=str(actor_settings.get("model", JUDGE_MODEL)),
                                    timeout=verifier_timeout, judge_runtime=runtime,
-                                   judge_requester=requester)
+                                   judge_requester=scoring_requester)
     except Exception as exception:
         # Do not serialize arbitrary transport exception text: it can contain
         # request headers, credentials or private provider error bodies.
         error = {"type": type(exception).__name__,
                  "message": "Official scoring did not complete; inspect retained rule and judge artifacts."}
+    if isinstance(scoring_requester, PlannedJudgeRequester):
+        scoring_requester.finish(outcome is not None)
     rule_score = _read_json(Path(layout.artifacts_dir) / "verifier_output" / "score.json")
     combined_score = _read_json(Path(layout.artifacts_dir) / "llm_judge" / "combined_score.json")
     # A rubric interrupted by a budget/HTTP/parse failure has no full score.
