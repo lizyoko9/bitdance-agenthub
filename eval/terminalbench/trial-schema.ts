@@ -22,6 +22,9 @@ export const TrialRequestSchema = z.object({
 }).strict()
 
 export type TrialRequest = z.infer<typeof TrialRequestSchema>
+export type ConversationTrialRequest = TrialRequest & {
+  conversation?: { mode: 'fixed_turns'; turns: string[] }
+}
 
 function canonicalPath(target: string): string {
   try {
@@ -37,7 +40,9 @@ const contains = (parent: string, child: string): boolean => {
   return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
 }
 
-export function validateTrialRequest(input: unknown, schema: typeof TrialRequestSchema = TrialRequestSchema): TrialRequest {
+export function validateTrialRequest(input: unknown): TrialRequest
+export function validateTrialRequest<T extends TrialRequest>(input: unknown, schema: z.ZodType<T>): T
+export function validateTrialRequest(input: unknown, schema: z.ZodType<TrialRequest> = TrialRequestSchema): TrialRequest {
   const request = schema.parse(input)
   const cwd = realpathSync(request.cwd)
   if (!statSync(cwd).isDirectory()) throw new Error(`Task cwd is not a directory: ${cwd}`)

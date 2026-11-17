@@ -36,6 +36,7 @@ vi.mock('openai', async (importOriginal) => {
       }
     },
   }
+
 })
 vi.mock('@/server/tools/registry', () => ({
   toolRegistry: {
@@ -46,6 +47,7 @@ vi.mock('@/server/tools/registry', () => ({
 
 const scratch: string[] = []
 const pinnedTaskSource = process.env.AGENTHUB_TRACETRIAL_TEST_SOURCE ?? '/private/tmp/agenthub-tracetrial-source'
+const testPython = process.env.AGENTHUB_TRACETRIAL_TEST_PYTHON ?? 'python3'
 const safeEnvironment = (): NodeJS.ProcessEnv => ({
   NODE_ENV: process.env.NODE_ENV ?? 'test',
   ...Object.fromEntries(Object.entries(process.env).filter(([name]) =>
@@ -67,14 +69,14 @@ request = {'taskId': plan['taskId'], 'instruction': ${JSON.stringify(instruction
     'group': 'single', 'modelId': 'gpt-6-luna', 'outputDir': ${JSON.stringify(outputDir)},
     **{field: actor[field] for field in ('timeoutMs', 'maxTurns', 'maxToolCalls', 'requestLimits')}}
 print(json.dumps(request))`
-  const request: unknown = JSON.parse(execFileSync('python3', ['-c', script], {
+  const request: unknown = JSON.parse(execFileSync(testPython, ['-c', script], {
     cwd: path.resolve('.'), encoding: 'utf8', timeout: 10_000,
     env: { ...safeEnvironment(), PYTHONDONTWRITEBYTECODE: '1' },
   }))
   return { directory, instruction, request: validateTraceTrialRequest(request) }
 }
 
-function resolvedPinnedRequest(taskId: 'E6-timeout-error-channel-003' | 'L2-deploy-latency-001' | 'E8-mountcheck-exit-masked-003') {
+function resolvedPinnedRequest(taskId: 'E6-timeout-error-channel-003' | 'L2-deploy-latency-001' | 'E8-mountcheck-exit-masked-003' | 'E2-shard-stderr-003') {
   const directory = mkdtempSync(path.join(tmpdir(), 'agenthub-resolved-task-'))
   scratch.push(directory)
   const cwd = path.join(directory, 'workspace')
@@ -82,14 +84,14 @@ function resolvedPinnedRequest(taskId: 'E6-timeout-error-channel-003' | 'L2-depl
   const script = `import json,sys
 sys.path.insert(0, ${JSON.stringify(pinnedTaskSource)})
 from eval.tracetrial.run_trial import resolve_trial_task
-task, report, request = resolve_trial_task(${JSON.stringify(pinnedTaskSource)}, ${JSON.stringify(taskId)})
+task, report, request = resolve_trial_task(${JSON.stringify(pinnedTaskSource)}, ${JSON.stringify(taskId)}${taskId === 'E2-shard-stderr-003' ? ", workspace_setup_policy='e2-bin-ci-executable-v1'" : ''})
 assert report['status'] == 'supported', report['reasons']
 assert request['instruction'] == task.prompt
 print(json.dumps({'request': request, 'budgetPlan': report['budgetPlan'], 'runtime': report['declaredRuntime'], 'judge': report['judgeCoverage']}))`
-  const resolved = JSON.parse(execFileSync('python3', ['-B', '-c', script], {
+  const resolved = JSON.parse(execFileSync(testPython, ['-B', '-c', script], {
     cwd: path.resolve('.'), encoding: 'utf8', timeout: 10_000,
     env: { ...safeEnvironment(), PYTHONDONTWRITEBYTECODE: '1' },
-  })) as { request: Record<string, unknown>; budgetPlan: { coverage: { completeTaskTrajectory: boolean } }; runtime: { timeout_sec: number }; judge: { rubrics: number; worstCaseRequests: number } }
+  })) as { request: Record<string, unknown>; budgetPlan: { schemaVersion: number; actor: { userInputs: number }; coverage: { completeTaskTrajectory: boolean } }; runtime: { timeout_sec: number }; judge: { rubrics: number; worstCaseRequests: number; maxRequests: number } }
   return { ...resolved, request: validateTraceTrialRequest({ ...resolved.request, cwd, outputDir: path.join(directory, 'trial') }) }
 }
 
@@ -327,6 +329,102 @@ describe('task-derived TraceTrial budget propagation without model calls', () =>
       expect(sdk.clients.every((client) => client.provided && client.timeout === 2_400_000 && client.effectiveTimeout === 2_400_000)).toBe(true)
       expect(events.at(-1)).toMatchObject({ type: 'run.usage', usage: { inputTokens: 1410, outputTokens: 282 } })
       expect(profileServices.close).toHaveBeenCalledOnce()
+    },
+  )
+
+  it.skipIf(!existsSync(path.join(pinnedTaskSource, 'Task/E2-shard-stderr-003/task.yaml'))).each(['first', 'last'] as const)(
+    'shares the real E2 budget across ten SDK runs with all 140 tools in the %s input', async (allocation) => {
+      const { request, budgetPlan, runtime, judge } = resolvedPinnedRequest('E2-shard-stderr-003')
+      expect(request).toMatchObject({ timeoutMs: 2_400_000, maxToolCalls: 140, maxTurns: 141,
+        requestLimits: { maxRequests: 150, maxRequestBytes: 262144, maxTotalRequestBytes: 39321600, maxCompletionTokens: 8192 } })
+      expect(budgetPlan).toMatchObject({ schemaVersion: 3, actor: { userInputs: 10 }, coverage: { completeTaskTrajectory: true } })
+      expect(runtime.timeout_sec).toBe(1800)
+      expect(judge).toMatchObject({ rubrics: 0, maxRequests: 0, worstCaseRequests: 0 })
+      const turns = request.conversation!.turns
+      expect(turns).toHaveLength(10)
+      expect(turns[0]).toBe(request.instruction)
+      const observations: CustomRequestObservation[] = []
+      let inputIndex = 0
+      let perRunRequest = 0
+      let totalRequests = 0
+      tools.execute.mockImplementation(async () => ({ ok: true, value: { content: 'x'.repeat(64) } }))
+      fetchMock.mockImplementation(async () => {
+        perRunRequest++
+        return modelResponse(++totalRequests, inputIndex === (allocation === 'first' ? 0 : 9) && perRunRequest <= 140)
+      })
+      const profile = await createIsolatedProfile(request, (observation) => observations.push(observation), { benchmark: 'tracetrial' })
+      const adapter = profileServices.register.mock.calls[0][0] as CustomAgentAdapter
+      const events: StreamEvent[] = []
+      const input = (index: number): AdapterInput => ({
+        agentId: 'e2-agent', conversationId: 'e2-conversation', runId: `e2-run-${index}`,
+        workspacePath: request.cwd, prompt: turns[index] ?? 'one additional synthetic input', systemPrompt: 'Use the available test tool.',
+        apiKey: 'not-a-real-key', apiBaseUrl: null, modelId: request.modelId, toolNames: ['budget_probe'],
+        customConfig: { modelProvider: 'openai' },
+      })
+      try {
+        for (inputIndex = 0; inputIndex < turns.length; inputIndex++) {
+          perRunRequest = 0
+          for await (const event of adapter.stream(input(inputIndex), new AbortController().signal)) events.push(event)
+        }
+        const extra = async () => { for await (const event of adapter.stream(input(10), new AbortController().signal)) void event }
+        await expect(extra()).rejects.toThrow(/maximum HTTP requests reached/)
+      } finally {
+        profile.close()
+      }
+      expect(profileServices.register).toHaveBeenCalledOnce()
+      expect(fetchMock).toHaveBeenCalledTimes(150)
+      expect(tools.execute).toHaveBeenCalledTimes(140)
+      expect(events.filter((event) => event.type === 'tool.result')).toHaveLength(140)
+      expect(observations.filter((observation) => observation.status === 'completed')).toHaveLength(150)
+      expect(observations.slice(0, 150).map((observation) => observation.sequence)).toEqual(Array.from({ length: 150 }, (_, index) => index + 1))
+      expect(sdk.clients.slice(0, 150).every((client) => client.provided && client.timeout === 2_400_000)).toBe(true)
+      expect(Math.max(...observations.slice(0, 150).map((observation) => observation.bodyBytes))).toBeLessThanOrEqual(262144)
+      expect(observations.slice(0, 150).reduce((sum, observation) => sum + observation.bodyBytes, 0)).toBeLessThanOrEqual(39321600)
+    },
+  )
+
+  it.skipIf(!existsSync(path.join(pinnedTaskSource, 'Task/E2-shard-stderr-003/task.yaml')))(
+    'does not reset the real E2 tool quota at the next AgentRun', async () => {
+      const { request } = resolvedPinnedRequest('E2-shard-stderr-003')
+      let requestCount = 0
+      tools.execute.mockImplementation(async () => ({ ok: true, value: { content: 'x'.repeat(64) } }))
+      fetchMock.mockImplementation(async () => modelResponse(++requestCount, requestCount !== 141))
+      const profile = await createIsolatedProfile(request, () => {}, { benchmark: 'tracetrial' })
+      const adapter = profileServices.register.mock.calls[0][0] as CustomAgentAdapter
+      const drain = async (index: number) => {
+        for await (const event of adapter.stream({
+          agentId: 'e2-agent', conversationId: 'e2-conversation', runId: `e2-quota-${index}`,
+          workspacePath: request.cwd, prompt: request.conversation!.turns[index], systemPrompt: 'Use the available test tool.',
+          apiKey: 'not-a-real-key', apiBaseUrl: null, modelId: request.modelId, toolNames: ['budget_probe'],
+          customConfig: { modelProvider: 'openai' },
+        }, new AbortController().signal)) void event
+      }
+      try {
+        await drain(0)
+        await expect(drain(1)).rejects.toThrow(/maximum tool calls reached/)
+      } finally {
+        profile.close()
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(142)
+      expect(tools.execute).toHaveBeenCalledTimes(140)
+    },
+  )
+
+  it.skipIf(!existsSync(path.join(pinnedTaskSource, 'Task/E2-shard-stderr-003/task.yaml')))(
+    'rejects a task-mode E2 plan with 149 HTTP instead of clamping the ten-input trajectory', () => {
+      const script = `import json
+from eval.tracetrial.run_trial import resolve_trial_task
+_, report, request = resolve_trial_task(${JSON.stringify(pinnedTaskSource)}, 'E2-shard-stderr-003',
+    workspace_setup_policy='e2-bin-ci-executable-v1', overrides={'maxRequests':149})
+assert report['status'] == 'unsupported' and request is None
+assert any('maxRequests' in reason for reason in report['reasons'])
+print(json.dumps(report))`
+      const report = JSON.parse(execFileSync(testPython, ['-B', '-c', script], {
+        cwd: path.resolve('.'), encoding: 'utf8', timeout: 10_000,
+        env: { ...safeEnvironment(), PYTHONDONTWRITEBYTECODE: '1' },
+      })) as { status: string; modelCalls: number }
+      expect(report).toMatchObject({ status: 'unsupported', modelCalls: 0 })
+      expect(fetchMock).not.toHaveBeenCalled()
     },
   )
 

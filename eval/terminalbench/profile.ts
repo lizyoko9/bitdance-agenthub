@@ -17,6 +17,7 @@ export interface TrialRuntime extends TrialProfile {
   conversationId: string
   subscribe(listener: (event: StreamEvent) => void): () => void
   start(): Promise<{ runIds: string[] }>
+  send?(instruction: string): Promise<{ messageId: string; runIds: string[] }>
   approvePending(event: StreamEvent): void
   abort(runId: string): Promise<boolean>
 }
@@ -122,6 +123,11 @@ export async function loadTrialRuntime(
       start: () => conversations.sendMessage({
         conversationId: conversation.id,
         content: request.instruction,
+        mentionedAgentIds: single ? undefined : [profile.orchestratorId],
+      }),
+      send: (instruction) => conversations.sendMessage({
+        conversationId: conversation.id,
+        content: instruction,
         mentionedAgentIds: single ? undefined : [profile.orchestratorId],
       }),
       approvePending(event) {

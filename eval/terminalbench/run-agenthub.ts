@@ -4,11 +4,12 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import type { z } from 'zod'
 
 import { loadTrialRuntime, type TrialProfileOptions, type TrialRuntime } from './profile'
 import type { CustomRequestObservation } from './request-policy'
-import { classifyTrialTermination, executeTrial, type ExecutionResult } from './trial-execution'
-import { validateTrialRequest, type TrialRequest, type TrialRequestSchema } from './trial-schema'
+import { classifyTrialTermination, executeConversationTrial, executeTrial, type ConversationExecutionResult, type ExecutionResult } from './trial-execution'
+import { validateTrialRequest, type ConversationTrialRequest } from './trial-schema'
 
 const TOKEN_FIELDS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'reasoningTokens'] as const
 
@@ -44,7 +45,8 @@ export interface HeadlessTrialOptions extends TrialProfileOptions {
   sourceRevision?: string | null
 }
 
-export async function runHeadlessTrial(request: TrialRequest, options: HeadlessTrialOptions = {}) {
+export async function runHeadlessTrial(request: ConversationTrialRequest, options: HeadlessTrialOptions = {}) {
+  if (request.conversation && options.benchmark !== 'tracetrial') throw new Error('Fixed conversation requests require TraceTrial execution')
   mkdirSync(request.outputDir, { recursive: true })
   if (existsSync(path.join(request.outputDir, 'manifest.json'))) throw new Error('Trial output already contains a manifest; use a fresh output directory')
   const secrets = options.secrets ?? [process.env.OPENAI_API_KEY ?? '']
@@ -62,6 +64,8 @@ export async function runHeadlessTrial(request: TrialRequest, options: HeadlessT
     taskId: request.taskId,
     group: request.group,
     instructionSha256: createHash('sha256').update(request.instruction).digest('hex'),
+    ...(request.conversation ? { conversation: { mode: request.conversation.mode, plannedTurns: request.conversation.turns.length,
+      inputSha256: request.conversation.turns.map((turn) => createHash('sha256').update(turn).digest('hex')) } } : {}),
     agenthubCommit: commitId(),
     runtimePackageSha256: process.env.AGENTHUB_EVAL_PACKAGE_SHA256 ?? null,
     ...(traceTrial ? {} : { harborVersion: process.env.AGENTHUB_EVAL_HARBOR_VERSION ?? null }),
@@ -80,19 +84,30 @@ export async function runHeadlessTrial(request: TrialRequest, options: HeadlessT
   writeJson('manifest.json', manifest)
   writeFileSync(path.join(request.outputDir, 'requests.jsonl'), '')
   writeFileSync(path.join(request.outputDir, 'events.jsonl'), '')
+  if (request.conversation) writeFileSync(path.join(request.outputDir, 'conversation-turns.jsonl'), '')
   const startedAt = Date.now()
+  const deadline = performance.now() + request.timeoutMs
+  let nativeEventLine = 0
   let runtime: TrialRuntime | undefined
-  let execution: ExecutionResult = { runStatus: 'failed', terminationReason: 'error', rootRunIds: [], runs: [], allRunsSettled: false, timedOut: false, budgetExhausted: false }
+  let execution: ExecutionResult | ConversationExecutionResult = { runStatus: 'failed', terminationReason: 'error', rootRunIds: [], runs: [], allRunsSettled: false, timedOut: false, budgetExhausted: false,
+    ...(request.conversation ? { conversation: { plannedTurns: request.conversation.turns.length, completedTurns: 0, attemptedTurns: 0 } } : {}) }
   try {
     runtime = await (options.loadRuntime ?? loadTrialRuntime)(request, (observation) => {
       observations.push(observation)
       appendFileSync(path.join(request.outputDir, 'requests.jsonl'), `${serialize({ ...observation, parentRunId: parentRunIds.get(observation.runId) ?? null })}\n`)
     }, { benchmark: options.benchmark })
     writeJson('manifest.json', { ...manifest, dataDir: runtime.dataDir, conversationId: runtime.conversationId, workerIds: runtime.workerIds, orchestratorId: runtime.orchestratorId })
-    execution = await executeTrial(runtime, request.timeoutMs, (event) => {
+    const onEvent: Parameters<typeof executeTrial>[2] = (event) => {
       if (event.type === 'run.start') parentRunIds.set(event.runId, event.parentRunId)
       appendFileSync(path.join(request.outputDir, 'events.jsonl'), `${serialize(event)}\n`)
-    }, options.signal)
+      nativeEventLine++
+    }
+    execution = request.conversation
+      ? await executeConversationTrial(runtime, request.conversation.turns, onEvent, {
+        deadline, signal: options.signal, nativeEventLine: () => nativeEventLine,
+        onReceipt: (receipt) => appendFileSync(path.join(request.outputDir, 'conversation-turns.jsonl'), `${serialize(receipt)}\n`),
+      })
+      : await executeTrial(runtime, request.timeoutMs, onEvent, options.signal)
   } catch (failure) {
     execution.error = failure instanceof Error ? failure.message : String(failure)
     execution.budgetExhausted = execution.error.startsWith('budget_exhausted:')
@@ -119,11 +134,12 @@ export async function runHeadlessTrial(request: TrialRequest, options: HeadlessT
   return JSON.parse(serialize(result)) as typeof result
 }
 
-export async function runHeadlessCli(options: Pick<HeadlessTrialOptions, 'benchmark' | 'sourceRevision'> & { requestSchema?: typeof TrialRequestSchema } = {}): Promise<void> {
+export async function runHeadlessCli(options: Pick<HeadlessTrialOptions, 'benchmark' | 'sourceRevision'> & { requestSchema?: z.ZodType<ConversationTrialRequest> } = {}): Promise<void> {
   const { requestSchema, ...trialOptions } = options
   const { values } = parseArgs({ options: { request: { type: 'string' } }, strict: true })
   if (!values.request) throw new Error('Usage: run-agenthub.ts --request <trial.json>')
-  const request = validateTrialRequest(JSON.parse(readFileSync(values.request, 'utf8')), requestSchema)
+  const raw: unknown = JSON.parse(readFileSync(values.request, 'utf8'))
+  const request = requestSchema ? validateTrialRequest(raw, requestSchema) : validateTrialRequest(raw)
   if (!process.env.OPENAI_API_KEY?.trim()) throw new Error('OPENAI_API_KEY is required in the process environment')
   const controller = new AbortController()
   const stop = () => controller.abort()
