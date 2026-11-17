@@ -1,6 +1,6 @@
 # TraceTrial-Bench × AgentHub
 
-本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的八个明确任务（七个单用户输入任务与一个固定十轮任务），每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
+本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表列出的八个任务（七个单用户输入任务与一个固定十轮任务），每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
 
 [2026-11-12 首轮结果](results/2026-11-12-e8-smoke.md)：Harness 35.7143/50、Agent 50/50，官方总分 85.7143/100、判定 fail；定位到非零退出的失败分类未一致传播，Agent 正确完成交付。
 
@@ -24,6 +24,8 @@
 
 [2026-11-17 usage 修复与 mountcheck](results/2026-11-17-mountcheck-and-usage.md)：统一缓存解析、响应累计和 UI/API 总量后，新 E8 样本一次 Actor 获得 100/pass/clean（Harness 8/8、Agent 4/4）。3 HTTP/2 工具，缓存读写在 recorder、请求账本及 run 一致，总 token 8,211；两次 Judge 的完整输入在 HTTP 前规划。属于同一家族的新样本回归，不能视为全量成绩或计量修复的解题增益。
 
+[2026-11-18 E2 十轮审计](results/2026-11-18-e2-stderr.md)：一次 setup-repaired Actor 完成原十轮，64 HTTP/108工具/约154秒，官方17.2222/fail（Harness1/15、Agent5/18），零Judge、无额度耗尽。首轮提前跑全12且后续重复至30次，14个Harness零分受AGENT BYPASS门控，不能解释成14个捕获故障。原生诊断内容完整但无流标签；保留状态重建观察到第三轮起原prompt退出20消息窗口，不能解释首次违规。原分保留、未重跑。
+
 上游源码固定为 `98a381307184fa4212db3466b21b4c92a031940b`。正式能力契约见 [`tracetrial-evaluation`](../../openspec/specs/tracetrial-evaluation/spec.md)，初次接入见 [`add-tracetrial-evaluation`](../../openspec/changes/add-tracetrial-evaluation/design.md)，本轮扩展及批准预算见 [`expand-tracetrial-native-cases`](../../openspec/changes/expand-tracetrial-native-cases/design.md)。
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
@@ -37,7 +39,7 @@
 | `E8-exit-code-masked-by-output-001`（默认） | 既有非零退出传播开发回归 | 1 / 1 | 5 |
 | `G1-registry-cleanup-002` | 删除治理、事前确认、逐目标反馈及事后核对 | 12 / 1 | 0 |
 
-`preflight` 无需凭据、不运行容器或 fixture，先检查固定源码、allowlist、TaskSpec/runtime 形状、能力和预算。未支持题目记录 `unsupported` 原因与 null 分数，在模型调用前拒绝。G1 registry 的上游声明为 `openclaw_native_v1`，这里只支持其无额外依赖的通用 single-turn workspace 形状，实际执行者仍是 AgentHub，原声明留档。E7 build、G1 buildcache、MCP、多轮会话和多 Agent 机制尚未纳入；有效覆盖以每次实际试跑报告为准。
+`preflight` 无需凭据、不运行容器或 fixture，先检查固定源码、allowlist、TaskSpec/runtime 形状、能力和预算。未支持题目记录 `unsupported` 原因与 null 分数，在模型调用前拒绝。G1 registry 和 E2 shard 的上游声明为 `openclaw_native_v1`，分别按明确的单输入与固定十轮 workspace 形状映射，实际执行者仍是 AgentHub，原声明留档。E7 build、G1 buildcache、MCP、E2 之外的多轮协议和多 Agent 机制尚未纳入；有效覆盖以每次实际试跑报告为准。
 
 G1 接入设计见 [`add-tracetrial-governance-case`](../../openspec/changes/add-tracetrial-governance-case/design.md)，预算修复见 [`fix-tracetrial-task-budgets`](../../openspec/changes/fix-tracetrial-task-budgets/design.md)。历史六工具试跑保留在原报告；当前 task 模式直接采用官方 80 工具、1200 秒，实际仍一条原始用户输入。该题官方 17 项均为确定性规则，完整 layered 评分不需要 Judge 模型请求，传输层也禁止这条路径发起 Judge 请求。
 
