@@ -1,6 +1,6 @@
 # TraceTrial-Bench × AgentHub
 
-本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的七个单用户输入任务，每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
+本入口用于观察 AgentHub 的执行、工具反馈与验证机制。入口仅支持下表明确列出的八个明确任务（七个单用户输入任务与一个固定十轮任务），每次运行使用一个新容器和一个 `single` trial。它是项目自定义 AgentHub execution adapter 的集成试跑；实际结果单独留档，本文不构成已跑通或得分的证据。
 
 [2026-11-12 首轮结果](results/2026-11-12-e8-smoke.md)：Harness 35.7143/50、Agent 50/50，官方总分 85.7143/100、判定 fail；定位到非零退出的失败分类未一致传播，Agent 正确完成交付。
 
@@ -28,6 +28,7 @@
 
 | 可选任务 | 测量范围 | 用户轮次上限 / 实际输入 | LLM rubric 数 |
 |---|---|---|---:|
+| `E2-shard-stderr-003` | stderr 内容/来源与跨轮保留；明确的运行副本执行位修复 | 14 / 10 | 0 |
 | `E8-mountcheck-exit-masked-003` | E8新样本：非零退出/终态、post-tool反馈与usage回归 | 6 / 1 | 2 |
 | `L2-deploy-latency-001` | 已受理与下游确认的状态、晚确认对账及交付；真实归档/清理观测 | 14 / 1 | 2 |
 | `E6-timeout-error-channel-003` | 原生命令超时、失败/部分输出与 post-tool 反馈；隔离容器清理观测 | 6 / 1 | 4 |
@@ -215,3 +216,13 @@ E8-mountcheck-exit-masked-003 是新的 E8 回归样本，不扩大机制家族�
 该题 Agent 无 rubric，因此在首个 Judge HTTP 前可由已产出的官方规则结果、EvidenceFinder 与官方模板精确渲染两个完整 Harness prompt，核对实际每个 prompt/hash/body（含最多一次同 prompt 纠正），预检 peak 和 2*sum。默认 256KiB/2MiB/10HTTP/4096 输出/600 秒不扩大；不合适的证据明确 incomplete、0 Judge HTTP，不裁剪证据或自动改 guard。
 
 无模型 resolved-config 测试可用 AGENTHUB_TRACETRIAL_TEST_SOURCE 指向完整的固定 checkout；临时源码丢失时在新隔离目录恢复，缺源跳过不能当成已验证。实际源码与 installed Python package 的 hash 仍须一致。
+
+## E2 的固定十轮协议与明确环境修复
+
+已批准的 E2 接入范围为原始十条输入、同一会话、一次 Actor。TaskSpec ceiling14、140工具/2400秒；共享150 HTTP、256KiB单次/39,321,600 bytes累计、每次8192输出，maxTurns141是每个AgentRun上限。runtime的multi_turn/openclaw_native_v1/1800秒单独留档。原七题的v2预算、v1运行计划与单输入语义保留；E2采用带有序输入hash的v3预算及带workspaceSetup的v2运行计划。
+
+原bin/ci为Git100644/mode0644。仅已批准的e2-bin-ci-executable-v1政策允许在baseline前把运行副本改为0755；原checkout、内容、prompt和评分不改，保存实际hash/mode回执，无政策时unsupported。结果须标注setup-repaired custom execution。探针只检查解释器、权限与urandom可用，不执行fixture。
+
+十轮通过生产sendMessage依序执行，一次profile/SQLite/adapter与全局deadline；失败、中止、未闭合均停止后续输入。保持生产20条complete消息及公开内容的历史策略，不在评测中pin/replay隐藏工具结果。独立turn ledger支持唯一trace/run-*下的完整对话边界；只有全部真实根运行闭合才complete。仅E2允许将native合并output逐字别名为canonical content并标来源，不添加stdout/stderr标签或补正状态。
+
+E2的15 Harness和18 Agent规则原样执行，Judge HTTP为0。实现与无模型检查通过后才执行获批的一次真实试跑；此规格说明本身不是已跑通、已获分或性能提升的证据。详见openspec/changes/add-tracetrial-stderr-multiturn-case/design.md。

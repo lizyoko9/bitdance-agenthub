@@ -1,6 +1,6 @@
 ## 1. Approved contracts and narrow admission
 
-- [ ] 1.1 Obtain approval for the specified request/plan changes, copied-fixture mode repair and one bounded E2 Actor; synchronize capability and evaluation documentation in a separate specification commit.
+- [x] 1.1 Obtain approval for the specified request/plan changes, copied-fixture mode repair and one bounded E2 Actor; synchronize capability and evaluation documentation in a separate specification commit.
 - [ ] 1.2 Add only E2 fixed-ten-turn/openclaw profile admission, ordered input/source validation and explicit setup-policy selection; preserve all seven existing cases and default unsupported behavior for the original non-executable fixture.
 - [ ] 1.3 Implement backward-compatible v3 budgets/v2 setup-bearing envelopes and TraceTrial-only conversation schema, keeping per-run141 distinct from shared150 HTTP/140 tools/2400 seconds/39321600 bytes.
 
