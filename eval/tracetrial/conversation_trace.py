@@ -92,6 +92,8 @@ def normalize_conversation_trace(*, task, layout, native_events_path, native_res
     raw_lines = event_data.splitlines(keepends=True) if event_data is not None else []
     starts, ends = {}, {}
     first, last = None, None
+    shared_receipt_diagnostics = list(diagnostics)
+    receipt_diagnostics = {}
 
     def require(condition, detail):
         if not condition:
@@ -107,6 +109,7 @@ def normalize_conversation_trace(*, task, layout, native_events_path, native_res
 
     expected_type, expected_index = 'conversation.start', 1
     for record in ledger:
+        receipt_diagnostic_start = len(diagnostics)
         line, row = record
         kind, index = row.get('type'), row.get('index')
         require(row.get('schemaVersion') == 1 and type(row.get('schemaVersion')) is int
@@ -148,9 +151,26 @@ def normalize_conversation_trace(*, task, layout, native_events_path, native_res
             expected_type = None
         else:
             require(False, f'Unknown controller receipt at line {line}')
+        errors = diagnostics[receipt_diagnostic_start:]
+        if kind in ('turn.start', 'turn.end') and _integer(index, 1) and index <= 10:
+            receipt_diagnostics.setdefault(index, []).extend(errors)
+        else:
+            shared_receipt_diagnostics.extend(errors)
+    boundary_diagnostic_start = len(diagnostics)
     require(first is not None and last is not None, 'Controller conversation boundaries are missing')
     require(set(starts) == set(ends) and sorted(starts) == list(range(1, len(starts) + 1)),
             'Turn receipts are missing, duplicated or noncontiguous')
+    if last is not None:
+        final = last[1]
+        reported_completed = sum(row.get('runStatus') == 'complete' and row.get('terminationReason') == 'completed'
+            and row.get('allRunsSettled') is True and row.get('timedOut') is False
+            and row.get('budgetExhausted') is False and not row.get('error') for _, row in ends.values())
+        require(type(final.get('completedTurns')) is int and final['completedTurns'] == reported_completed
+                and type(final.get('attemptedTurns')) is int and final['attemptedTurns'] == len(starts),
+                'Controller reported counts disagree with its own turn receipts')
+        for key in ('runStatus', 'terminationReason', 'allRunsSettled'):
+            require(_equal(final.get(key), result.get(key)), 'Controller final ' + key + ' differs from native result')
+    shared_receipt_diagnostics.extend(diagnostics[boundary_diagnostic_start:])
     if first is not None:
         controller('conversation_started', first)
     seen_users, seen_runs, seen_calls, seen_messages = set(), set(), set(), set()
@@ -246,7 +266,8 @@ def normalize_conversation_trace(*, task, layout, native_events_path, native_res
                 event.pop(key, None)
             writer.write('native_event' if kind in ('run_started', 'run_finished', 'run_failed') else kind,
                          conversation_turn=index, **event)
-        turn_diagnostics = diagnostics[turn_diagnostic_start:]
+        turn_diagnostics = [*shared_receipt_diagnostics, *receipt_diagnostics.get(index, []),
+                            *diagnostics[turn_diagnostic_start:]]
         normal = (not turn_diagnostics and validation['trace_complete'] is True and user_ok and root_ok
                   and finish.get('runStatus') == 'complete' and finish.get('terminationReason') == 'completed'
                   and finish.get('allRunsSettled') is True and finish.get('timedOut') is False
@@ -258,6 +279,7 @@ def normalize_conversation_trace(*, task, layout, native_events_path, native_res
         if isinstance(finish.get('runs'), list):
             all_runs.extend(finish['runs'])
         turn_summaries.append({'index': index, 'complete': normal, 'diagnostics': turn_diagnostics,
+            'native_lifecycle_complete': validation['trace_complete'],
             'summary_path': validation['summary_path'],
             'controller_source': {'path': str(ledger_path.resolve()), 'start_line': start_record[0], 'end_line': end_record[0]}})
         controller('conversation_turn_finished', end_record)

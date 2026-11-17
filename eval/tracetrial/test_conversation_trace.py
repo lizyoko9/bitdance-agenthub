@@ -277,6 +277,50 @@ class ConversationTraceTests(unittest.TestCase):
                 self.assertEqual(ledger[-1]['completedTurns'], 10)
                 self.assertEqual(ledger[8]['runStatus'], 'complete')
 
+    def test_receipt_prevalidation_errors_invalidate_local_verified_completion(self):
+        def wrong_start_hash(native, ledger, result):
+            ledger[3]['instructionSha256'] = '0' * 64
+        def wrong_end_hash(native, ledger, result):
+            ledger[4]['instructionSha256'] = '0' * 64
+        def invalid_schema(native, ledger, result):
+            ledger[3]['schemaVersion'] = 1.0
+        def invalid_time(native, ledger, result):
+            ledger[4]['timestamp'] = None
+        def reordered_receipts(native, ledger, result):
+            ledger[3], ledger[4] = ledger[4], ledger[3]
+        def duplicate_receipt(native, ledger, result):
+            ledger.insert(4, copy.deepcopy(ledger[3]))
+        for mutation in (wrong_start_hash, wrong_end_hash, invalid_schema, invalid_time,
+                         reordered_receipts, duplicate_receipt):
+            with self.subTest(mutation=mutation.__name__):
+                _, summary, _, _, ledger, _ = self.normalize(mutation)
+                second = summary['conversation']['turn_summaries'][1]
+                self.assertFalse(summary['trace_complete'])
+                self.assertLess(summary['conversation']['turns_completed'], 10)
+                self.assertFalse(second['complete'])
+                self.assertTrue(second['diagnostics'])
+                self.assertTrue(second['native_lifecycle_complete'])
+                self.assertEqual(ledger[-1]['completedTurns'], 10)
+
+    def test_unattributable_conversation_receipt_errors_block_all_verified_turns(self):
+        def wrong_conversation(native, ledger, result):
+            ledger[0]['conversationId'] = 'foreign-conversation'
+        def unknown_receipt(native, ledger, result):
+            ledger.insert(1, {'type': 'unknown', 'schemaVersion': 1, 'timestamp': 1735689600000})
+        def missing_boundary(native, ledger, result):
+            ledger.pop()
+        def inconsistent_reported_count(native, ledger, result):
+            ledger[-1]['completedTurns'] = 9
+        for mutation in (wrong_conversation, unknown_receipt, missing_boundary, inconsistent_reported_count):
+            with self.subTest(mutation=mutation.__name__):
+                _, summary, _, _, _, _ = self.normalize(mutation)
+                self.assertFalse(summary['trace_complete'])
+                self.assertEqual(summary['conversation']['turns_completed'], 0)
+                self.assertTrue(all(not turn['complete'] and turn['diagnostics']
+                                    for turn in summary['conversation']['turn_summaries']))
+                self.assertTrue(all(turn['native_lifecycle_complete']
+                                    for turn in summary['conversation']['turn_summaries']))
+
     def test_unexpected_e2_judge_callback_is_prohibited_without_transport(self):
         layout, summary, _, _, _, _ = self.normalize()
         def official(**kwargs):
@@ -299,6 +343,9 @@ class ConversationTraceTests(unittest.TestCase):
             with self.subTest(metadata=metadata):
                 _, summary, _, _, _, _ = self.normalize(actor=metadata)
                 self.assertFalse(summary['trace_complete'])
+                self.assertEqual(summary['conversation']['turns_completed'], 10)
+                self.assertTrue(all(turn['complete'] and turn['native_lifecycle_complete']
+                                    for turn in summary['conversation']['turn_summaries']))
 
 
 if __name__ == '__main__':
