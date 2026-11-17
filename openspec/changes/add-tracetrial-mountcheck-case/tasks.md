@@ -13,4 +13,4 @@
 - [x] 3.1 After the usage fix summary, commit reviewed runtime/controller sources, validate new isolated source/packages and build one immutable Linux runtime with a no-model dependency probe.
 - [x] 3.2 Run one fresh Luna/none Actor and complete both official rubrics under declared budgets without automatic rerun, preserving original task/scoring/native payloads.
 - [x] 3.3 Independently compare actual known provider/request/message/run cache counts and total semantics, source integrity, feedback/terminal/probe fidelity, scores, limits and unknown values.
-- [ ] 3.4 Report the fix and new sample result separately from mechanism-coverage/performance claims, complete checks and merge locally without pushing.
+- [x] 3.4 Report the fix and new sample result separately from mechanism-coverage/performance claims, complete checks and merge locally without pushing.
