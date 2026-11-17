@@ -31,4 +31,4 @@ Actual context audit verifies all input/message/root hashes and reconstructs ori
 
 All129new original files remain unchanged;14official task files,124runtime source files and14controller files match provenance. Historical9trials/866original files remain unchanged. Known credential and common-token-pattern scan has no findings within its limited scope. Cleanup is supported by the retained successful removal receipt; audits did not restart Docker or execute the fixture.
 
-Full report: eval/tracetrial/results/2026-11-18-e2-stderr.md. Actual model/fixture calls ended with this one trial; no subsequent paid call, new production fix or leaderboard claim is included. Local reviewed merge status is recorded after report review; no push is performed.
+Full report: eval/tracetrial/results/2026-11-18-e2-stderr.md. Actual model/fixture calls ended with this one trial; no subsequent paid call, new production fix or leaderboard claim is included. After independent report review, local main was fast-forwarded from c00a7c1 to a4a71d6. The original four untracked paths were excluded and preserved; no push was performed.

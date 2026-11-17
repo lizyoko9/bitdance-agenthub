@@ -24,4 +24,4 @@
 
 - [x] 4.1 After the approved setup and green checks, run exactly one fresh Luna/none Actor using the existing authorized OpenAI credential, with shared declared limits and no automatic retries or reruns; complete unchanged deterministic layered scoring with zero Judge HTTP.
 - [x] 4.2 Independently audit original task/mode/byte hashes, setup receipt, ordered ten-turn/native/canonical/consumer evidence, actual context/stream behavior, provider/run/message usage and raw/effective scores without modifying the original trial.
-- [ ] 4.3 Report repaired custom execution, payload/provenance/retention/Agent outcomes and apparatus/scorer limitations separately, preserve earlier trials, complete local reviewed merge and do not push.
+- [x] 4.3 Report repaired custom execution, payload/provenance/retention/Agent outcomes and apparatus/scorer limitations separately, preserve earlier trials, complete local reviewed merge and do not push.
