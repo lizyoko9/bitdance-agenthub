@@ -21,4 +21,4 @@ Three requests reported input 8,056, output 155, cache-read 5,212 and cache-writ
 
 Official raw/effective scores were both 100/pass (Harness 8/8, Agent 4/4), but there was no paired same-task pre-fix trial. This supports the observed accounting fix and E8 feedback regression, not a claim that accounting raised task performance. Unknown historical values, billing accuracy, UI live rendering and public usage emission on all abort/error paths were not established.
 
-Full report: eval/tracetrial/results/2026-11-17-mountcheck-and-usage.md. Local fast-forward merge is recorded after final report review; no push is authorized or performed.
+Full report: eval/tracetrial/results/2026-11-17-mountcheck-and-usage.md. After final report review, local main was fast-forwarded from 7940a02 to b3727b9. The original four untracked paths were excluded and preserved; no push was performed.

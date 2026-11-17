@@ -13,4 +13,4 @@
 
 - [x] 3.1 Reconstruct the retained L2 normalized usage observations with explicit provenance, preserve original hashes, run appropriate checks and independent review.
 - [x] 3.2 Synchronize detailed/capability specs, commit the fix separately and explain the root causes and key code before the real case trial.
-- [ ] 3.3 Record actual post-fix evidence and limitations, then merge reviewed work locally without pushing.
+- [x] 3.3 Record actual post-fix evidence and limitations, then merge reviewed work locally without pushing.
