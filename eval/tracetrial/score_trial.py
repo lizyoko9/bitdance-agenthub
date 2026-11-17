@@ -13,7 +13,7 @@ from tracetrial_bench.llm_judge import JudgeRuntime
 from tracetrial_bench.score_config import load_score_sheet
 from tracetrial_bench.scoring import score_layout
 
-from .container_worker import GOVERNANCE_TASK_ID, MOUNTCHECK_TASK_ID
+from .container_worker import MOUNTCHECK_TASK_ID, STDERR_TASK_ID, ZERO_RUBRIC_TASK_IDS
 from .judge_plan import PlannedJudgeRequester
 from .judge import (BoundedJudgeRequester, JUDGE_MODEL, JudgeRequestError, MAX_JUDGE_REQUESTS,
                     TOKEN_FIELDS, _api_url, _minimal_environment, judge_request_limits)
@@ -71,7 +71,7 @@ class NoModelJudgeRequester:
         self.rejection_reason = None
         (self.output_dir / "settings.json").write_text(json.dumps({
             "mode": "official_zero_rubrics", "maxRequests": 0, "transportProhibited": True,
-            "reason": "The approved governance score sheets declare no LLM rubric."}, indent=2) + "\n")
+            "reason": "The approved task score sheets declare no LLM rubric."}, indent=2) + "\n")
         (self.output_dir / "requests.jsonl").write_text("")
         self._persist_summary()
 
@@ -115,9 +115,11 @@ def score_retained_trial(
     sheets = [load_score_sheet(task.scoring.harness_score_path, expected_layer="harness"),
               load_score_sheet(task.scoring.agent_score_path, expected_layer="agent")]
     rubric_count = sum(len(sheet.rubric_items) for sheet in sheets)
-    no_model_judge = task.task_id == GOVERNANCE_TASK_ID
+    no_model_judge = task.task_id in ZERO_RUBRIC_TASK_IDS
     if no_model_judge and rubric_count:
-        raise ValueError("The approved zero-Judge governance task must declare zero LLM rubrics")
+        raise ValueError("The approved zero-Judge task must declare zero LLM rubrics")
+    if task.task_id == STDERR_TASK_ID and [len(sheet.rule_items) for sheet in sheets] != [15, 18]:
+        raise ValueError("The approved E2 task must retain fifteen Harness and eighteen Agent rules")
     if not isinstance(judge_key, str) or (not no_model_judge and not judge_key):
         raise ValueError("An in-memory judge credential is required for rubric scoring")
     _api_url(judge_base_url)

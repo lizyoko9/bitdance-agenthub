@@ -13,6 +13,7 @@ from tracetrial_bench.task_resolver import resolve_task
 
 from . import run_trial as driver
 from .run_trial import actor_request, checked_source, directory_hashes, docker_environment, verify_build_files, TASK_ID
+from .workspace_setup import E2_SETUP, E2_SETUP_POLICY
 
 
 SOURCE = Path(os.environ.get('AGENTHUB_TRACETRIAL_TEST_SOURCE', '/private/tmp/agenthub-tracetrial-source'))
@@ -272,12 +273,69 @@ class DriverContractTests(unittest.TestCase):
     def test_preflight_admits_only_allowlisted_pinned_tasks_without_a_key_or_docker(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(driver, 'docker') as docker:
             for task_id in driver.APPROVED_TASK_IDS:
-                report = driver.preflight_task(SOURCE, task_id)
+                report = driver.preflight_task(SOURCE, task_id,
+                    **({'workspace_setup_policy': E2_SETUP_POLICY} if task_id == driver.STDERR_TASK_ID else {}))
                 self.assertEqual(report['taskId'], task_id)
                 self.assertEqual(report['status'], 'supported')
                 self.assertIsNone(report['score'])
                 self.assertEqual(report['modelCalls'], 0)
             docker.assert_not_called()
+
+    def test_e2_run_plan_binds_setup_and_ordered_budget_with_strict_version_compatibility(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(driver, 'docker') as docker:
+            path = self.plan_file(folder, driver.STDERR_TASK_ID, workspace_setup_policy=E2_SETUP_POLICY)
+            original = driver.read_budget_file(path)
+            self.assertEqual(original['schemaVersion'], 'agenthub_tracetrial_run_plan_v2')
+            self.assertEqual(original['workspaceSetup'], E2_SETUP)
+            self.assertEqual(original['budgetPlan']['schemaVersion'], 3)
+            self.assertEqual(original['sourceTaskHashes']['workspace/bin/ci'], E2_SETUP['sha256'])
+            for mutation in ('path', 'mode', 'hash', 'version', 'removed', 'extra'):
+                with self.subTest(mutation=mutation):
+                    changed = json.loads(json.dumps(original))
+                    if mutation == 'path':
+                        changed['workspaceSetup']['path'] = 'bin/other'
+                    elif mutation == 'mode':
+                        changed['workspaceSetup']['targetMode'] = '0777'
+                    elif mutation == 'hash':
+                        changed['sourceTaskHashes']['workspace/bin/ci'] = '0' * 64
+                    elif mutation == 'version':
+                        changed['schemaVersion'] = 'agenthub_tracetrial_run_plan_v1'
+                    elif mutation == 'removed':
+                        changed.pop('workspaceSetup')
+                    else:
+                        changed['workspaceSetup']['extra'] = True
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaises(ValueError):
+                        driver.read_budget_file(path)
+            docker.assert_not_called()
+
+    def test_e2_copy_mode_receipt_precedes_measured_baseline_and_actor_start(self):
+        import stat
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            plan = self.plan_file(root, driver.STDERR_TASK_ID, workspace_setup_policy=E2_SETUP_POLICY)
+            context = root/'context'
+            context.mkdir()
+            (context/'build-manifest.json').write_text(json.dumps({'runtime': {'agenthubCommit': 'fixture'}}))
+            (context/'image.json').write_text(json.dumps({'id': 'sha256:fixture'}))
+            output = root/'trial'
+            def inspect_baseline(workspace, baseline):
+                self.assertEqual(stat.S_IMODE((workspace/'bin/ci').stat().st_mode), 0o755)
+                receipt = json.loads((output/'artifacts/workspace-setup.json').read_text())
+                self.assertEqual(receipt['status'], 'completed')
+                self.assertEqual(receipt['source']['mode'], '0644')
+                self.assertEqual(receipt['after']['mode'], '0755')
+                raise RuntimeError('stop after verifying baseline ordering')
+            with patch.dict(os.environ, {'OPENAI_API_KEY': 'fixture-only-key'}), \
+                 patch.object(driver, 'verify_build_files'), patch.object(driver, 'verify_runtime_sources'), \
+                 patch.object(driver, 'docker', return_value=SimpleNamespace(stdout='[{"Id":"sha256:fixture"}]')) as docker, \
+                 patch('tracetrial_bench.workspace.snapshot_workspace', side_effect=inspect_baseline):
+                with self.assertRaisesRegex(RuntimeError, 'baseline ordering'):
+                    driver.run_trial(source=SOURCE, output=output, context=context, image='fixture',
+                        actor_proxy='', judge_proxy='', task_id=driver.STDERR_TASK_ID, budget_file=plan)
+                docker.assert_called_once_with('image', 'inspect', 'fixture')
+            self.assertFalse((output/'artifacts/actor-started.json').exists())
 
     def test_changed_host_trace_or_scoring_controller_is_rejected_before_execution(self):
         required = {'eval/tracetrial/trace_adapter.py', 'eval/tracetrial/score_trial.py',

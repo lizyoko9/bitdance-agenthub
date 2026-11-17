@@ -1,14 +1,44 @@
 import copy
 import unittest
 
-from .budget_contract import (MAX_TIMER_MS, build_budget_plan, budget_plan_digest,
-                              validate_budget_plan)
+from .budget_contract import (MAX_TIMER_MS, STDERR_TASK_ID, build_budget_plan, budget_plan_digest,
+                              conversation_from_turns, validate_budget_plan)
 
 
 G1 = {'maxUserTurns': 12, 'maxToolCalls': 80, 'maxWallTimeSeconds': 1200}
 
 
 class BudgetContractTests(unittest.TestCase):
+    def test_e2_covers_ten_fixed_inputs_without_reinterpreting_fourteen_as_extra_messages(self):
+        fixed = conversation_from_turns([f'original input {index}' for index in range(10)])
+        ceilings = {'maxUserTurns': 14, 'maxToolCalls': 140, 'maxWallTimeSeconds': 2400}
+        budget = build_budget_plan(STDERR_TASK_ID, ceilings, conversation=fixed)
+        self.assertEqual(budget['schemaVersion'], 3)
+        self.assertEqual(budget['conversation'], fixed)
+        self.assertEqual(budget['actor'], {'userInputs': 10, 'timeoutMs': 2400000,
+            'maxToolCalls': 140, 'maxTurns': 141, 'requestLimits': {'maxRequests': 150,
+            'maxRequestBytes': 262144, 'maxTotalRequestBytes': 39321600, 'maxCompletionTokens': 8192}})
+        self.assertEqual(validate_budget_plan(budget, conversation=fixed), budget)
+        for overrides in ({'maxRequests': 149}, {'maxTurns': 140}, {'maxTotalRequestBytes': 36962304}):
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, 'does not cover'):
+                build_budget_plan(STDERR_TASK_ID, ceilings, conversation=fixed, overrides=overrides)
+        changed = {**fixed, 'turnSha256': list(reversed(fixed['turnSha256']))}
+        with self.assertRaisesRegex(ValueError, 'original ordered'):
+            validate_budget_plan(budget, conversation=changed)
+        for invalid in (None, {'mode': 'fixed_turns', 'turnSha256': fixed['turnSha256'][:9]},
+                        {'mode': 'single_turn', 'turnSha256': fixed['turnSha256']},
+                        {'mode': 'fixed_turns', 'turnSha256': ['invalid'] * 10}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                build_budget_plan(STDERR_TASK_ID, ceilings, conversation=invalid)
+        with self.assertRaises(ValueError):
+            build_budget_plan('legacy-task', ceilings, conversation=fixed)
+
+    def test_fixed_turn_hashing_requires_the_whole_valid_original_sequence(self):
+        for invalid in ([], ['one'] * 9, ['one'] * 11, ['one'] * 9 + [' '],
+                        ['one'] * 9 + [1], ['one'] * 9 + ['\ud800']):
+            with self.subTest(invalid=repr(invalid)), self.assertRaises(ValueError):
+                conversation_from_turns(invalid)
+
     def test_g1_covers_eighty_tools_and_a_final_model_response_without_old_bottlenecks(self):
         plan = build_budget_plan('G1-registry-cleanup-002', G1)
         self.assertEqual(plan['actor'], {'userInputs': 1, 'timeoutMs': 1_200_000,

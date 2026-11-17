@@ -8,7 +8,7 @@ from harness_tracer.summary import build_summary
 from harness_tracer.writer import EventWriter
 from tracetrial_bench.execution_capabilities import persist_execution_probe_evidence
 
-from .container_worker import MOUNTCHECK_TASK_ID, PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
+from .container_worker import MOUNTCHECK_TASK_ID, PROCESS_OBSERVED_TASK_IDS, STDERR_TASK_ID, TIMEOUT_TASK_ID
 
 
 CAPABILITIES = ("native_exec_v1", "post_tool_v1")
@@ -315,6 +315,18 @@ def _identifier(event: dict, key: str) -> str | None:
 
 def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
                             native_result_path: Path, actor_metadata: dict) -> dict:
+    if task.task_id == STDERR_TASK_ID:
+        from .conversation_trace import normalize_conversation_trace
+        return normalize_conversation_trace(task=task, layout=layout,
+            native_events_path=native_events_path, native_result_path=native_result_path,
+            actor_metadata=actor_metadata)
+    return _normalize_single_trace(task=task, layout=layout, native_events_path=native_events_path,
+        native_result_path=native_result_path, actor_metadata=actor_metadata)
+
+
+def _normalize_single_trace(*, task, layout, native_events_path: Path,
+                            native_result_path: Path, actor_metadata: dict,
+                            require_process_success: bool = True) -> dict:
     trace_dir = layout.artifacts_dir / "trace" / "agenthub"
     trace_dir.mkdir(parents=True, exist_ok=False)
     diagnostics = []
@@ -549,8 +561,9 @@ def normalize_agenthub_trace(*, task, layout, native_events_path: Path,
     native_complete = len(root_ends) == 1 and root_ends[0].get("status") == "complete"
     exit_code = actor_metadata.get("exit_code")
     timed_out = actor_metadata.get("timed_out") is True or result.get("timedOut") is True
+    process_ok = not require_process_success or type(exit_code) is int and exit_code == 0
     finished = (not diagnostics and native_complete and result.get("runStatus") == "complete"
-                and type(exit_code) is int and exit_code == 0 and not timed_out
+                and process_ok and not timed_out
                 and result.get("terminationReason") == "completed" and not result.get("error")
                 and result.get("budgetExhausted") is not True)
     # A native end alone cannot establish completeness before all evidence is validated.
@@ -617,5 +630,5 @@ def emit_execution_evidence(task, layout, summary):
             raise ValueError('E6 timeout observer apparatus did not produce official helper evidence')
         _project_timeout_observations(Path(evidence), summary)
     summary["execution_probe_evidence"] = evidence
-    _write_json(layout.artifacts_dir / "trace" / "agenthub" / "summary.json", summary)
+    _write_json(Path(summary['summary_path']), summary)
     return evidence

@@ -8,7 +8,9 @@ from unittest.mock import patch
 from tracetrial_bench.task_resolver import resolve_task
 from tracetrial_bench.types import ExecutionProbeSpec
 
-from .container_worker import APPROVED_TASK_IDS, CONFIRMATION_TASK_ID, GOVERNANCE_TASK_ID, MOUNTCHECK_TASK_ID, PROCESS_OBSERVED_TASK_IDS, TIMEOUT_TASK_ID
+from .container_worker import (APPROVED_TASK_IDS, CONFIRMATION_TASK_ID, GOVERNANCE_TASK_ID, MOUNTCHECK_TASK_ID,
+                               PROCESS_OBSERVED_TASK_IDS, STDERR_TASK_ID, TIMEOUT_TASK_ID, ZERO_RUBRIC_TASK_IDS)
+from .workspace_setup import E2_SETUP_POLICY
 from .budget_contract import build_budget_plan, budget_plan_digest
 from .task_admission import actor_request, actor_settings, admit_task, task_budget_values
 
@@ -21,7 +23,8 @@ class TaskAdmissionTests(unittest.TestCase):
         self.task = resolve_task(SOURCE/'Task'/'E8-exit-code-masked-by-output-001')
 
     def test_all_approved_tasks_preserve_one_user_input_and_independent_internal_turns(self):
-        for task_id, user_ceiling, rubrics in zip(APPROVED_TASK_IDS, (6, 6, 1, 12, 6, 14, 6), (4, 2, 5, 0, 4, 2, 2), strict=True):
+        single_tasks = [task_id for task_id in APPROVED_TASK_IDS if task_id != STDERR_TASK_ID]
+        for task_id, user_ceiling, rubrics in zip(single_tasks, (6, 6, 1, 12, 6, 14, 6), (4, 2, 5, 0, 4, 2, 2), strict=True):
             with self.subTest(task=task_id):
                 task = resolve_task(SOURCE/'Task'/task_id)
                 report, request = admit_task(task)
@@ -116,15 +119,46 @@ class TaskAdmissionTests(unittest.TestCase):
         for task_id in APPROVED_TASK_IDS:
             with self.subTest(task=task_id):
                 task = resolve_task(SOURCE / 'Task' / task_id)
-                report, _ = admit_task(task)
+                report, _ = admit_task(task, **({'workspace_setup_policy': E2_SETUP_POLICY} if task_id == STDERR_TASK_ID else {}))
                 self.assertEqual(report['status'], 'supported')
                 self.assertEqual(report['judgeLimits'], {
-                    'maxRequests': 0 if task_id == GOVERNANCE_TASK_ID else 10,
+                    'maxRequests': 0 if task_id in ZERO_RUBRIC_TASK_IDS else 10,
                     'maxRequestBytes': 512 * 1024 if task_id == CONFIRMATION_TASK_ID else 256 * 1024,
                     'maxTotalRequestBytes': 2 * 1024 * 1024, 'maxCompletionTokens': 4096,
                     'wallSeconds': 600.0, 'callSeconds': 60.0})
                 if task_id == CONFIRMATION_TASK_ID:
                     self.assertEqual(report['judgeCoverage'], {'rubrics': 2, 'maxRequests': 10, 'worstCaseRequests': 4})
+
+    def test_e2_requires_explicit_setup_and_preserves_ten_original_inputs_and_shared_budget(self):
+        task = resolve_task(SOURCE / 'Task' / STDERR_TASK_ID)
+        report, request = admit_task(task)
+        self.assertEqual(report['status'], 'unsupported')
+        self.assertIsNone(request)
+        self.assertTrue(any('non-executable' in reason for reason in report['reasons']))
+        report, request = admit_task(task, workspace_setup_policy=E2_SETUP_POLICY)
+        self.assertEqual(report['status'], 'supported', report['reasons'])
+        original = json.loads((task.task_dir / 'turns.json').read_text())['turns']
+        self.assertEqual(request['conversation'], {'mode': 'fixed_turns', 'turns': original})
+        self.assertEqual(request['instruction'], original[0])
+        self.assertEqual((len(original), task.max_turns, request['maxTurns']), (10, 14, 141))
+        self.assertEqual(request['requestLimits'], {'maxRequests': 150, 'maxRequestBytes': 262144,
+            'maxTotalRequestBytes': 39321600, 'maxCompletionTokens': 8192})
+        self.assertEqual(report['effectiveActor']['userTurns'], 10)
+        self.assertEqual(report['effectiveActor']['maxTurnsScope'], 'per_run')
+        self.assertEqual(report['effectiveActor']['timeoutSeconds'], 2400)
+        self.assertEqual(report['declaredRuntime']['timeout_sec'], 1800)
+        self.assertEqual(report['judgeCoverage'], {'rubrics': 0, 'maxRequests': 0, 'worstCaseRequests': 0})
+        self.assertNotIn('processObservation', report['effectiveActor'])
+        for overrides in ({'maxRequests': 149}, {'maxToolCalls': 6}, {'timeoutMs': 120000}):
+            with self.subTest(overrides=overrides):
+                rejected, _ = admit_task(task, workspace_setup_policy=E2_SETUP_POLICY, overrides=overrides)
+                self.assertEqual(rejected['status'], 'unsupported')
+                self.assertTrue(any('does not cover' in reason for reason in rejected['reasons']))
+        stale = json.loads(json.dumps(report['budgetPlan']))
+        stale['conversation']['turnSha256'].reverse()
+        rejected, _ = admit_task(task, workspace_setup_policy=E2_SETUP_POLICY, budget_plan=stale)
+        self.assertEqual(rejected['status'], 'unsupported')
+        self.assertTrue(any('original ordered inputs' in reason for reason in rejected['reasons']))
 
     def test_confirmation_cannot_borrow_timeout_capability_or_use_the_previous_task_ceiling(self):
         task = resolve_task(SOURCE/'Task'/CONFIRMATION_TASK_ID)

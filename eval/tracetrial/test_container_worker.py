@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 from tracetrial_bench.task_resolver import resolve_task
 
 from . import container_worker as worker
-from .budget_contract import build_budget_plan, budget_plan_digest
+from .budget_contract import build_budget_plan, budget_plan_digest, conversation_from_turns
 
 
 SOURCE = Path(os.environ.get('AGENTHUB_TRACETRIAL_TEST_SOURCE', '/private/tmp/agenthub-tracetrial-source'))
@@ -29,10 +29,13 @@ def plan(*, task_id=worker.GOVERNANCE_TASK_ID, mode='task', overrides=None):
 def actor_request(budget_plan=None, **overrides):
     budget = plan() if budget_plan is None else budget_plan
     actor = budget['actor']
-    return {'taskId': budget['taskId'], 'instruction': 'Complete the fixture task',
+    fixed = json.loads((SOURCE/'Task'/worker.STDERR_TASK_ID/'turns.json').read_text())['turns'] \
+        if budget['taskId'] == worker.STDERR_TASK_ID else None
+    return {'taskId': budget['taskId'], 'instruction': fixed[0] if fixed else 'Complete the fixture task',
         'cwd': '/workspace', 'group': 'single', 'modelId': worker.MODEL,
         **{name: actor[name] for name in ('timeoutMs', 'maxTurns', 'maxToolCalls')},
-        'requestLimits': dict(actor['requestLimits']), 'outputDir': '/state/trial', **overrides}
+        'requestLimits': dict(actor['requestLimits']), 'outputDir': '/state/trial',
+        **({'conversation': {'mode': 'fixed_turns', 'turns': fixed}} if fixed else {}), **overrides}
 
 
 class UpstreamBudgetTests(unittest.TestCase):
@@ -64,6 +67,21 @@ class UpstreamBudgetTests(unittest.TestCase):
             self.guard.open(self.request())
         self.assertEqual(self.transport.open.call_count, 81)
         self.assertEqual(self.guard.budget_rejection['limit'], 'http_requests')
+
+    def test_e2_shares_one_upstream_guard_for_ten_inputs_and_one_hundred_fifty_requests(self):
+        turns = json.loads((SOURCE/'Task'/worker.STDERR_TASK_ID/'turns.json').read_text())['turns']
+        budget = build_budget_plan(worker.STDERR_TASK_ID,
+            {'maxUserTurns': 14, 'maxToolCalls': 140, 'maxWallTimeSeconds': 2400},
+            conversation=conversation_from_turns(turns))
+        guard = self.guard_for(budget, 'e2.jsonl')
+        for _ in range(150):
+            guard.open(self.request())
+        self.assertEqual(guard.count, 150)
+        self.assertIsNone(guard.budget_rejection)
+        with self.assertRaisesRegex(URLError, 'budget'):
+            guard.open(self.request())
+        self.assertEqual(self.transport.open.call_count, 150)
+        self.assertEqual(guard.budget_rejection['limit'], 'http_requests')
 
     def test_failed_upstream_is_counted_once_without_transport_retry(self):
         self.transport.open.side_effect = URLError('offline')
@@ -138,11 +156,45 @@ class RequestValidationTests(unittest.TestCase):
             with self.subTest(task=task_id):
                 task = resolve_task((SOURCE / 'Task')/task_id)
                 budget = build_budget_plan(task_id, {'maxUserTurns': task.max_turns,
-                    'maxToolCalls': task.max_tool_calls, 'maxWallTimeSeconds': task.max_wall_time_sec})
+                    'maxToolCalls': task.max_tool_calls, 'maxWallTimeSeconds': task.max_wall_time_sec},
+                    **({'conversation': conversation_from_turns(json.loads((task.task_dir/'turns.json').read_text())['turns'])}
+                       if task_id == worker.STDERR_TASK_ID else {}))
                 request = actor_request(budget)
                 self.assertEqual(worker.validate_actor_request(request, budget), request)
                 self.assertEqual(request['maxToolCalls'], task.max_tool_calls)
                 self.assertEqual(request['maxTurns'], task.max_tool_calls + 1)
+
+    def test_e2_worker_rejects_changed_reordered_or_extra_inputs_before_reading_credentials(self):
+        from .task_admission import actor_request as actual_request, resolve_task_budget_plan
+
+        task = resolve_task(SOURCE/'Task'/worker.STDERR_TASK_ID)
+        budget = resolve_task_budget_plan(task)
+        original = actual_request(task, budget)
+        for mutation in ('changed', 'reordered', 'extra', 'missing', 'first', 'unknown_field'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as folder:
+                request = json.loads(json.dumps(original))
+                turns = request['conversation']['turns']
+                if mutation == 'changed':
+                    turns[3] += ' changed'
+                elif mutation == 'reordered':
+                    turns[3], turns[4] = turns[4], turns[3]
+                elif mutation == 'extra':
+                    turns.append('unapproved input')
+                elif mutation == 'missing':
+                    turns.pop()
+                elif mutation == 'first':
+                    request['instruction'] = 'substituted initial instruction'
+                else:
+                    request['conversation']['extra'] = True
+                root = Path(folder)
+                (root/'request.json').write_text(json.dumps(request))
+                (root/'budget.json').write_text(json.dumps(budget))
+                with patch.object(sys, 'stdin') as credential, patch.object(worker.subprocess, 'Popen') as child:
+                    with self.assertRaises(ValueError):
+                        worker.run_worker(root/'request.json', root/'state', '', root/'budget.json')
+                    credential.read.assert_not_called()
+                    child.assert_not_called()
+                self.assertFalse((root/'state').exists())
 
     def test_plan_request_scalar_shape_and_limit_disagreement_are_rejected(self):
         budget = plan()
@@ -197,7 +249,9 @@ class RequestValidationTests(unittest.TestCase):
             {'maxUserTurns': task.max_turns, 'maxToolCalls': task.max_tool_calls,
                 'maxWallTimeSeconds': task.max_wall_time_sec},
             mode='constrained', overrides={
-            'timeoutMs': 5000, 'maxTurns': 4, 'maxToolCalls': 2, 'maxRequests': 3})
+            'timeoutMs': 5000, 'maxTurns': 4, 'maxToolCalls': 2, 'maxRequests': 3},
+            **({'conversation': conversation_from_turns(json.loads((task.task_dir/'turns.json').read_text())['turns'])}
+               if task_id == worker.STDERR_TASK_ID else {}))
         request = actor_request(budget)
         with tempfile.TemporaryDirectory() as folder:
             state = Path(folder)

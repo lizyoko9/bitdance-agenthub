@@ -13,15 +13,17 @@ from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
 if __package__:
-    from .budget_contract import budget_plan_digest, validate_budget_plan
+    from .budget_contract import budget_plan_digest, conversation_from_turns, validate_budget_plan
 else:
-    from budget_contract import budget_plan_digest, validate_budget_plan
+    from budget_contract import budget_plan_digest, conversation_from_turns, validate_budget_plan
 
 
 GOVERNANCE_TASK_ID = 'G1-registry-cleanup-002'
 TIMEOUT_TASK_ID = 'E6-timeout-error-channel-003'
 CONFIRMATION_TASK_ID = 'L2-deploy-latency-001'
 MOUNTCHECK_TASK_ID = 'E8-mountcheck-exit-masked-003'
+STDERR_TASK_ID = 'E2-shard-stderr-003'
+ZERO_RUBRIC_TASK_IDS = (GOVERNANCE_TASK_ID, STDERR_TASK_ID)
 PROCESS_OBSERVED_TASK_IDS = (TIMEOUT_TASK_ID, CONFIRMATION_TASK_ID)
 APPROVED_TASK_IDS = (
     'E7-failed-command-stale-artifact-002',
@@ -31,6 +33,7 @@ APPROVED_TASK_IDS = (
     TIMEOUT_TASK_ID,
     CONFIRMATION_TASK_ID,
     MOUNTCHECK_TASK_ID,
+    STDERR_TASK_ID,
 )
 MODEL = 'gpt-6-luna'
 
@@ -279,6 +282,8 @@ class ProcessObserver:
 def validate_actor_request(request, budget_plan):
     fields = {'taskId', 'instruction', 'cwd', 'group', 'modelId', 'timeoutMs',
               'maxTurns', 'maxToolCalls', 'requestLimits', 'outputDir'}
+    if isinstance(request, dict) and request.get('taskId') == STDERR_TASK_ID:
+        fields.add('conversation')
     if not isinstance(request, dict) or set(request) != fields:
         raise ValueError('Actor request fields differ from the approved public request')
     if request['taskId'] not in APPROVED_TASK_IDS or request['modelId'] != MODEL or request['group'] != 'single':
@@ -288,6 +293,14 @@ def validate_actor_request(request, budget_plan):
     if not isinstance(request['instruction'], str) or not request['instruction'].strip() or len(request['instruction']) > 262144:
         raise ValueError('Actor instruction is missing or exceeds the public request bound')
     plan = validate_budget_plan(budget_plan, task_id=request['taskId'])
+    fixed = None
+    if request['taskId'] == STDERR_TASK_ID:
+        value = request['conversation']
+        if not isinstance(value, dict) or set(value) != {'mode', 'turns'} or value['mode'] != 'fixed_turns':
+            raise ValueError('E2 Actor conversation fields differ from the original fixed-turn request')
+        fixed = conversation_from_turns(value['turns'])
+        if fixed != plan.get('conversation') or request['instruction'] != value['turns'][0]:
+            raise ValueError('E2 Actor conversation differs from the source-bound original ordered inputs')
     effective = plan['actor']
     for name in ('timeoutMs', 'maxTurns', 'maxToolCalls'):
         if type(request[name]) is not int or request[name] != effective[name]:
@@ -297,7 +310,8 @@ def validate_actor_request(request, budget_plan):
         raise ValueError('Actor request limits differ from the budget plan')
     if any(type(value) is not int or value != effective['requestLimits'][name] for name, value in limits.items()):
         raise ValueError('Actor request limits differ from the budget plan')
-    return {**request, 'requestLimits': dict(limits)}
+    return {**request, 'requestLimits': dict(limits),
+            **({'conversation': {'mode': 'fixed_turns', 'turns': list(request['conversation']['turns'])}} if fixed else {})}
 
 
 class NoRedirect(HTTPRedirectHandler):
