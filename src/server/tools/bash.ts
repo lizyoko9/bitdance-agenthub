@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { basename } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
@@ -113,7 +114,7 @@ function killProcessTree(
 const PLATFORM = currentPlatform()
 
 const DESCRIPTION_POSIX =
-  'Run a shell command inside the workspace. Optional cwd must stay inside the workspace. POSIX uses the user login shell for zsh/bash ($SHELL -l -i -c) when available, otherwise sh -c. Use POSIX syntax: ls, grep, cat, git, npm, python, etc. Output is stdout + stderr combined, truncated to 10000 chars, 30s timeout. Destructive commands (rm -rf /, sudo, fork bombs, curl | sh) are blocked. No interactive stdin. Do not leave persistent background servers running; start test servers only inside a command that cleans them up.'
+  'Run a shell command inside the workspace. Optional cwd must stay inside the workspace. POSIX uses the user login shell for zsh/bash ($SHELL -l -i -c) when available, otherwise sh -c. Use POSIX syntax: ls, grep, cat, git, npm, python, etc. Output capture shares a 10000 UTF-16 code unit limit across stdout and stderr, 30s timeout. Destructive commands (rm -rf /, sudo, fork bombs, curl | sh) are blocked. No interactive stdin. Do not leave persistent background servers running; start test servers only inside a command that cleans them up.'
 
 const DESCRIPTION_WINDOWS =
   'Run a Windows PowerShell 5.1 command inside the workspace. Optional cwd must stay inside the workspace. ' +
@@ -121,12 +122,12 @@ const DESCRIPTION_WINDOWS =
   'Examples of correct commands: `Get-ChildItem -Force` (NOT `ls -la`), `Get-Content file.txt` (NOT `cat`), ' +
   '`Select-String pattern file.txt` (NOT `grep`), `Remove-Item path` (NOT `rm`), `New-Item -ItemType Directory` (NOT `mkdir -p`), ' +
   '`Copy-Item src dst` (NOT `cp`), `Move-Item src dst` (NOT `mv`). git/npm/python/node work as usual. ' +
-  'Output is UTF-8, stdout + stderr combined, truncated to 10000 chars. ' +
+  'Output is decoded as UTF-8 with a shared 10000 UTF-16 code unit capture limit across stdout and stderr. ' +
   'Destructive commands (Remove-Item -Recurse -Force, format, shutdown, iex(iwr ...), reg delete, Set-ExecutionPolicy Unrestricted) are blocked. No interactive stdin. ' +
   'Do not leave persistent background servers running; start test servers only inside a command that cleans them up.'
 
 const EXECUTION_RESULT_DESCRIPTION =
-  'Results expose status, isError and failure alongside the observed exit code and interruption flags. Exit code 0 indicates normal completion only without timeout, abort or signal termination; any nonzero code is classified as failed execution, with its specific meaning defined by the program. A null exit code means no exit code was observed and does not confirm success. Failed results include failure.kind and failure.message. Check these fields for consistency. Output text does not override the observed execution outcome.'
+  'Results expose status, isError and failure alongside the observed exit code and interruption flags. Exit code 0 indicates normal completion only without timeout, abort or signal termination; any nonzero code is classified as failed execution, with its specific meaning defined by the program. A null exit code means no exit code was observed and does not confirm success. Failed results include failure.kind and failure.message. Check these fields for consistency. Output text does not override the observed execution outcome. stdout and stderr retain text from the actual pipes after shell redirection; nonempty stderr alone does not indicate failure. output keeps the merged view and tool annotations. stdoutTruncated and stderrTruncated indicate observed text omitted by the shared size cap, not whether interrupted streams reached EOF.'
 
 /**
  * bash —— 在 workspace 内跑 shell 命令。详见 specs/07-tools.md, specs/11-platform.md。
@@ -233,15 +234,38 @@ function runShellCommand(
 
     let buffer = ''
     let truncated = false
-    const append = (chunk: Buffer) => {
-      if (truncated) return
-      const text = chunk.toString('utf8')
-      if (buffer.length + text.length <= MAX_OUTPUT_CHARS) {
-        buffer += text
-      } else {
-        buffer = (buffer + text).slice(0, MAX_OUTPUT_CHARS)
-        truncated = true
+    const streams = {
+      stdout: { decoder: new StringDecoder('utf8'), ended: false, text: '', truncated: false },
+      stderr: { decoder: new StringDecoder('utf8'), ended: false, text: '', truncated: false },
+    }
+    type Pipe = keyof typeof streams
+
+    const append = (pipe: Pipe, text: string) => {
+      if (settled || text.length === 0) return
+      let end = truncated ? 0 : Math.min(text.length, MAX_OUTPUT_CHARS - buffer.length)
+      if (end > 0 && end < text.length
+        && text.charCodeAt(end - 1) >= 0xd800 && text.charCodeAt(end - 1) <= 0xdbff
+        && text.charCodeAt(end) >= 0xdc00 && text.charCodeAt(end) <= 0xdfff) {
+        end -= 1
       }
+      const retained = text.slice(0, end)
+      buffer += retained
+      streams[pipe].text += retained
+      if (end < text.length) {
+        truncated = true
+        streams[pipe].truncated = true
+      }
+    }
+
+    const receive = (pipe: Pipe, chunk: Buffer) => {
+      if (settled || streams[pipe].ended) return
+      append(pipe, streams[pipe].decoder.write(chunk))
+    }
+
+    const endStream = (pipe: Pipe) => {
+      if (settled || streams[pipe].ended) return
+      streams[pipe].ended = true
+      append(pipe, streams[pipe].decoder.end())
     }
 
     const cleanup = () => {
@@ -264,6 +288,9 @@ function runShellCommand(
 
     const finishClose = (exitCode: number | null, closeSignal: NodeJS.Signals | null) => {
       if (settled) return
+      // Destroyed pipes may close without an end event.
+      endStream('stdout')
+      endStream('stderr')
       const note = timedOut
         ? `\n\n[KILLED after ${timeoutMs / 1000}s timeout]`
         : aborted
@@ -296,6 +323,10 @@ function runShellCommand(
           command: args.command,
           exitCode,
           output: buffer + truncNote + note + orphanNote,
+          stdout: streams.stdout.text,
+          stderr: streams.stderr.text,
+          stdoutTruncated: streams.stdout.truncated,
+          stderrTruncated: streams.stderr.truncated,
           truncated,
           timedOut,
           aborted,
@@ -348,8 +379,10 @@ function runShellCommand(
       return
     }
 
-    child.stdout?.on('data', append)
-    child.stderr?.on('data', append)
+    child.stdout?.on('data', (chunk: Buffer) => receive('stdout', chunk))
+    child.stderr?.on('data', (chunk: Buffer) => receive('stderr', chunk))
+    child.stdout?.on('end', () => endStream('stdout'))
+    child.stderr?.on('end', () => endStream('stderr'))
     child.on('error', finishSpawnError)
 
     child.on('exit', (exitCode, closeSignal) => {

@@ -69,6 +69,13 @@ function controlled() {
   return child
 }
 
+async function startControlled() {
+  const child = controlled()
+  const operation = executeBashCommand({ command: 'fixture' }, context)
+  await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce())
+  return { child, operation }
+}
+
 function expectFailure(result: ToolResult, kind: BashFailure['kind']) {
   if (!result.ok) throw new Error('Expected an obtained process observation')
   const value = result.value as { failure?: BashFailure }
@@ -84,6 +91,8 @@ describe.skipIf(process.platform === 'win32')('Bash real process observations', 
     expect(result).toMatchObject({ ok: true, isError: true, value: {
       command: expect.any(String), cwd: directory, exitCode, status: 'failed',
       isError: true, timedOut: false, aborted: false, signal: null, truncated: false,
+      stdout: 'STATUS: OK\nRESULT: complete\n', stderr: 'diagnostic\n',
+      stdoutTruncated: false, stderrTruncated: false,
     } })
     if (!result.ok) throw new Error('Expected an obtained process observation')
     const value = result.value as { output: string }
@@ -109,18 +118,161 @@ describe.skipIf(process.platform === 'win32')('Bash real process observations', 
     expect(getRunToolEvidence(context.runId).commands[0]).not.toHaveProperty('error')
   })
 
+  it('retains actual Unicode text in both pipes without treating stderr as failure', async () => {
+    const result = await executeBashCommand({ command: "printf '完成🙂'; printf '警告中' >&2" }, context)
+    expect(result).toMatchObject({ ok: true, isError: false, value: {
+      exitCode: 0, status: 'completed', stdout: '完成🙂', stderr: '警告中',
+      stdoutTruncated: false, stderrTruncated: false, truncated: false,
+    } })
+  })
+
+  it('labels pipes after redirection rather than inferring diagnostic origin', async () => {
+    const result = await executeBashCommand({ command: "{ printf 'diagnostic' >&2; } 2>&1" }, context)
+    expect(result).toMatchObject({ ok: true, isError: false, value: {
+      output: 'diagnostic', stdout: 'diagnostic', stderr: '',
+      stdoutTruncated: false, stderrTruncated: false,
+    } })
+  })
+
+  it('retains empty streams for a real command without output', async () => {
+    expect(await executeBashCommand({ command: 'exit 0' }, context)).toMatchObject({
+      ok: true, value: { stdout: '', stderr: '', output: '',
+        stdoutTruncated: false, stderrTruncated: false, status: 'completed' },
+    })
+  })
+
   it('preserves bounded output and the truncation annotation', async () => {
     const result = await executeBashCommand({ command: "printf '%12000s' x; exit 9" }, context)
     expect(result).toMatchObject({ ok: true, isError: true, value: {
       exitCode: 9, truncated: true, output: expect.stringContaining('[TRUNCATED at 10000 chars]'),
+      stdout: ' '.repeat(10000), stderr: '',
+      stdoutTruncated: true, stderrTruncated: false,
     } })
     expectFailure(result, 'nonzero_exit')
   })
 
   it('closes inherited background stdio without losing the successful shell outcome', async () => {
-    const result = await executeBashCommand({ command: 'sleep 20 & exit 0' }, context)
+    const result = await executeBashCommand({ command: "printf out; printf err >&2; sleep 20 & exit 0" }, context)
     expect(result).toMatchObject({ ok: true, isError: false, value: {
       exitCode: 0, status: 'completed', output: expect.stringContaining('[STOPPED background processes'),
+      stdout: 'out', stderr: 'err', stdoutTruncated: false, stderrTruncated: false,
+    } })
+    expect(getRunToolEvidence(context.runId).commands).toHaveLength(1)
+  })
+})
+
+describe('Bash pipe capture boundaries', () => {
+  it('preserves decoded callback order and per-pipe ownership', async () => {
+    const { child, operation } = await startControlled()
+    child.stdout.emit('data', Buffer.from('out-1'))
+    child.stderr.emit('data', Buffer.from('err'))
+    child.stdout.emit('data', Buffer.from('out-2'))
+    child.emit('close', 0, null)
+    expect(await operation).toMatchObject({ ok: true, value: {
+      output: 'out-1errout-2', stdout: 'out-1out-2', stderr: 'err',
+      truncated: false, stdoutTruncated: false, stderrTruncated: false,
+    } })
+  })
+
+  it('keeps independent UTF-8 decoder state for interleaved partial characters', async () => {
+    const { child, operation } = await startControlled()
+    const out = Buffer.from('中🙂')
+    const err = Buffer.from('文🚀')
+    for (let index = 0; index < out.length; index += 1) {
+      child.stdout.emit('data', out.subarray(index, index + 1))
+      child.stderr.emit('data', err.subarray(index, index + 1))
+    }
+    child.stdout.emit('end')
+    child.stderr.emit('end')
+    child.emit('close', 0, null)
+    expect(await operation).toMatchObject({ ok: true, value: {
+      output: '中文🙂🚀', stdout: '中🙂', stderr: '文🚀',
+      stdoutTruncated: false, stderrTruncated: false,
+    } })
+  })
+
+  it.each([
+    { out: 10000, err: 0, extra: '', outFlag: false, errFlag: false },
+    { out: 10001, err: 0, extra: '', outFlag: true, errFlag: false },
+    { out: 10000, err: 1, extra: '', outFlag: false, errFlag: true },
+    { out: 6000, err: 4001, extra: 'late', outFlag: true, errFlag: true },
+  ])('shares the cap and attributes only observed omissions: $out/$err/$extra', async ({ out, err, extra, outFlag, errFlag }) => {
+    const { child, operation } = await startControlled()
+    child.stdout.emit('data', Buffer.from('a'.repeat(out)))
+    child.stderr.emit('data', Buffer.from('b'.repeat(err)))
+    child.stdout.emit('data', Buffer.from(extra))
+    child.emit('close', 0, null)
+    const retainedOut = 'a'.repeat(Math.min(out, 10000))
+    const retainedErr = 'b'.repeat(Math.min(err, 10000 - retainedOut.length))
+    const truncated = outFlag || errFlag
+    const result = await operation
+    expect(result).toMatchObject({ ok: true, value: {
+      stdout: retainedOut, stderr: retainedErr, stdoutTruncated: outFlag, stderrTruncated: errFlag,
+      truncated, output: retainedOut + retainedErr + (truncated ? '\n\n[TRUNCATED at 10000 chars]' : ''),
+    } })
+    if (!result.ok) throw new Error('Expected an obtained process observation')
+    const value = result.value as { stdout: string; stderr: string; truncated: boolean;
+      stdoutTruncated: boolean; stderrTruncated: boolean }
+    expect(value.truncated).toBe(value.stdoutTruncated || value.stderrTruncated)
+    expect(value.stdout.length + value.stderr.length).toBeLessThanOrEqual(10000)
+  })
+
+  it('omits a whole surrogate pair and freezes even with one unused unit', async () => {
+    const { child, operation } = await startControlled()
+    child.stdout.emit('data', Buffer.from('a'.repeat(9999)))
+    child.stderr.emit('data', Buffer.from('🙂'))
+    child.stdout.emit('data', Buffer.from('x'))
+    child.emit('close', 0, null)
+    expect(await operation).toMatchObject({ ok: true, value: {
+      stdout: 'a'.repeat(9999), stderr: '', truncated: true,
+      stdoutTruncated: true, stderrTruncated: true,
+      output: 'a'.repeat(9999) + '\n\n[TRUNCATED at 10000 chars]',
+    } })
+  })
+
+  it('retains an entire supplementary character when two units remain', async () => {
+    const { child, operation } = await startControlled()
+    child.stdout.emit('data', Buffer.from('a'.repeat(9998)))
+    child.stderr.emit('data', Buffer.from('🙂'))
+    child.emit('close', 0, null)
+    expect(await operation).toMatchObject({ ok: true, value: {
+      stdout: 'a'.repeat(9998), stderr: '🙂', truncated: false,
+      stdoutTruncated: false, stderrTruncated: false,
+    } })
+  })
+
+  it('flushes incomplete UTF-8 once across duplicate end/close and ignores late data', async () => {
+    const { child, operation } = await startControlled()
+    child.stdout.emit('data', Buffer.from([0xe4, 0xb8]))
+    child.stderr.emit('data', Buffer.from('err'))
+    child.stdout.emit('end')
+    child.stdout.emit('end')
+    child.stdout.emit('data', Buffer.from('after-end'))
+    child.stderr.emit('data', Buffer.from([0xf0, 0x9f]))
+    child.emit('close', 0, null)
+    const result = await operation
+    const snapshot = JSON.stringify(result)
+    child.stdout.emit('data', Buffer.from('after-close'))
+    child.stderr.emit('end')
+    child.emit('close', 23, 'SIGTERM')
+    child.emit('error', new Error('late error'))
+    expect(result).toMatchObject({ ok: true, value: {
+      output: 'err��', stdout: '�', stderr: 'err�', truncated: false,
+    } })
+    expect(JSON.stringify(result)).toBe(snapshot)
+    expect(getRunToolEvidence(context.runId).commands).toHaveLength(1)
+  })
+
+  it('attributes final decoder omissions after forced abort without requiring end', async () => {
+    const { child, operation } = await startControlled()
+    child.stdout.emit('data', Buffer.from('a'.repeat(10000)))
+    child.stderr.emit('data', Buffer.from([0xe4, 0xb8]))
+    controller.abort()
+    child.emit('close', null, 'SIGTERM')
+    expect(await operation).toMatchObject({ ok: true, value: {
+      stdout: 'a'.repeat(10000), stderr: '', stdoutTruncated: false, stderrTruncated: true,
+      truncated: true, aborted: true,
+      output: 'a'.repeat(10000) + '\n\n[TRUNCATED at 10000 chars]\n\n[KILLED after run abort]',
     } })
     expect(getRunToolEvidence(context.runId).commands).toHaveLength(1)
   })
@@ -140,6 +292,7 @@ describe('Bash controlled lifecycle boundaries', () => {
     expect(mocks.approval).not.toHaveBeenCalled()
     expect(result).toMatchObject({ ok: true, isError: true, value: {
       exitCode: null, signal: null, aborted: true, timedOut: false, status: 'failed', isError: true,
+      stdout: '', stderr: '', stdoutTruncated: false, stderrTruncated: false,
     } })
     expect(getRunToolEvidence(context.runId).commands).toHaveLength(1)
     expectFailure(result, 'aborted')
@@ -181,12 +334,15 @@ describe('Bash controlled lifecycle boundaries', () => {
     const operation = executeBashCommand({ command: 'fixture', timeoutMs: 1000 }, context)
     await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce())
     child.stdout.write('partial output')
+    child.stderr.write('partial error')
     await vi.advanceTimersByTimeAsync(1000)
     child.emit('close', 0, null)
     const result = await operation
     expect(result).toMatchObject({ ok: true, isError: true, value: {
       exitCode: 0, timedOut: true, status: 'failed', isError: true,
       output: expect.stringContaining('partial output'),
+      stdout: 'partial output', stderr: 'partial error',
+      stdoutTruncated: false, stderrTruncated: false,
     } })
     expect(child.kill).toHaveBeenCalledOnce()
     expect(getRunToolEvidence(context.runId).commands).toEqual([
@@ -200,12 +356,14 @@ describe('Bash controlled lifecycle boundaries', () => {
     const child = controlled()
     const operation = executeBashCommand({ command: 'fixture' }, context)
     await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce())
+    child.stderr.write('before abort')
     controller.abort()
     child.emit('close', 0, null)
     child.emit('error', new Error('late process error'))
     const result = await operation
     expect(result).toMatchObject({ ok: true, isError: true, value: {
       exitCode: 0, aborted: true, timedOut: false, status: 'failed',
+      stdout: '', stderr: 'before abort', stdoutTruncated: false, stderrTruncated: false,
     } })
     expect(child.kill).toHaveBeenCalledOnce()
     expect(getRunToolEvidence(context.runId).commands).toHaveLength(1)
