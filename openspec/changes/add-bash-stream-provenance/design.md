@@ -51,4 +51,4 @@ After contract approval, implement capture and focused tests, synchronize the to
 
 ## Open Questions
 
-None for this scope. Implementation is pending confirmation under `CLAUDE.md` §6.1/§6.2 because the documented Bash result structure gains fields.
+None for this scope. The user confirmed the additive result contract and no-model regressions on 2026-11-18: “按方案实现并做无模型回归（推荐）”. No paid benchmark rerun is included.
