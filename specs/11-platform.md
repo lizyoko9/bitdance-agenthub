@@ -124,10 +124,12 @@ const SHARED_BANNED: RegExp[] = [
 
 `src/server/tools/bash.ts` 的 `description` 字段从静态字符串改为基于 `currentPlatform()` 生成：
 
-- **POSIX**：`"Run a shell command inside workspace. POSIX uses the user login shell for zsh/bash ($SHELL -l -i -c) when available, otherwise sh -c. Use POSIX syntax: ls, grep, cat, git, npm. Output: stdout+stderr merged, 10000 char limit, 30s timeout. Blocked: rm -rf /, sudo, fork bombs, curl | sh."`
-- **Windows**：`"Run a PowerShell 5.1 command inside workspace. Use PowerShell syntax: Get-ChildItem, Select-String, Get-Content, git, npm. Output is UTF-8 (chcp 65001), stdout+stderr merged, 10000 char limit, 30s timeout. Blocked: Remove-Item -Recurse -Force, format, shutdown, iex(iwr ...), reg delete."`
+- **POSIX**：描述用户 login shell 回退策略、POSIX 命令示例、30s 默认超时和现有 POSIX 黑名单；输出说明具名 `stdout` / `stderr` 与兼容合并 `output`，共享 10000 个 UTF-16 code unit 的原始采集上限。
+- **Windows**：描述 PowerShell 5.1 语法、`Get-ChildItem` / `Select-String` / `Get-Content` 等示例和现有 Windows 黑名单；保留 `$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()` preamble，不承诺所有外部程序都遵循 UTF-8。输出字段与共享采集上限和 POSIX 相同。
 
-**注**：CustomAgentAdapter 与 ClaudeCodeAdapter 不共用同一工具实例；ClaudeCodeAdapter 走 SDK 原生 Bash 工具，描述由 SDK 控制，但 `canUseTool` 钩子里的黑名单走同一份 `getBannedPatterns`。
+两平台的原生工具均说明：两条管道各自增量解码 UTF-8，`stdoutTruncated` / `stderrTruncated` 仅标出各管道已观察文本因共享上限被省略；工具注释仅放在 `output`，中止与清理仍看既有生命周期字段。来源以重定向后的管道为准（如 `2>&1`），`stderr` 有文本不代表执行失败。合并顺序是解码回调的观察顺序，不保证跨 OS 管道的写入全序。完整返回契约见 Spec 07「bash」。
+
+**注**：上述返回字段仅属于 AgentHub 原生 `bash`。CustomAgentAdapter 与 ClaudeCodeAdapter 不共用同一工具实例；ClaudeCodeAdapter 走 SDK 原生 Bash 工具，描述由 SDK 控制，但 `canUseTool` 钩子里的黑名单走同一份 `getBannedPatterns`。Codex SDK 自有 shell 结果也不由本次原生工具契约定义。
 
 ---
 

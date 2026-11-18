@@ -355,8 +355,8 @@ write_artifact({
 3. `child_process.spawn(shell.cmd, shell.args(command), { cwd: getEffectiveCwd(workspace), windowsHide: true, detached: platform !== 'windows' })`
    - 跨平台 shell（详见 Spec 11 「Shell 选择」节）：
      - POSIX：优先用用户 `zsh` / `bash` login+interactive shell：`$SHELL -l -i -c <command>`；无法确认时回退 `sh -c <command>`
-     - Windows：`powershell.exe -NoProfile -NonInteractive -Command "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); <command>"`（用系统自带 PS 5.1，并强制 UTF-8 输出）
-4. stdout + stderr 合并截断 **10000 字符**
+     - Windows：`powershell.exe -NoProfile -NonInteractive -Command "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); <command>"`（用系统自带 PS 5.1，保留现有 UTF-8 preamble；外部程序仍可能使用其它编码）
+4. stdout / stderr 各用独立 UTF-8 增量解码器跨 Buffer chunk 解码，按实际解码回调顺序保留合并文本和各管道文本；两条管道**共享 10000 个 UTF-16 code unit** 的原始采集上限，截断处不切开 surrogate pair
 5. **30s 超时**：进程清理走 `killProcessTree`
    - POSIX：创建独立进程组，`process.kill(-child.pid, 'SIGTERM')` 清理 shell 及其后台子进程
    - Windows：`taskkill /F /T /PID <pid>` 递归杀进程树（Node 的 SIGTERM 在 Windows 杀不到孙子进程）
@@ -381,7 +381,16 @@ curl -s http://127.0.0.1:3000/health
 
 **工具 description 按平台变体**（详见 Spec 11 「工具描述按平台变体」节）：description 字段在模块加载时根据 `currentPlatform()` 拼接，POSIX 展示用户 login shell 回退策略、POSIX 命令示例与 POSIX 黑名单文案，Windows 展示 PowerShell 示例与 Windows 黑名单文案。这是 LLM 选择命令语法的关键提示。
 
-**返回**：`{ cwd, command, exitCode, output, truncated, timedOut, aborted, signal, status, isError, failure? }`。`status` 为 `completed` 或 `failed`；非零或未知退出码、信号终止、超时或中止均为失败。完整结果放在 `{ ok: true, value, isError }` 中，`ok` 表示成功取得结果；wrapper、value 和命令证据中的错误分类必须一致。模型继续获得输出与退出码，命令失败不直接终止整个 AgentRun。已中止的调用不再创建进程；error/close 竞争只能产生一条命令证据与一个结果。进程无法启动时保留 `{ ok: false, error }`。
+**返回**：`{ cwd, command, exitCode, output, stdout, stderr, truncated, stdoutTruncated, stderrTruncated, timedOut, aborted, signal, status, isError, failure? }`。`status` 为 `completed` 或 `failed`；非零或未知退出码、信号终止、超时或中止均为失败。完整结果放在 `{ ok: true, value, isError }` 中，`ok` 表示成功取得结果；wrapper、value 和命令证据中的错误分类必须一致。模型继续获得输出与退出码，命令失败不直接终止整个 AgentRun。已中止的调用不再创建进程；error/close 竞争只能产生一条命令证据与一个结果。进程无法启动时保留 `{ ok: false, error }`。
+
+**输出来源与采集边界**：
+
+- `stdout` / `stderr` 是从对应子进程管道实际保留的字符串，二者长度之和不超过共享采集上限。`output` 保留按解码回调观察顺序合并的兼容视图，并继续追加既有 `[TRUNCATED]` / `[KILLED]` / `[STOPPED ...]` 工具注释；这些注释不进入两个具名流。两条 OS 管道之间不保证原程序写入的全局先后顺序。
+- 第一次观察到因上限而省略的文本后，所有管道停止继续保留文本；为避免切开 surrogate pair 而空出的一个 code unit 也不再补齐。仍继续解码后续观察，用 `stdoutTruncated` / `stderrTruncated` 标出各管道是否有文本因该上限被省略，`truncated` 表示任一管道发生这类省略。恰好填满而没有多余文本时不标截断。
+- 两个流标志只说明**已观察文本因大小上限被省略**，不保证超时、中止或强制关闭管道后未观察到的数据已被恢复；这些情况由已有生命周期事实和 `output` 注释保留。每个解码器在管道结束或结果收尾时最多 flush 一次，强制销毁不必等 `end` 事件；晚到事件不能重复结算或修改已返回结果。
+- 管道标签描述 shell 重定向后的来源。例如 `2>&1` 会把文本路由到 `stdout`，不能根据错误措辞反推原始 `stderr`。`stderr` 非空本身不判失败。空字符串表示没有观察到文本，不单独证明进程曾启动或正常结束；执行前取消仍由 `aborted` / 退出状态区分。
+
+新增字段沿既有通用 JSON 结果进入 Custom 的下一次模型请求、AgentRunner 消息持久化、SSE/store 与结果详情；原 `output` 预览和诊断消费者继续可用，旧记录缺少具名字段时保持可读。不新增 SQL 列；序列化增加一份已保留原始文本及字段开销，实际请求体字节限制不变。该契约仅覆盖 AgentHub 原生 `bash`，不改变 Claude Code / Codex SDK 自有 shell 工具。
 
 失败时额外返回 `failure: { kind, message }`，成功时完全省略。`kind` 按 `timeout > aborted > signal > nonzero_exit > unknown_exit` 决定；`message` 自动陈述已有进程事实，并由模型结果、命令 evidence 的 `error` 和 supervisor 错误诊断共用。解释单独存放，不能追加到或改写 `output`。历史结果没有 failure 时，supervisor 保留原有诊断 fallback。
 
