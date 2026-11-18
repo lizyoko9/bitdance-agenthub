@@ -8,6 +8,7 @@ import { AgentInfoPopover } from '@/components/agent-info-popover'
 import { AskUserQuestionDialog } from '@/components/ask-user-question-dialog'
 import { ArtifactLibrary } from '@/components/artifact-library'
 import { ConversationOutline } from '@/components/conversation-outline'
+import { DeliveryValidationDialog } from '@/components/delivery-validation-dialog'
 import { FileLibraryDialog } from '@/components/file-library-dialog'
 import { FileTab } from '@/components/file-tab'
 import { PendingWriteDiffTab } from '@/components/pending-write-diff-tab'
@@ -169,6 +170,7 @@ export function ChatPanel() {
             <FolderOpen className="size-4" />
           </Button>
           <ConversationOutline conversationId={conv.id} />
+          <DeliveryValidationDialog key={conv.id} conversationId={conv.id} />
           <Button
             size="icon-sm"
             variant="ghost"

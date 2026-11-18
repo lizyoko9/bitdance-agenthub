@@ -5,7 +5,8 @@
  */
 
 import { sql } from 'drizzle-orm'
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import type { DeliveryFixture, DeliveryInput, DeliveryReceiptView, DeliveryRequirement } from '@/shared/delivery-validation'
 import type { ArtifactContent, ArtifactType, AdapterName, MessagePart, ModelProvider } from '@/shared/types'
 
 // ─── Agents ──────────────────────────────────────────────────
@@ -247,6 +248,54 @@ export const agentRuns = sqliteTable(
     finishedAt: integer('finished_at'),
   },
   (t) => [index('idx_runs_parent').on(t.parentRunId)],
+)
+
+export const deliveryValidationRevisions = sqliteTable(
+  'delivery_validation_revisions',
+  {
+    id: text('id').primaryKey(),
+    conversationId: text('conversation_id').notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    planId: text('plan_id').notNull(),
+    revision: integer('revision').notNull(),
+    title: text('title').notNull(),
+    workspaceDigest: text('workspace_digest').notNull(),
+    requirementDigest: text('requirement_digest').notNull(),
+    requirements: text('requirements', { mode: 'json' })
+      .$type<(DeliveryRequirement & { messageDigest: string; quoteDigest: string })[]>().notNull(),
+    inputs: text('inputs', { mode: 'json' }).$type<DeliveryInput[]>().notNull(),
+    definition: text('definition', { mode: 'json' }).$type<unknown>().notNull(),
+    definitionDigest: text('definition_digest').notNull(),
+    engineVersion: integer('engine_version').notNull(),
+    generatorRunId: text('generator_run_id').notNull(),
+    modelId: text('model_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+    activatedAt: integer('activated_at'),
+    revokedAt: integer('revoked_at'),
+    qualification: text('qualification', { mode: 'json' }).$type<{
+      fixtures: (DeliveryFixture & { inputsDigest: string })[]
+      outcomes: { ruleId: string; expected: DeliveryFixture['expected']; actual: string }[]
+    }>(),
+  },
+  (t) => [
+    index('idx_delivery_revisions_conv').on(t.conversationId, t.createdAt),
+    uniqueIndex('uidx_delivery_plan_rev').on(t.planId, t.revision),
+  ],
+)
+
+export const deliveryValidationReceipts = sqliteTable(
+  'delivery_validation_receipts',
+  {
+    id: text('id').primaryKey(),
+    revisionId: text('revision_id').notNull()
+      .references(() => deliveryValidationRevisions.id, { onDelete: 'cascade' }),
+    definitionDigest: text('definition_digest').notNull(),
+    engineVersion: integer('engine_version').notNull(),
+    createdAt: integer('created_at').notNull(),
+    result: text('result', { mode: 'json' })
+      .$type<Pick<DeliveryReceiptView, 'status' | 'checks' | 'inputs'>>().notNull(),
+  },
+  (t) => [index('idx_delivery_receipts_rev').on(t.revisionId, t.createdAt)],
 )
 
 /** RunUsage —— 一次 run 累计的 token 用量。token 计数字段为 0+ 整数；不返回的计数字段为 0，而不是 null。 */

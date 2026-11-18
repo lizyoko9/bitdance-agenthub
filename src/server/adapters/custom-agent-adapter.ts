@@ -8,7 +8,9 @@ import type { ToolContext } from '@/server/tools/types'
 import type { DeployStatusRecord, ModelProvider, StreamEvent } from '@/shared/types'
 
 import { resolveCustomProviderClientConfig } from './custom-provider-client'
-import { CustomAgentTerminationError, resolveCustomMaxTurns, resolveCustomRequestTimeoutMs } from './custom-agent-limits'
+import {
+  CustomAgentTerminationError, CustomAgentTextOnlyResponseError, resolveCustomMaxTurns, resolveCustomRequestTimeoutMs,
+} from './custom-agent-limits'
 import {
   CustomRequestTracker, mergeCustomRequestUsage, readCustomRequestUsage,
   type CustomAgentAdapterOptions, type CustomRequestStatus,
@@ -61,7 +63,8 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       ? undefined
       : buildClient(modelProvider, apiKey, input.apiBaseUrl, this.options)
 
-    const toolDefs = toolRegistry.resolve(input.toolNames)
+    const textOnlyLimit = this.options.textOnlyResponseMaxBytes
+    const toolDefs = textOnlyLimit === undefined ? toolRegistry.resolve(input.toolNames) : []
     const apiTools = toolDefs.map(toApiTool)
 
     const ctx: ToolContext = {
@@ -115,6 +118,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       let textBuffer = ''
       let thinkingPartIndex = -1
       let reasoningBuffer = ''
+      let responseBytes = 0
       let nextPartIndex = 0
       const toolCallBuffer = new Map<number, AccumulatingToolCall>()
 
@@ -160,6 +164,11 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           if (signal.aborted) return
           request?.observeChunk(chunk)
           if (chunk.usage) responseUsage = mergeCustomRequestUsage(responseUsage, chunk.usage)
+          if (textOnlyLimit !== undefined && chunk.choices.some(({ delta, finish_reason }) =>
+            delta.tool_calls?.length || delta.function_call
+            || finish_reason === 'tool_calls' || finish_reason === 'function_call')) {
+            throw new CustomAgentTextOnlyResponseError('unexpected_tool')
+          }
           const choice = chunk.choices[0]
           if (!choice) continue
           // DeepSeek V4/R1 等 thinking-mode 模型在 delta 上加了 reasoning_content
@@ -168,8 +177,15 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
             reasoning_content?: string
           }
 
+          if (textOnlyLimit !== undefined) {
+            responseBytes += Buffer.byteLength(delta.content ?? '', 'utf8')
+              + Buffer.byteLength(delta.reasoning_content ?? '', 'utf8')
+            if (responseBytes > textOnlyLimit) throw new CustomAgentTextOnlyResponseError('response_size')
+          }
+
           // —— reasoning_content (thinking mode) —— 先 yield 出来让 UI 渲染 thinking part
-          if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
+          if (textOnlyLimit === undefined
+            && typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
             if (thinkingPartIndex < 0) {
               thinkingPartIndex = nextPartIndex++
               yield baseEvent(input, {

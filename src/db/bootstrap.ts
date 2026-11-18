@@ -136,6 +136,38 @@ const DDL: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_runs_parent ON agent_runs(parent_run_id)`,
 
+  `CREATE TABLE IF NOT EXISTS delivery_validation_revisions (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    plan_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    workspace_digest TEXT NOT NULL,
+    requirement_digest TEXT NOT NULL,
+    requirements TEXT NOT NULL,
+    inputs TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    definition_digest TEXT NOT NULL,
+    engine_version INTEGER NOT NULL,
+    generator_run_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    activated_at INTEGER,
+    revoked_at INTEGER,
+    qualification TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_delivery_revisions_conv ON delivery_validation_revisions(conversation_id, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uidx_delivery_plan_rev ON delivery_validation_revisions(plan_id, revision)`,
+  `CREATE TABLE IF NOT EXISTS delivery_validation_receipts (
+    id TEXT PRIMARY KEY,
+    revision_id TEXT NOT NULL REFERENCES delivery_validation_revisions(id) ON DELETE CASCADE,
+    definition_digest TEXT NOT NULL,
+    engine_version INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    result TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_delivery_receipts_rev ON delivery_validation_receipts(revision_id, created_at)`,
+
   // ─── conversation_context_summaries ─────────────────────────
   `CREATE TABLE IF NOT EXISTS conversation_context_summaries (
     id TEXT PRIMARY KEY,

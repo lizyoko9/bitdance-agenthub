@@ -27,6 +27,15 @@ export function resolveCustomMaxTurns(override?: number): number {
 
 export type CustomAgentTerminationReason = 'iteration_limit' | 'output_limit' | 'content_filter' | 'model_interrupted'
 
+export class CustomAgentTextOnlyResponseError extends Error {
+  constructor(reason: 'unexpected_tool' | 'response_size') {
+    super(reason === 'unexpected_tool'
+      ? 'Text-only model response attempted a tool call.'
+      : 'Text-only model response exceeded the byte limit.')
+    this.name = 'CustomAgentTextOnlyResponseError'
+  }
+}
+
 export class CustomAgentTerminationError extends Error {
   constructor(
     readonly code: CustomAgentTerminationReason,
