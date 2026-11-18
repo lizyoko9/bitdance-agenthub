@@ -343,6 +343,10 @@ app_settings ──(独立，无外键)── 单行表，与任何业务表都�
 | `messages.parts` | `MessagePart[]` | 见 Spec 03 |
 | `messages.mentioned_agent_ids` | `string[]` | @ 的 agent |
 | `artifacts.content` | `ArtifactContent` | 见 Spec 04，按 type 分发的可辨联合 |
+| `delivery_validation_revisions` JSON 列 | 需求引用、文件绑定、已验证规则、确认样例 | 见 Spec 17。不可变规则内容绑定范围及哈希，激活与撤销单独记录 |
+| `delivery_validation_receipts.result` | `DeliveryReceiptView` 的状态、明细和输入摘要 | 保留所选版本与文件哈希。规则修订和文件更新生成各自的历史记录 |
+
+交付校验表由现有 SQLite 启动自举创建。规则版本随会话清理，回执通过规则版本外键级联删除。
 
 **修改 JSON 列结构时**：旧数据按旧 schema 解析仍合法（向后兼容），否则需要写 migration 脚本（见下节）。
 
