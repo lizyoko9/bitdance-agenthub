@@ -2,7 +2,7 @@ import { accessSync, constants, mkdirSync, statSync } from 'node:fs'
 import { rm as fsRm } from 'node:fs/promises'
 import path from 'node:path'
 
-import { and, desc, eq, gt, gte, inArray } from 'drizzle-orm'
+import { and, desc, eq, gt, gte, inArray, or } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { ConversationWithMeta, MessageRow } from '@/db/schema'
@@ -10,6 +10,7 @@ import { PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
 import type { MessagePart } from '@/shared/types'
 
 import { clearClaudeCodeSession, clearCodexSession } from './adapters/session-store'
+import { assertDeliveryRevisionEligible } from './delivery-validation-service'
 import {
   handleDeployCommand,
   parseDeployCommand,
@@ -549,6 +550,7 @@ export interface SendMessageArgs {
   mentionedAgentIds?: string[]
   parentMessageId?: string
   attachmentIds?: string[]
+  deliveryValidationRevisionId?: string
 }
 
 export interface SendMessageResult {
@@ -558,12 +560,36 @@ export interface SendMessageResult {
   deploy?: DeployCommandResult
 }
 
+function requireFormalDeliveryProducer(conversationId: string, revisionId: string): string {
+  const conversation = db.select({
+    mode: schema.conversations.mode,
+    agentIds: schema.conversations.agentIds,
+  }).from(schema.conversations).where(eq(schema.conversations.id, conversationId)).get()
+  if (conversation?.mode !== 'single' || conversation.agentIds.length !== 1) {
+    throw new Error('完成时自动验收仅适用于单 Agent 会话')
+  }
+
+  const [agentId] = conversation.agentIds
+  const producer = db.select({ isOrchestrator: schema.agents.isOrchestrator })
+    .from(schema.agents).where(eq(schema.agents.id, agentId)).get()
+  if (!producer || producer.isOrchestrator) {
+    throw new Error('完成时自动验收需要一个普通 Agent 执行交付')
+  }
+  assertDeliveryRevisionEligible(conversationId, revisionId)
+  return agentId
+}
+
 export async function sendMessage(args: SendMessageArgs): Promise<SendMessageResult> {
   const conv = await db.query.conversations.findFirst({
     where: eq(schema.conversations.id, args.conversationId),
   })
   if (!conv) {
     throw new Error(`Conversation not found: ${args.conversationId}`)
+  }
+
+  const revisionId = args.deliveryValidationRevisionId
+  if (revisionId !== undefined && parseDeployCommand(args.content)) {
+    throw new Error('部署指令不能同时绑定交付验收规则')
   }
 
   const now = Date.now()
@@ -600,7 +626,9 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
     }
   }
 
-  await db.insert(schema.messages).values({
+  const formalRunner = revisionId === undefined ? undefined : (await getAgentRunner()).AgentRunner
+  const formalProducer = revisionId === undefined ? undefined : requireFormalDeliveryProducer(conv.id, revisionId)
+  db.insert(schema.messages).values({
     id: messageId,
     conversationId: args.conversationId,
     role: 'user',
@@ -608,13 +636,15 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
     status: 'complete',
     mentionedAgentIds: args.mentionedAgentIds ?? [],
     parentMessageId: args.parentMessageId ?? null,
+    deliveryValidationRevisionId: revisionId ?? null,
     createdAt: now,
-  })
+  }).run()
 
-  await db
+  db
     .update(schema.conversations)
     .set({ updatedAt: now })
     .where(eq(schema.conversations.id, args.conversationId))
+    .run()
 
   // 广播新用户消息：消息已落库，这条事件让其它已连接客户端（如桌面端看手机端发来的消息）实时插入。
   // 发送方自己靠乐观更新 + POST 返回值对账；按 id 幂等，重复收到无副作用。详见 specs/02。
@@ -636,6 +666,16 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
       createdAt: now,
     },
   })
+
+  if (formalRunner && formalProducer && revisionId !== undefined) {
+    const { runId } = formalRunner.run({
+      agentId: formalProducer,
+      conversationId: args.conversationId,
+      triggerMessageId: messageId,
+      deliveryValidationRevisionId: revisionId,
+    })
+    return { messageId, runIds: [runId] }
+  }
 
   const deployIntent =
     parts.length === 1 &&
@@ -892,15 +932,23 @@ export async function regenerateLatestResponse(
       eq(schema.messages.conversationId, conversationId),
       eq(schema.messages.role, 'user'),
     ),
-    orderBy: [desc(schema.messages.createdAt)],
+    orderBy: [desc(schema.messages.createdAt), desc(schema.messages.id)],
   })
   if (!latestUser) throw new Error('No user message to regenerate from')
+
+  const revisionId = latestUser.deliveryValidationRevisionId
+  const formalRunner = revisionId == null ? undefined : (await getAgentRunner()).AgentRunner
+  if (revisionId != null) requireFormalDeliveryProducer(conversationId, revisionId)
+
+  const afterRequest = gt(schema.agentRuns.startedAt, latestUser.createdAt)
+  const replacedRun = revisionId == null ? afterRequest
+    : or(afterRequest, eq(schema.agentRuns.triggerMessageId, latestUser.id))
 
   // abort 任何还在跑的 run（不一定有）
   const runsToAbort = await db.query.agentRuns.findMany({
     where: and(
       eq(schema.agentRuns.conversationId, conversationId),
-      gt(schema.agentRuns.startedAt, latestUser.createdAt),
+      replacedRun,
       eq(schema.agentRuns.status, 'running'),
     ),
   })
@@ -910,15 +958,20 @@ export async function regenerateLatestResponse(
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
 
-  // 重新生成等价于「让 agent 对同一个 user msg 重新作答」，SDK session 里那个旧 reply 要扔；清掉重新开 session
-  clearClaudeCodeSession(conversationId)
-  clearCodexSession(conversationId)
+  const runsToDelete = await db.query.agentRuns.findMany({
+    where: and(eq(schema.agentRuns.conversationId, conversationId), replacedRun),
+  })
+  const runIds = runsToDelete.map((r) => r.id)
 
   // 删除 latestUser 之后的所有 message（保留 latestUser 本身）
+  const afterRequestMessage = gt(schema.messages.createdAt, latestUser.createdAt)
+  const replacedMessage = revisionId != null && runIds.length > 0
+    ? or(afterRequestMessage, inArray(schema.messages.runId, runIds))
+    : afterRequestMessage
   const messagesToDelete = await db.query.messages.findMany({
     where: and(
       eq(schema.messages.conversationId, conversationId),
-      gt(schema.messages.createdAt, latestUser.createdAt),
+      replacedMessage,
     ),
   })
   const messageIds = messagesToDelete.map((m) => m.id)
@@ -930,15 +983,26 @@ export async function regenerateLatestResponse(
     }
   }
 
-  const runsToDelete = await db.query.agentRuns.findMany({
-    where: and(
-      eq(schema.agentRuns.conversationId, conversationId),
-      gt(schema.agentRuns.startedAt, latestUser.createdAt),
-    ),
-  })
-  const runIds = runsToDelete.map((r) => r.id)
-
-  db.transaction((tx) => {
+  const formalProducer = db.transaction((tx) => {
+    let producer: string | undefined
+    if (revisionId != null) {
+      const currentRequest = tx.select({ id: schema.messages.id, revisionId: schema.messages.deliveryValidationRevisionId })
+        .from(schema.messages)
+        .where(and(eq(schema.messages.conversationId, conversationId), eq(schema.messages.role, 'user')))
+        .orderBy(desc(schema.messages.createdAt), desc(schema.messages.id))
+        .limit(1).get()
+      if (currentRequest?.id !== latestUser.id || currentRequest.revisionId !== revisionId) {
+        throw new Error('交付请求已更新，请从当前消息重新生成')
+      }
+      const activeRun = tx.select({ id: schema.agentRuns.id }).from(schema.agentRuns)
+        .where(and(
+          eq(schema.agentRuns.conversationId, conversationId),
+          replacedRun,
+          inArray(schema.agentRuns.status, ['queued', 'running']),
+        )).limit(1).get()
+      if (activeRun) throw new Error('上一轮交付仍在结束，请稍后重新生成')
+      producer = requireFormalDeliveryProducer(conversationId, revisionId)
+    }
     if (messageIds.length > 0) {
       tx.delete(schema.messages).where(inArray(schema.messages.id, messageIds)).run()
     }
@@ -950,7 +1014,12 @@ export async function regenerateLatestResponse(
     if (runIds.length > 0) {
       tx.delete(schema.agentRuns).where(inArray(schema.agentRuns.id, runIds)).run()
     }
+    return producer
   })
+
+  // 重新生成等价于「让 agent 对同一个 user msg 重新作答」，SDK session 里那个旧 reply 要扔；清掉重新开 session
+  clearClaudeCodeSession(conversationId)
+  clearCodexSession(conversationId)
 
   // 广播删除：在启动新 run 之前发，保证其它客户端「先移除旧回复，再收到新回复」。
   eventBus.publish({
@@ -961,19 +1030,21 @@ export async function regenerateLatestResponse(
     artifactIds: [...artifactIds],
   })
 
-  // 重新决定 responders（沿用 sendMessage 的 decideResponders）
-  const agentsInConv = await db.query.agents.findMany({
-    where: (a, { inArray: inArr }) => inArr(a.id, conv.agentIds),
-  })
-  const responders = decideResponders(conv, latestUser.mentionedAgentIds, agentsInConv)
+  // 正式交付固定重用已验证的唯一执行者。普通消息重新决定 responders。
+  const responders = formalProducer === undefined
+    ? decideResponders(conv, latestUser.mentionedAgentIds, await db.query.agents.findMany({
+      where: (a, { inArray: inArr }) => inArr(a.id, conv.agentIds),
+    }))
+    : [formalProducer]
 
   const newRunIds: string[] = []
-  const { AgentRunner } = await getAgentRunner()
+  const AgentRunner = formalRunner ?? (await getAgentRunner()).AgentRunner
   for (const agentId of responders) {
     const { runId } = AgentRunner.run({
       agentId,
       conversationId,
       triggerMessageId: latestUser.id,
+      ...(revisionId == null ? {} : { deliveryValidationRevisionId: revisionId }),
     })
     newRunIds.push(runId)
   }

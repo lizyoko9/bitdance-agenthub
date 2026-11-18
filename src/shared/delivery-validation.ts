@@ -31,6 +31,7 @@ export interface DeliveryCheckView {
 export interface DeliveryReceiptView {
   id: string
   revisionId: string
+  runId?: string
   createdAt: number
   status: DeliveryValidationStatus
   checks: DeliveryCheckView[]
@@ -40,6 +41,14 @@ export interface DeliveryReceiptView {
     sha256?: string
     status: 'ready' | 'missing' | 'unavailable'
   }[]
+}
+
+export interface DeliveryRunAcceptance {
+  revisionId: string
+  status: 'pending' | DeliveryValidationStatus | 'not_run'
+  receiptId?: string
+  checks?: DeliveryCheckView[]
+  reason?: string
 }
 
 export interface DeliveryPlanView {

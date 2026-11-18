@@ -358,6 +358,15 @@ function toMobileMessagePart(part: MessagePart): MobileMessagePart {
       }
     case 'deploy_candidates':
       return { type: 'deploy_candidates', candidates: part.candidates }
+    case 'delivery_acceptance': {
+      const labels = {
+        pending: '交付验收中', pass: '交付验收通过', fail: '交付未通过',
+        unverified: '交付未验证', not_run: '交付未执行验收',
+      }
+      const acceptance = part.acceptance
+      const detail = acceptance.reason ?? acceptance.checks?.find((check) => check.status !== 'pass')?.location
+      return { type: 'text', content: labels[acceptance.status] + (detail ? ' · ' + detail : '') }
+    }
     case 'image_attachment':
       return { type: 'attachment', fileName: part.fileName, kind: 'image' }
     case 'file_attachment':

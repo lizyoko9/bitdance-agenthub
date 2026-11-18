@@ -14,9 +14,11 @@ import type {
   DispatchTaskInput,
   DispatchTaskEndStatus,
   MessagePart,
+  MessageRecord,
   StreamEvent,
   TaskResultReport,
 } from '@/shared/types'
+import type { DeliveryReceiptView, DeliveryRunAcceptance } from '@/shared/delivery-validation'
 import { estimateTokens, getModelLimits } from '@/shared/model-registry'
 import { buildSkillContext, skillInlineBudget } from '@/shared/skill-context'
 
@@ -59,7 +61,7 @@ import { runDispatchDag } from './dispatch-dag-scheduler'
 import { detectOverlapConflicts, type TaskExecutionWrites } from './dispatch-overlap-conflicts'
 import { evidenceGatesEnabled } from './eval-flags'
 import { eventBus } from './event-bus'
-import { newArtifactId, newRunId } from './ids'
+import { newArtifactId, newMessageId, newRunId } from './ids'
 import { createMessagePartsFlusher, type MessagePartsFlusher } from './message-parts-flusher'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
 import { buildProjectFiles } from './project-artifact'
@@ -91,6 +93,7 @@ export interface RunArgs {
   agentId: string
   conversationId: string
   triggerMessageId: string
+  deliveryValidationRevisionId?: string
   parentRunId?: string
   /** 子 agent 调度时覆盖 prompt（外部 prompt，由 Orchestrator 构造） */
   overridePrompt?: string
@@ -112,6 +115,7 @@ export interface RunResult {
   outputMessageIds: string[]
   outputArtifacts: Record<string, string>
   taskReport?: TaskResultReport
+  deliveryAcceptance?: DeliveryRunAcceptance
 }
 
 interface RunExecutionResult {
@@ -411,13 +415,21 @@ async function executeRun(
   }
 
   try {
+    if (args.deliveryValidationRevisionId) {
+      await preflightBoundDelivery(args, args.deliveryValidationRevisionId, agent, triggerMessage)
+      if (signal.aborted) return await finalize(runId, args, 'aborted', emptyRunExecutionResult())
+    }
     const result = agent.isOrchestrator
       ? await executeOrchestratorRun(runId, signal, args, agent, workspace, prompt, attachments)
       : await executeSimpleRun(runId, signal, args, agent, workspace, prompt, attachments)
     if (signal.aborted) {
       return await finalize(runId, args, 'aborted', result)
     }
-    return await finalizeOk(runId, args, result)
+    if (args.deliveryValidationRevisionId) {
+      const pending = await prepareBoundDelivery(args.conversationId, args.deliveryValidationRevisionId, signal)
+      return await finalize(runId, args, 'complete', result, undefined, true, pending)
+    }
+    return await finalize(runId, args, 'complete', result)
   } catch (err) {
     if (signal.aborted) {
       const conflictError = err instanceof Error && hasDispatchConflictDetails(err) ? err.message : undefined
@@ -425,6 +437,60 @@ async function executeRun(
     }
     const msg = err instanceof Error ? err.message : String(err)
     return finalize(runId, args, 'failed', emptyRunExecutionResult(), msg)
+  }
+}
+
+async function preflightBoundDelivery(
+  args: RunArgs, revisionId: string, agent: AgentRow, trigger: MessageRow,
+): Promise<void> {
+  const conversation = await db.query.conversations.findFirst({
+    where: eq(schema.conversations.id, args.conversationId),
+  })
+  if (args.parentRunId || args.requireTaskReport || args.overridePrompt || args.overrideToolNames || args.overrideSystemPrompt
+    || agent.isOrchestrator || conversation?.mode !== 'single' || conversation.agentIds.length !== 1
+    || conversation.agentIds[0] !== agent.id || trigger.role !== 'user' || trigger.status !== 'complete') {
+    throw new Error('仅普通单 Agent 会话的正式用户请求支持自动交付验收。')
+  }
+  if (trigger.deliveryValidationRevisionId !== revisionId) {
+    throw new Error('该用户请求没有绑定指定的交付规则版本。')
+  }
+  const { assertDeliveryRevisionEligible } = await import('./delivery-validation-service')
+  assertDeliveryRevisionEligible(args.conversationId, revisionId)
+}
+
+interface PreparedRunDelivery {
+  signal: AbortSignal
+  commit?: (ownerRunId: string) => DeliveryReceiptView
+  reason?: string
+}
+
+async function prepareBoundDelivery(
+  conversationId: string, revisionId: string, signal: AbortSignal,
+): Promise<PreparedRunDelivery> {
+  try {
+    const { prepareDeliveryValidation, DeliveryValidationError } = await import('./delivery-validation-service')
+    try {
+      const commit = await prepareDeliveryValidation(conversationId, revisionId, signal)
+      return {
+        signal,
+        commit(ownerRunId) {
+          try {
+            return commit(ownerRunId)
+          } catch (error) {
+            throw new Error(error instanceof DeliveryValidationError
+              ? error.message.slice(0, 300)
+              : '验收结果未能保存。')
+          }
+        },
+      }
+    } catch (error) {
+      return {
+        signal,
+        reason: error instanceof DeliveryValidationError ? error.message.slice(0, 300) : '交付文件暂时无法验证。',
+      }
+    }
+  } catch {
+    return { signal, reason: '交付验证服务暂时不可用。' }
   }
 }
 
@@ -1883,6 +1949,9 @@ async function insertRun(runId: string, args: RunArgs, agentId: string) {
     agentId,
     triggerMessageId: args.triggerMessageId,
     status: 'running',
+    ...(args.deliveryValidationRevisionId
+      ? { deliveryAcceptance: { revisionId: args.deliveryValidationRevisionId, status: 'pending' } }
+      : {}),
     parentRunId: args.parentRunId,
     startedAt: Date.now(),
   })
@@ -1895,6 +1964,7 @@ async function finalize(
   result: RunExecutionResult,
   error?: string,
   showFailureInChat = true,
+  pendingDelivery?: PreparedRunDelivery,
 ): Promise<RunResult> {
   const finishedAt = Date.now()
 
@@ -1902,17 +1972,28 @@ async function finalize(
     await persistUnresolvedToolFailures(runId, args.conversationId, status, error, finishedAt)
   }
 
-  await db
-    .update(schema.agentRuns)
-    .set({ status, finishedAt, error: error ?? null })
-    .where(eq(schema.agentRuns.id, runId))
-
-  await db
-    .update(schema.messages)
-    .set({
-      status: status === 'complete' ? 'complete' : status === 'aborted' ? 'aborted' : 'error',
+  let deliveryAcceptance: DeliveryRunAcceptance | undefined
+  const revisionId = args.deliveryValidationRevisionId
+  if (revisionId) {
+    const terminal = persistBoundDelivery(runId, args, revisionId, status, finishedAt, error, pendingDelivery)
+    if (!terminal) return { runId, status: status === 'complete' ? 'aborted' : status, error, ...result }
+    deliveryAcceptance = terminal.acceptance
+    status = terminal.status
+    error = terminal.error
+    publish({
+      type: 'message.added',
+      conversationId: args.conversationId,
+      timestamp: finishedAt,
+      message: terminal.message,
     })
-    .where(and(eq(schema.messages.runId, runId), eq(schema.messages.status, 'streaming')))
+  } else {
+    await db.update(schema.agentRuns)
+      .set({ status, finishedAt, error: error ?? null })
+      .where(eq(schema.agentRuns.id, runId))
+    await db.update(schema.messages)
+      .set({ status: status === 'complete' ? 'complete' : status === 'aborted' ? 'aborted' : 'error' })
+      .where(and(eq(schema.messages.runId, runId), eq(schema.messages.status, 'streaming')))
+  }
 
   // 失败 / 中止时把错误信息暴露给用户：如果该 run 已有 streaming message，把
   // 错误作为新 text part 追加；否则新建一条 system message 显示错误。
@@ -1920,10 +2001,11 @@ async function finalize(
     await emitErrorVisualisation(runId, args, status, error, result.outputMessageIds)
   }
 
-  await db
-    .update(schema.conversations)
-    .set({ updatedAt: finishedAt })
-    .where(eq(schema.conversations.id, args.conversationId))
+  if (!revisionId) {
+    await db.update(schema.conversations)
+      .set({ updatedAt: finishedAt })
+      .where(eq(schema.conversations.id, args.conversationId))
+  }
 
   publish({
     type: 'run.end',
@@ -1942,7 +2024,98 @@ async function finalize(
     outputMessageIds: result.outputMessageIds,
     outputArtifacts: result.outputArtifacts,
     ...(result.taskReport ? { taskReport: result.taskReport } : {}),
+    ...(deliveryAcceptance ? { deliveryAcceptance } : {}),
   }
+}
+
+function persistBoundDelivery(
+  runId: string, args: RunArgs, revisionId: string, status: RunResult['status'], finishedAt: number,
+  error: string | undefined, pending: PreparedRunDelivery | undefined,
+): {
+  acceptance: DeliveryRunAcceptance
+  message: MessageRecord
+  status: RunResult['status']
+  error: string | undefined
+} | undefined {
+  return db.transaction((tx) => {
+    const where = and(
+      eq(schema.agentRuns.id, runId),
+      eq(schema.agentRuns.conversationId, args.conversationId),
+      eq(schema.agentRuns.agentId, args.agentId),
+      eq(schema.agentRuns.triggerMessageId, args.triggerMessageId),
+      eq(schema.agentRuns.status, 'running'),
+    )
+    const owner = tx.select({ acceptance: schema.agentRuns.deliveryAcceptance })
+      .from(schema.agentRuns).where(where).get()
+    if (owner?.acceptance?.status !== 'pending' || owner.acceptance.revisionId !== revisionId) return
+    const triggerBinding = tx.select({ revisionId: schema.messages.deliveryValidationRevisionId })
+      .from(schema.messages).where(and(
+        eq(schema.messages.id, args.triggerMessageId),
+        eq(schema.messages.conversationId, args.conversationId),
+        eq(schema.messages.role, 'user'),
+        eq(schema.messages.status, 'complete'),
+      )).get()
+    const matchingTrigger = triggerBinding?.revisionId === revisionId
+    if (pending?.signal.aborted) {
+      status = 'aborted'
+      error = undefined
+    }
+
+    let acceptance: DeliveryRunAcceptance = status === 'complete'
+      ? {
+          revisionId,
+          status: 'unverified',
+          reason: matchingTrigger ? pending?.reason ?? '交付文件未完成验证。' : '正式交付请求或规则绑定已变更。',
+        }
+      : { revisionId, status: 'not_run', reason: status === 'aborted' ? '运行已中止。' : '运行未正常完成。' }
+    const commit = pending?.commit
+    if (status === 'complete' && matchingTrigger && commit) {
+      try {
+        const receipt = tx.transaction(() => {
+          const value = commit(runId)
+          pending?.signal.throwIfAborted()
+          if (value.revisionId !== revisionId || value.runId !== runId) {
+            throw new Error('验收结果与当前交付任务不一致。')
+          }
+          return value
+        })
+        acceptance = { revisionId, receiptId: receipt.id, status: receipt.status, checks: receipt.checks }
+      } catch (error) {
+        acceptance = {
+          revisionId, status: 'unverified',
+          reason: error instanceof Error ? error.message.slice(0, 300) : '验收结果未能提交。',
+        }
+      }
+    }
+    if (pending?.signal.aborted) {
+      status = 'aborted'
+      error = undefined
+      acceptance = { revisionId, status: 'not_run', reason: '运行已中止。' }
+    }
+
+    tx.update(schema.agentRuns).set({ status, finishedAt, error: error ?? null, deliveryAcceptance: acceptance })
+      .where(where).run()
+    tx.update(schema.messages)
+      .set({ status: status === 'complete' ? 'complete' : status === 'aborted' ? 'aborted' : 'error' })
+      .where(and(eq(schema.messages.runId, runId), eq(schema.messages.status, 'streaming'))).run()
+    const message: MessageRecord = {
+      id: newMessageId(),
+      conversationId: args.conversationId,
+      role: 'system',
+      agentId: null,
+      parts: [{ type: 'delivery_acceptance', acceptance }],
+      status: 'complete',
+      parentMessageId: triggerBinding ? args.triggerMessageId : null,
+      mentionedAgentIds: [],
+      runId,
+      usage: null,
+      createdAt: finishedAt,
+    }
+    tx.insert(schema.messages).values(message).run()
+    tx.update(schema.conversations).set({ updatedAt: finishedAt })
+      .where(eq(schema.conversations.id, args.conversationId)).run()
+    return { acceptance, message, status, error }
+  })
 }
 
 async function emitErrorVisualisation(
@@ -2073,14 +2246,6 @@ function buildUnresolvedToolFailureResult(
   return error
     ? `工具调用未完成：本次运行失败。${error}`
     : '工具调用未完成：本次运行失败。'
-}
-
-function finalizeOk(
-  runId: string,
-  args: RunArgs,
-  result: RunExecutionResult,
-) {
-  return finalize(runId, args, 'complete', result)
 }
 
 function finalizeFailed(runId: string, args: RunArgs, error: string) {

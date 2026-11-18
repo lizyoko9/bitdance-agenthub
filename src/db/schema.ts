@@ -6,7 +6,7 @@
 
 import { sql } from 'drizzle-orm'
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
-import type { DeliveryFixture, DeliveryInput, DeliveryReceiptView, DeliveryRequirement } from '@/shared/delivery-validation'
+import type { DeliveryFixture, DeliveryInput, DeliveryReceiptView, DeliveryRequirement, DeliveryRunAcceptance } from '@/shared/delivery-validation'
 import type { ArtifactContent, ArtifactType, AdapterName, MessagePart, ModelProvider } from '@/shared/types'
 
 // ─── Agents ──────────────────────────────────────────────────
@@ -138,6 +138,7 @@ export const messages = sqliteTable(
 
     status: text('status', { enum: ['streaming', 'complete', 'error', 'aborted'] }).notNull(),
     parentMessageId: text('parent_message_id'),
+    deliveryValidationRevisionId: text('delivery_validation_revision_id'),
     mentionedAgentIds: text('mentioned_agent_ids', { mode: 'json' })
       .$type<string[]>()
       .notNull()
@@ -240,6 +241,7 @@ export const agentRuns = sqliteTable(
     error: text('error'),
 
     parentRunId: text('parent_run_id'),
+    deliveryAcceptance: text('delivery_acceptance', { mode: 'json' }).$type<DeliveryRunAcceptance>(),
 
     /** Token 使用量。run 完成时由 adapter 报告并由 AgentRunner 落库。null = 该 run 未上报（如 mock / 失败）。 */
     usage: text('usage', { mode: 'json' }).$type<RunUsage>(),
@@ -293,7 +295,7 @@ export const deliveryValidationReceipts = sqliteTable(
     engineVersion: integer('engine_version').notNull(),
     createdAt: integer('created_at').notNull(),
     result: text('result', { mode: 'json' })
-      .$type<Pick<DeliveryReceiptView, 'status' | 'checks' | 'inputs'>>().notNull(),
+      .$type<Pick<DeliveryReceiptView, 'status' | 'checks' | 'inputs' | 'runId'>>().notNull(),
   },
   (t) => [index('idx_delivery_receipts_rev').on(t.revisionId, t.createdAt)],
 )
@@ -381,7 +383,9 @@ export interface ConversationWithMeta extends ConversationRow {
   workspaceBoundPath: string | null
 }
 
-export type MessageRow = typeof messages.$inferSelect
+type StoredMessageRow = typeof messages.$inferSelect
+export type MessageRow = Omit<StoredMessageRow, 'deliveryValidationRevisionId'> &
+  Partial<Pick<StoredMessageRow, 'deliveryValidationRevisionId'>>
 export type MessageInsert = typeof messages.$inferInsert
 
 export type ArtifactRow = typeof artifacts.$inferSelect
@@ -393,7 +397,9 @@ export type WorkspaceInsert = typeof workspaces.$inferInsert
 export type AttachmentRow = typeof attachments.$inferSelect
 export type AttachmentInsert = typeof attachments.$inferInsert
 
-export type AgentRunRow = typeof agentRuns.$inferSelect
+type StoredAgentRunRow = typeof agentRuns.$inferSelect
+export type AgentRunRow = Omit<StoredAgentRunRow, 'deliveryAcceptance'> &
+  Partial<Pick<StoredAgentRunRow, 'deliveryAcceptance'>>
 export type AgentRunInsert = typeof agentRuns.$inferInsert
 
 export type ContextSummaryRow = typeof contextSummaries.$inferSelect

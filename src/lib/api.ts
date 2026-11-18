@@ -583,6 +583,7 @@ export interface SendMessageBody {
   mentionedAgentIds?: string[]
   parentMessageId?: string
   attachmentIds?: string[]
+  deliveryValidationRevisionId?: string
 }
 
 export interface SendMessageResult {

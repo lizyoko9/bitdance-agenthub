@@ -104,6 +104,8 @@ function PartRenderer({
       return <DeployStatusPart deployment={part.deployment} />
     case 'deploy_candidates':
       return <DeployCandidatesPart conversationId={conversationId} candidates={part.candidates} />
+    case 'delivery_acceptance':
+      return <DeliveryAcceptancePart acceptance={part.acceptance} />
     case 'image_attachment':
     case 'file_attachment':
       return (
@@ -121,6 +123,51 @@ function PartRenderer({
     default:
       return null
   }
+}
+
+const DELIVERY_ACCEPTANCE_LABELS = {
+  pending: '等待交付验收',
+  pass: '交付验收通过',
+  fail: '交付未通过',
+  unverified: '交付未验证',
+  not_run: '未执行交付验收',
+}
+
+function DeliveryAcceptancePart({ acceptance }: {
+  acceptance: Extract<MessagePart, { type: 'delivery_acceptance' }>['acceptance']
+}) {
+  const label = DELIVERY_ACCEPTANCE_LABELS[acceptance.status]
+  const issues = (acceptance.checks ?? []).filter((check) => check.status !== 'pass')
+
+  return (
+    <section
+      aria-label={label}
+      className={cn(
+        'space-y-2 text-sm',
+        acceptance.status === 'fail' && 'border-l-2 border-destructive/65 pl-2.5',
+        acceptance.status === 'pass' && 'border-l-2 border-emerald-500/65 pl-2.5',
+      )}
+    >
+      <p className={cn('font-medium', acceptance.status === 'fail' && 'text-destructive')}>{label}</p>
+      {acceptance.reason && <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{acceptance.reason}</p>}
+      {issues.length > 0 && (
+        <ul className="space-y-2">
+          {issues.map((check, index) => (
+            <li key={`${check.ruleId}/${index}`} className="space-y-1 rounded-md border px-2 py-1.5 text-xs">
+              <p className="break-words">{check.status === 'fail' ? '失败' : '未验证'} · {check.ruleId}</p>
+              {check.location && <code className="block break-all">{check.location}</code>}
+              {check.reason && <p className="whitespace-pre-wrap break-words text-muted-foreground">{check.reason}</p>}
+              {check.expected && <p className="break-words">预期：{check.expected}</p>}
+              {check.observed && <p className="break-words">实际：{check.observed}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="break-all text-xs text-muted-foreground">
+        {acceptance.receiptId ? <>回执 <code>{acceptance.receiptId}</code></> : <>规则版本 <code>{acceptance.revisionId}</code></>}
+      </p>
+    </section>
+  )
 }
 
 // ─── Text ──────────────────────────────────────────────

@@ -1000,6 +1000,7 @@ function areMessagesEquivalent(a: MessageRow, b: MessageRow): boolean {
     a.agentId === b.agentId &&
     a.status === b.status &&
     a.parentMessageId === b.parentMessageId &&
+    (a.deliveryValidationRevisionId ?? null) === (b.deliveryValidationRevisionId ?? null) &&
     a.runId === b.runId &&
     a.createdAt === b.createdAt &&
     areStringArraysEqual(a.mentionedAgentIds, b.mentionedAgentIds) &&
@@ -1072,6 +1073,8 @@ function areMessagePartsEquivalent(a: MessagePart, b: MessagePart): boolean {
         b.type === 'deploy_candidates' &&
         areUnknownValuesEquivalent(a.candidates, b.candidates)
       )
+    case 'delivery_acceptance':
+      return b.type === 'delivery_acceptance' && areUnknownValuesEquivalent(a.acceptance, b.acceptance)
     case 'image_attachment':
     case 'file_attachment':
       return (

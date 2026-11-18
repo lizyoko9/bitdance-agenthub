@@ -11,7 +11,6 @@ import type {
 } from '@/shared/delivery-validation'
 import type { MessagePart } from '@/shared/types'
 
-import { generateDeliveryValidationDraft } from './agent-runner'
 import {
   DELIVERY_VALIDATION_ENGINE_VERSION,
   DELIVERY_VALIDATION_GRAMMAR,
@@ -212,8 +211,9 @@ export async function createDeliveryDraft(conversationId: string, request: Draft
   const previous = request.previousRevisionId ? getRevision(conversationId, request.previousRevisionId) : undefined
   const planId = previous?.planId ?? randomUUID()
   const context = { requirements, inputs: request.inputs }
-  let generated: Awaited<ReturnType<typeof generateDeliveryValidationDraft>>
+  let generated: { generatorRunId: string; modelId: string; candidate: string }
   try {
+    const { generateDeliveryValidationDraft } = await import('./agent-runner')
     generated = await generateDeliveryValidationDraft({
       conversationId, agentId: request.agentId, triggerMessageId: requirements[0].messageId,
       requirements: requirements.map(({ id, quote }) => ({ id, quote })),
@@ -280,7 +280,16 @@ export function revokeDeliveryRevision(conversationId: string, revisionId: strin
   return toPlanView(saved)
 }
 
+export function assertDeliveryRevisionEligible(conversationId: string, revisionId: string) {
+  requireEligible(getRevision(conversationId, revisionId), true)
+}
+
 export async function validateDeliveryRevision(conversationId: string, revisionId: string, signal: AbortSignal) {
+  const commit = await prepareDeliveryValidation(conversationId, revisionId, signal)
+  return db.transaction(() => commit())
+}
+
+export async function prepareDeliveryValidation(conversationId: string, revisionId: string, signal: AbortSignal) {
   signal.throwIfAborted()
   const revision = getRevision(conversationId, revisionId)
   requireEligible(revision, true)
@@ -297,21 +306,35 @@ export async function validateDeliveryRevision(conversationId: string, revisionI
   }
   signal.throwIfAborted()
   const evaluation = evaluateDeliveryDraft(draft, revision, snapshots)
-  return db.transaction(() => {
+  const inputs = revision.inputs.map(({ alias, path }) => {
+    const snapshot = snapshots[alias]
+    return { alias, path, status: snapshot.status, ...(snapshot.status === 'ready' ? { sha256: snapshot.sha256 } : {}) }
+  })
+  let committed = false
+  return (runId?: string): DeliveryReceiptView => {
+    signal.throwIfAborted()
+    if (committed) throw new DeliveryValidationError('这份快照已保存过校验结果')
     const current = getRevision(conversationId, revisionId)
     requireEligible(current, true)
     if (current.definitionDigest !== revision.definitionDigest) throw new DeliveryValidationError('规则版本在验证期间发生变化')
-    const result = {
-      ...evaluation,
-      inputs: revision.inputs.map(({ alias, path }) => {
-        const snapshot = snapshots[alias]
-        return { alias, path, status: snapshot.status, ...(snapshot.status === 'ready' ? { sha256: snapshot.sha256 } : {}) }
-      }),
+    if (runId) {
+      const run = db.select({
+        status: schema.agentRuns.status,
+        acceptance: schema.agentRuns.deliveryAcceptance,
+      }).from(schema.agentRuns).where(and(
+        eq(schema.agentRuns.id, runId),
+        eq(schema.agentRuns.conversationId, conversationId),
+      )).get()
+      if (run?.status !== 'running' || run.acceptance?.status !== 'pending' || run.acceptance.revisionId !== revisionId) {
+        throw new DeliveryValidationError('正式交付任务已结束或规则绑定发生变化')
+      }
     }
     const row = db.insert(receipts).values({
       id: randomUUID(), revisionId, definitionDigest: revision.definitionDigest,
-      engineVersion: revision.engineVersion, createdAt: Date.now(), result,
+      engineVersion: revision.engineVersion, createdAt: Date.now(),
+      result: { ...evaluation, inputs, ...(runId ? { runId } : {}) },
     }).returning().get()
+    committed = true
     return toReceipt(row)
-  })
+  }
 }

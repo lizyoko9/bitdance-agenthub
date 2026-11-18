@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { AttachmentChip, PendingAttachmentChip } from '@/components/attachment-chip'
+import { DeliveryAcceptancePicker, type DeliveryAcceptanceChoice } from '@/components/delivery-acceptance-picker'
 import { QuotedMessage } from '@/components/quoted-message'
 import { SlashCommandHelpDialog } from '@/components/slash-command-help-dialog'
 import { SlashCommandMenu, type SlashCommandItem } from '@/components/slash-command-menu'
@@ -186,6 +187,16 @@ function renderMessagePartForExport(part: MessageRow['parts'][number]): string {
       return `[Deployment candidates: ${part.candidates
         .map((candidate) => `${candidate.title} v${candidate.version} (${candidate.artifactId})`)
         .join(', ')}]`
+    case 'delivery_acceptance':
+      return [
+        `Delivery acceptance: ${part.acceptance.status}`,
+        `Rule revision: ${part.acceptance.revisionId}`,
+        ...(part.acceptance.receiptId ? [`Receipt: ${part.acceptance.receiptId}`] : []),
+        ...(part.acceptance.reason ? [part.acceptance.reason] : []),
+        ...(part.acceptance.checks ?? []).map((check) => [
+          check.status, check.ruleId, check.location, check.reason, check.expected, check.observed,
+        ].filter(Boolean).join(' · ')),
+      ].join('\n')
     case 'image_attachment':
     case 'file_attachment':
       return `[Attachment: ${part.fileName} (${part.attachmentId}, ${part.mimeType}, ${part.size} bytes)]`
@@ -249,6 +260,14 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const [sending, setSending] = useState(false)
   const [aborting, setAborting] = useState(false)
   const [uploading, setUploading] = useState<Array<{ tempId: string; name: string }>>([])
+  const [delivery, setDelivery] = useState<{
+    conversationId: string
+    choice: DeliveryAcceptanceChoice | null
+    error?: string
+  }>({ conversationId, choice: null })
+  if (delivery.conversationId !== conversationId) {
+    setDelivery({ conversationId, choice: null })
+  }
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -284,6 +303,9 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   }, [pendingQuote])
 
   const isGroup = conversation?.mode === 'group'
+  const producer = conversation?.agentIds.length === 1 && agents[conversation.agentIds[0]]
+  const canBindDelivery = conversation?.mode === 'single' && !!producer && !producer.isOrchestrator
+  const deliveryChoice = canBindDelivery && delivery.conversationId === conversationId ? delivery.choice : null
 
   // 可被 @ 的 agent：群聊里所有成员，包含 Orchestrator
   // (@ Orchestrator 是合法语义：用户明确请求 Orchestrator 接手)
@@ -506,6 +528,10 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     if (replyTargetId) setReplyTarget(conversationId, null)
   }
 
+  const clearDeliveryChoice = () => {
+    setDelivery((current) => current.conversationId === conversationId ? { conversationId, choice: null } : current)
+  }
+
   const executeExportCommand = async () => {
     if (exporting) return
     clearSlashCommandInput()
@@ -533,6 +559,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
       const result = await clearConversationHistoryAPI(conversationId)
       clearConversationHistory(conversationId, result.conversation)
       clearComposerDraft()
+      clearDeliveryChoice()
       setClearHistoryOpen(false)
     } catch (err) {
       console.error('[MessageInput] clear history failed', err)
@@ -576,6 +603,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
       const result = await sendMessageAPI(conversationId, { content: '/deploy' })
       replaceLocalMessageId(tempId, result.messageId)
       upsertReturnedMessages(result.messages)
+      clearDeliveryChoice()
     } catch (err) {
       console.error('[MessageInput] deploy failed', err)
     } finally {
@@ -710,33 +738,59 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
       ? `<quoted_selection source="${pendingQuote.sourceLabel}"${pendingQuote.artifactId ? ` artifactId="${pendingQuote.artifactId}"` : ''}${pendingQuote.filePath ? ` filePath="${pendingQuote.filePath}"` : ''}>\n${pendingQuote.text}\n</quoted_selection>\n\n${text}`
       : text
 
-    const tempId = `temp_${nanoid()}`
     const parentId = replyTargetId ?? undefined
-    addLocalUserMessage({
-      tempId,
+    const localMessage = {
       conversationId,
       content: finalContent,
       mentionedAgentIds: mentionedIds,
       parentMessageId: parentId,
       attachments: pending,
-    })
+    }
+    const request = {
+      content: finalContent,
+      mentionedAgentIds: mentionedIds,
+      parentMessageId: parentId,
+      attachmentIds: pending.map((a) => a.id),
+    }
+
+    if (deliveryChoice) {
+      setSending(true)
+      setDelivery({ conversationId, choice: deliveryChoice })
+      try {
+        const result = await sendMessageAPI(conversationId, {
+          ...request,
+          deliveryValidationRevisionId: deliveryChoice.id,
+        })
+        if (!useAppStore.getState().messages[result.messageId]) {
+          addLocalUserMessage({ ...localMessage, tempId: result.messageId })
+        }
+        upsertReturnedMessages(result.messages)
+        if (useAppStore.getState().activeConversationId === conversationId) clearComposerDraft()
+        clearDeliveryChoice()
+      } catch (cause) {
+        setDelivery((current) => current.conversationId === conversationId ? {
+          ...current,
+          error: cause instanceof Error ? cause.message : '交付请求发送失败',
+        } : current)
+      } finally {
+        setSending(false)
+      }
+      return
+    }
+
+    const tempId = `temp_${nanoid()}`
+    addLocalUserMessage({ ...localMessage, tempId })
     setContent('')
     setMentionedIds([])
     setTrigger(null)
     setSlashTrigger(null)
     if (pendingQuote) setPendingQuote(null)
-    const attachmentIds = pending.map((a) => a.id)
     clearPendingAttachments(conversationId)
     if (replyTargetId) setReplyTarget(conversationId, null)
     setSending(true)
 
     try {
-      const result = await sendMessageAPI(conversationId, {
-        content: finalContent,
-        mentionedAgentIds: mentionedIds,
-        parentMessageId: parentId,
-        attachmentIds,
-      })
+      const result = await sendMessageAPI(conversationId, request)
       replaceLocalMessageId(tempId, result.messageId)
       upsertReturnedMessages(result.messages)
     } catch (err) {
@@ -941,6 +995,21 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
         </div>
       )}
 
+      {canBindDelivery && !planReview && (
+        <div className="mb-1.5 space-y-1">
+          <DeliveryAcceptancePicker
+            key={conversationId}
+            conversationId={conversationId}
+            choice={deliveryChoice}
+            disabled={sending || composerLocked}
+            onChange={(choice) => setDelivery({ conversationId, choice })}
+          />
+          {delivery.conversationId === conversationId && delivery.error && (
+            <p role="alert" className="break-words text-xs text-destructive">{delivery.error}</p>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <Textarea
           ref={textareaRef}
@@ -959,7 +1028,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
                   : '输入消息，Enter 发送，Shift+Enter 换行'
           }
           className="min-h-[44px] max-h-40 resize-none"
-          disabled={composerLocked}
+          disabled={composerLocked || (sending && !!deliveryChoice)}
         />
 
         {/* 文件上传 */}

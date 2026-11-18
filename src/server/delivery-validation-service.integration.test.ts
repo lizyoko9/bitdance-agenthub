@@ -2,9 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
+import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DeliveryCatalog, DeliveryPlanView, DeliveryReceiptView } from '@/shared/delivery-validation'
+import type { StreamEvent } from '@/shared/types'
 
 const captureHook = vi.hoisted(() => ({ after: undefined as (() => void) | undefined }))
 vi.mock('./delivery-validation-snapshot', async (importOriginal) => {
@@ -52,12 +54,25 @@ let route: typeof import('@/app/api/conversations/[id]/delivery-validation/route
 const fetchMock = vi.fn<typeof fetch>()
 
 function responseWithCandidate(content: string) {
+  return completionResponse({ content }, 'stop')
+}
+
+function completionResponse(delta: unknown, finishReason: 'stop' | 'tool_calls') {
   return new Response('data: ' + JSON.stringify({
     id: 'fixture-completion', object: 'chat.completion.chunk', created: 1, model: 'fixture-model',
-    choices: [{ index: 0, delta: { content }, finish_reason: 'stop' }],
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
   }) + '\n\ndata: [DONE]\n\n', {
     headers: { 'content-type': 'text/event-stream' },
   })
+}
+
+function reportWrite(content: string) {
+  return completionResponse({
+    tool_calls: [{
+      index: 0, id: 'fixture_write', type: 'function',
+      function: { name: 'fs_write', arguments: JSON.stringify({ path: 'report.json', content }) },
+    }],
+  }, 'tool_calls')
 }
 
 async function openDatabase() {
@@ -95,7 +110,7 @@ async function setup() {
     name: 'Offline validation generator', avatar: '🔬', description: 'Fake transport',
     capabilities: [],
     systemPrompt: 'Unrelated author prompt.',
-    modelProvider: 'openai', modelId: 'fixture-model', toolNames: ['bash'], skillIds: [],
+    modelProvider: 'openai', modelId: 'fixture-model', toolNames: ['bash', 'fs_write'], skillIds: [],
     apiKey: 'fixture-key-not-a-credential', apiBaseUrl: 'https://offline.invalid/v1',
   })
   const conversation = await conversations.createConversation({ mode: 'single', agentIds: [agent.id] })
@@ -141,6 +156,29 @@ function writeFiles(directory: string, report: string) {
   writeFileSync(path.join(directory, 'report.json'), report)
   writeFileSync(path.join(directory, 'notes.md'), '## Summary\nReviewed output.\n')
   writeFileSync(path.join(directory, 'totals.json'), '{"deleted":1,"kept":1}')
+}
+
+async function sendFormal(conversationId: string, revisionId?: string) {
+  const messages = await import('@/app/api/conversations/[id]/messages/route')
+  const response = await messages.POST(new NextRequest('http://localhost/api/conversations/' + conversationId + '/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: 'Please write the final report.',
+      ...(revisionId ? { deliveryValidationRevisionId: revisionId } : {}),
+    }),
+  }), { params: Promise.resolve({ id: conversationId }) })
+  const body = await response.json()
+  expect(response.status, JSON.stringify(body)).toBe(202)
+  return body.runIds[0] as string
+}
+
+async function terminalRun(runId: string) {
+  return vi.waitFor(() => {
+    const run = client.db.select().from(client.schema.agentRuns).where(eq(client.schema.agentRuns.id, runId)).get()
+    if (!run || !['complete', 'failed', 'aborted'].includes(run.status)) throw new Error('Run is not terminal')
+    return run
+  })
 }
 
 describe('reusable delivery validation through the conversation API', () => {
@@ -249,5 +287,97 @@ describe('reusable delivery validation through the conversation API', () => {
     await clearConversationHistory(conversationId)
     expect(client.db.select().from(client.schema.deliveryValidationRevisions).all()).toEqual([])
     expect(client.db.select().from(client.schema.deliveryValidationReceipts).all()).toEqual([])
+  })
+})
+
+describe('Hub automatic delivery acceptance', () => {
+  it('checks the actual last file write, publishes inline, then regenerates with the same rule and a fresh receipt', async () => {
+    const { conversationId, draft, workspace } = await setup()
+    const active = await activate(conversationId, draft)
+    client.db.update(client.schema.conversations).set({ fsWriteApprovalMode: 'auto' })
+      .where(eq(client.schema.conversations.id, conversationId)).run()
+    writeFiles(workspace.rootPath, '{"s1":"ABC","s2":null}')
+    const manual = (await post(conversationId, { action: 'validate', revisionId: active.id })).body.receipt as DeliveryReceiptView
+    expect(manual.status).toBe('pass')
+    expect(manual.runId).toBeUndefined()
+    const { eventBus } = await import('./event-bus')
+    const events: StreamEvent[] = []
+    const off = eventBus.subscribe(({ event }) => { if (event.conversationId === conversationId) events.push(event) })
+    try {
+      fetchMock.mockResolvedValueOnce(reportWrite('{"s1":{"verification_code":"ABC"},"s2":null}'))
+        .mockResolvedValueOnce(responseWithCandidate('Report written.'))
+      const firstRunId = await sendFormal(conversationId, active.id)
+      const first = await terminalRun(firstRunId)
+      expect(first.status).toBe('complete')
+      expect(first.deliveryAcceptance).toMatchObject({ revisionId: active.id, status: 'fail' })
+      expect(first.deliveryAcceptance?.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ ruleId: 'report_shape', status: 'fail', location: expect.stringContaining('s1') }),
+      ]))
+      const inline = events.find((e) => e.type === 'message.added' && e.message.runId === firstRunId && e.message.role === 'system')
+      const end = events.findIndex((e) => e.type === 'run.end' && e.runId === firstRunId)
+      expect(inline).toMatchObject({ message: {
+        parts: [{ type: 'delivery_acceptance', acceptance: first.deliveryAcceptance }],
+      } })
+      expect(events.findIndex((e) => e === inline)).toBeLessThan(end)
+      expect(first.deliveryAcceptance?.receiptId).not.toBe(manual.id)
+
+      const { regenerateLatestResponse } = await import('./conversation-service')
+      fetchMock.mockResolvedValueOnce(reportWrite('{"s1":"ABC","s2":null}'))
+        .mockResolvedValueOnce(responseWithCandidate('Corrected report written.'))
+      const regenerated = await regenerateLatestResponse(conversationId)
+      const second = await terminalRun(regenerated.runIds[0])
+      expect(second.deliveryAcceptance).toMatchObject({ revisionId: active.id, status: 'pass' })
+      expect(second.deliveryAcceptance?.receiptId).not.toBe(first.deliveryAcceptance?.receiptId)
+      const automaticReceipt = client.db.select().from(client.schema.deliveryValidationReceipts)
+        .where(eq(client.schema.deliveryValidationReceipts.id, second.deliveryAcceptance!.receiptId!)).get()
+      expect(automaticReceipt?.result.runId).toBe(second.id)
+      expect(fetchMock).toHaveBeenCalledTimes(5)
+
+      closeDatabase()
+      vi.resetModules()
+      await openDatabase()
+      const messages = await import('@/app/api/conversations/[id]/messages/route')
+      const snapshot = await messages.GET(new NextRequest('http://localhost'), { params: Promise.resolve({ id: conversationId }) })
+      expect((await snapshot.json()).messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: 'system', runId: second.id, parts: [
+          { type: 'delivery_acceptance', acceptance: second.deliveryAcceptance },
+        ] }),
+      ]))
+      expect(fetchMock).toHaveBeenCalledTimes(5)
+    } finally {
+      off()
+    }
+  })
+
+  it('skips ordinary turns and keeps cancelled or revoked formal runs from getting a receipt', async () => {
+    const { conversationId, draft, workspace } = await setup()
+    const active = await activate(conversationId, draft)
+    writeFiles(workspace.rootPath, '{"s1":"ABC","s2":null}')
+    fetchMock.mockResolvedValueOnce(responseWithCandidate('Discussion.'))
+    const unbound = await terminalRun(await sendFormal(conversationId))
+    expect(unbound.deliveryAcceptance).toBeNull()
+    const { AgentRunner } = await import('./agent-runner')
+    captureHook.after = () => {
+      captureHook.after = undefined
+      const run = client.db.select().from(client.schema.agentRuns)
+        .where(eq(client.schema.agentRuns.status, 'running')).get()
+      if (run) AgentRunner.abort(run.id)
+    }
+    fetchMock.mockResolvedValueOnce(responseWithCandidate('Candidate prepared.'))
+    const cancelled = await terminalRun(await sendFormal(conversationId, active.id))
+    expect(cancelled.status).toBe('aborted')
+    expect(cancelled.deliveryAcceptance?.status).toBe('not_run')
+
+    captureHook.after = () => {
+      captureHook.after = undefined
+      client.db.update(client.schema.deliveryValidationRevisions).set({ revokedAt: Date.now() })
+        .where(eq(client.schema.deliveryValidationRevisions.id, active.id)).run()
+    }
+    fetchMock.mockResolvedValueOnce(responseWithCandidate('Candidate prepared.'))
+    const revoked = await terminalRun(await sendFormal(conversationId, active.id))
+    expect(revoked.status).toBe('complete')
+    expect(revoked.deliveryAcceptance?.status).toBe('unverified')
+    expect(client.db.select().from(client.schema.deliveryValidationReceipts).all()).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 })

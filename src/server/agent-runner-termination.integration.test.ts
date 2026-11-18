@@ -6,10 +6,15 @@ import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { StreamEvent } from '@/shared/types'
+import type { DeliveryReceiptView } from '@/shared/delivery-validation'
 
 import type { AgentPlatformAdapter } from './adapters/types'
 
 const registry = vi.hoisted(() => ({ adapter: undefined as AgentPlatformAdapter | undefined }))
+const delivery = vi.hoisted(() => ({
+  prepare: vi.fn<(conversationId: string, revisionId: string, signal: AbortSignal) =>
+    Promise<(ownerRunId: string) => DeliveryReceiptView>>(),
+}))
 vi.mock('./adapters/registry', () => ({
   agentRegistry: {
     getAdapter: () => {
@@ -18,30 +23,143 @@ vi.mock('./adapters/registry', () => ({
     },
   },
 }))
+vi.mock('./delivery-validation-service', () => ({
+  assertDeliveryRevisionEligible: () => undefined,
+  prepareDeliveryValidation: delivery.prepare,
+  DeliveryValidationError: class extends Error {},
+}))
 
 let client: typeof import('@/db/client')
 let conversations: typeof import('./conversation-service')
 let agents: typeof import('./agent-service')
 let eventBus: typeof import('./event-bus').eventBus
 let CustomAgentAdapter: typeof import('./adapters/custom-agent-adapter').CustomAgentAdapter
+let AgentRunner: typeof import('./agent-runner').AgentRunner
 let dataDir: string
 const fetchMock = vi.fn<typeof fetch>()
 
 beforeAll(async () => {
   dataDir = mkdtempSync(path.join(tmpdir(), 'agenthub-run-termination-'))
   vi.stubEnv('AGENTHUB_DATA_DIR', dataDir)
-  ;[client, conversations, agents, { eventBus }, { CustomAgentAdapter }] = await Promise.all([
+  ;[client, conversations, agents, { eventBus }, { CustomAgentAdapter }, { AgentRunner }] = await Promise.all([
     import('@/db/client'),
     import('./conversation-service'),
     import('./agent-service'),
     import('./event-bus'),
     import('./adapters/custom-agent-adapter'),
+    import('./agent-runner'),
   ])
 })
 
 beforeEach(() => {
   fetchMock.mockReset()
+  delivery.prepare.mockReset()
   vi.stubGlobal('fetch', fetchMock)
+})
+
+async function boundRunFixture() {
+  registry.adapter = new CustomAgentAdapter({ maxTurns: 1, maxRetries: 0 })
+  const agent = await agents.createCustomAgent({
+    name: 'Delivery transaction fixture', avatar: '🤖', description: 'Offline runner test',
+    capabilities: [], systemPrompt: 'Finish the delivery.',
+    modelProvider: 'openai', modelId: 'fixture-model', toolNames: [],
+    apiKey: 'fixture-key-not-a-credential',
+  })
+  const conversation = await conversations.createConversation({ mode: 'single', agentIds: [agent.id] })
+  const triggerMessageId = `fixture-delivery-${crypto.randomUUID()}`
+  const deliveryValidationRevisionId = 'fixture-revision'
+  await client.db.insert(client.schema.messages).values({
+    id: triggerMessageId, conversationId: conversation.id, role: 'user', status: 'complete',
+    parts: [{ type: 'text', content: 'Deliver the checked report.' }],
+    deliveryValidationRevisionId,
+    createdAt: Date.now(),
+  })
+  fetchMock.mockResolvedValueOnce(modelResponse(false))
+  return { agentId: agent.id, conversationId: conversation.id, triggerMessageId, deliveryValidationRevisionId }
+}
+
+describe('AgentRunner delivery terminal ownership', () => {
+  it('declines an internal binding when the user request did not select that revision', async () => {
+    const args = await boundRunFixture()
+    client.db.update(client.schema.messages).set({ deliveryValidationRevisionId: null })
+      .where(eq(client.schema.messages.id, args.triggerMessageId)).run()
+    const terminal = await AgentRunner.run(args).promise
+    expect(terminal).toMatchObject({
+      status: 'failed',
+      deliveryAcceptance: { revisionId: args.deliveryValidationRevisionId, status: 'not_run' },
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(delivery.prepare).not.toHaveBeenCalled()
+  })
+
+  it('does not commit or publish an acceptance after the prepared run was replaced', async () => {
+    const args = await boundRunFixture()
+    const events: StreamEvent[] = []
+    const unsubscribe = eventBus.subscribe(({ event }) => {
+      if (event.conversationId === args.conversationId) events.push(event)
+    })
+    let release: (commit: (runId: string) => DeliveryReceiptView) => void = () => {}
+    delivery.prepare.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    const commit = vi.fn(() => { throw new Error('An abandoned run must not commit') })
+    try {
+      const { runId, promise } = AgentRunner.run(args)
+      await vi.waitFor(() => expect(delivery.prepare).toHaveBeenCalledOnce())
+      client.db.delete(client.schema.agentRuns).where(eq(client.schema.agentRuns.id, runId)).run()
+      release(commit)
+      const terminal = await promise
+      expect(terminal.status).toBe('aborted')
+      expect(terminal.deliveryAcceptance).toBeUndefined()
+      expect(commit).not.toHaveBeenCalled()
+      expect(events.some((event) => event.type === 'message.added' || event.type === 'run.end')).toBe(false)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('does not apply a prepared receipt after the stored formal request binding changes', async () => {
+    const args = await boundRunFixture()
+    let release: (commit: (runId: string) => DeliveryReceiptView) => void = () => {}
+    delivery.prepare.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    const commit = vi.fn(() => { throw new Error('A changed user binding must not commit') })
+    const { promise } = AgentRunner.run(args)
+    await vi.waitFor(() => expect(delivery.prepare).toHaveBeenCalledOnce())
+    client.db.update(client.schema.messages).set({ deliveryValidationRevisionId: 'another-revision' })
+      .where(eq(client.schema.messages.id, args.triggerMessageId)).run()
+    release(commit)
+    const terminal = await promise
+    expect(terminal).toMatchObject({
+      status: 'complete',
+      deliveryAcceptance: { revisionId: args.deliveryValidationRevisionId, status: 'unverified' },
+    })
+    expect(terminal.deliveryAcceptance?.receiptId).toBeUndefined()
+    expect(commit).not.toHaveBeenCalled()
+  })
+
+  it('rolls back a partial receipt write and atomically persists an unverified outcome', async () => {
+    const args = await boundRunFixture()
+    const commit = vi.fn((): DeliveryReceiptView => {
+      client.db.update(client.schema.conversations).set({ title: 'partial-write-sentinel' })
+        .where(eq(client.schema.conversations.id, args.conversationId)).run()
+      throw new Error('Synthetic receipt failure')
+    })
+    delivery.prepare.mockResolvedValueOnce(commit)
+    const { runId, promise } = AgentRunner.run(args)
+    const result = await promise
+    expect(result.status).toBe('complete')
+    expect(result.deliveryAcceptance).toMatchObject({ revisionId: args.deliveryValidationRevisionId, status: 'unverified' })
+    expect(commit).toHaveBeenCalledExactlyOnceWith(runId)
+    const run = client.db.select().from(client.schema.agentRuns)
+      .where(eq(client.schema.agentRuns.id, runId)).get()
+    expect(run).toMatchObject({ status: 'complete', error: null, deliveryAcceptance: result.deliveryAcceptance })
+    const conversation = client.db.select().from(client.schema.conversations)
+      .where(eq(client.schema.conversations.id, args.conversationId)).get()
+    expect(conversation?.title).not.toBe('partial-write-sentinel')
+    const messages = await client.db.query.messages.findMany({ where: eq(client.schema.messages.runId, runId) })
+    expect(messages.filter(({ role }) => role === 'system')).toEqual([expect.objectContaining({
+      parentMessageId: args.triggerMessageId,
+      parts: [{ type: 'delivery_acceptance', acceptance: result.deliveryAcceptance }],
+    })])
+  })
 })
 
 afterEach(() => vi.unstubAllGlobals())

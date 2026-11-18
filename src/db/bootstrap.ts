@@ -77,6 +77,7 @@ const DDL: string[] = [
     parts TEXT NOT NULL,
     status TEXT NOT NULL,
     parent_message_id TEXT,
+    delivery_validation_revision_id TEXT,
     mentioned_agent_ids TEXT NOT NULL DEFAULT '[]',
     run_id TEXT,
     usage TEXT,
@@ -130,6 +131,7 @@ const DDL: string[] = [
     status TEXT NOT NULL,
     error TEXT,
     parent_run_id TEXT,
+    delivery_acceptance TEXT,
     usage TEXT,
     started_at INTEGER NOT NULL,
     finished_at INTEGER
@@ -223,6 +225,8 @@ function ensureSchema(sqlite: Database.Database): void {
     sqlite.exec(stmt)
   }
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN companion_mode TEXT NOT NULL DEFAULT 'off'`)
+  safeAlter(sqlite, `ALTER TABLE messages ADD COLUMN delivery_validation_revision_id TEXT`)
+  safeAlter(sqlite, `ALTER TABLE agent_runs ADD COLUMN delivery_acceptance TEXT`)
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN mobile_device_token TEXT`)
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN deployment_publish_enabled INTEGER NOT NULL DEFAULT 0`)
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN deployment_publish_dir TEXT`)

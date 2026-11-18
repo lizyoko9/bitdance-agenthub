@@ -3,6 +3,8 @@
  * 与 specs/01-core-entities.md, specs/02-stream-events.md, specs/03-message-parts.md 对应。
  */
 
+import type { DeliveryRunAcceptance } from './delivery-validation'
+
 // ─── MessagePart 联合类型 ─────────────────────────────────
 export type MessagePart =
   | { type: 'text'; content: string }
@@ -13,6 +15,7 @@ export type MessagePart =
   | { type: 'artifact_ref'; artifactId: string }
   | { type: 'deploy_status'; deployment: DeployStatusRecord }
   | { type: 'deploy_candidates'; candidates: DeployCandidateRecord[] }
+  | { type: 'delivery_acceptance'; acceptance: DeliveryRunAcceptance }
   | {
       type: 'image_attachment'
       attachmentId: string

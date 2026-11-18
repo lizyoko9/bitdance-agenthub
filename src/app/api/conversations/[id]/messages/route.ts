@@ -13,6 +13,7 @@ const SendBody = z
     mentionedAgentIds: z.array(z.string()).optional(),
     parentMessageId: z.string().optional(),
     attachmentIds: z.array(z.string()).optional(),
+    deliveryValidationRevisionId: z.string().min(1).max(128).optional(),
   })
   .refine(
     (d) => d.content.trim().length > 0 || (d.attachmentIds && d.attachmentIds.length > 0),
@@ -32,6 +33,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid body', issues: parsed.error.issues }, { status: 400 })
   }
+  if (parsed.data.deliveryValidationRevisionId) {
+    const origin = req.headers.get('origin')
+    if (req.headers.get('sec-fetch-site') === 'cross-site' || (origin && origin !== new URL(req.url).origin)) {
+      return NextResponse.json({ error: '正式交付请求须来自当前应用' }, { status: 403 })
+    }
+    if (req.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+      return NextResponse.json({ error: '正式交付请求需要 application/json' }, { status: 415 })
+    }
+  }
 
   try {
     const result = await sendMessage({
@@ -40,6 +50,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       mentionedAgentIds: parsed.data.mentionedAgentIds,
       parentMessageId: parsed.data.parentMessageId,
       attachmentIds: parsed.data.attachmentIds,
+      deliveryValidationRevisionId: parsed.data.deliveryValidationRevisionId,
     })
     return NextResponse.json(result, { status: 202 })
   } catch (err) {
