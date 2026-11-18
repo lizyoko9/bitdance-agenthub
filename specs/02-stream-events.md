@@ -30,7 +30,7 @@ type StreamEvent = BaseEvent & (
   // —— Message 生命周期 ——
   | { type: 'message.start', messageId: string, agentId: string, runId: string }
   | { type: 'message.end',   messageId: string }
-  | { type: 'message.added', message: Message }   // 用户消息：已落库后广播，让非发送方客户端实时插入
+  | { type: 'message.added', message: Message }   // 已落库的用户消息或 Hub 系统消息
   | { type: 'message.removed', messageIds: string[], artifactIds: string[] }  // 撤回/编辑/重新生成删除消息后广播
 
   // —— Part 增量（核心，最高频）——
@@ -130,6 +130,8 @@ type PartDelta =
   | { type: 'thinking.append', text: string }
   // 注：tool_use / tool_result / artifact_ref 不增量，整体替换或独立事件
 ```
+
+正式交付的自动验收使用标准 `message.added` 传输持久化的系统消息。消息含 `delivery_acceptance` part，并通过 `runId` 关联本轮执行。其验收状态独立于 `run.end` 的执行状态。重连或重新打开会话时，消息快照恢复同一验收结果。
 
 ---
 
@@ -242,7 +244,7 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 | `run.*` | ✅ 落到 `agent_runs` 表 | start/end 更新 status |
 | `message.start` | ✅ 创建 message 记录（parts=[]） | |
 | `message.end` | ✅ 更新 status='complete' | |
-| `message.added` | ❌ 透传 | user 消息已由 `sendMessage` 落库；此事件仅广播给其它客户端，前端按 id 幂等 upsert（详见下方「用户消息广播」） |
+| `message.added` | ❌ 透传 | 用户消息或 Hub 验收消息由应用服务先落库。前端按 id 幂等 upsert（详见下方「用户消息广播」） |
 | `message.removed` | ❌ 透传 | 撤回/编辑/重新生成已在服务端删库；此事件仅广播 messageIds/artifactIds 让其它客户端幂等移除 |
 | `part.start` | ✅ 写入 `messages.parts[i]` | parts 整体作为 JSON 更新 |
 | `part.delta` | ✅ 追加到 `messages.parts[i].content` | 高频写，按 100ms 窗口合并落库（见下方「写入策略」） |

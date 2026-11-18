@@ -98,6 +98,7 @@ interface Message {
 
   status: 'streaming' | 'complete' | 'error' | 'aborted'
   parentMessageId?: string      // 回复 / 引用关系
+  deliveryValidationRevisionId?: string // 正式交付用户消息选择的已启用版本
   mentionedAgentIds: string[]   // 用户 @ 提及的 Agent
 
   runId?: string                // role === 'agent' 时，由哪个 AgentRun 产生
@@ -222,6 +223,7 @@ interface AgentRun {
   conversationId: string
   agentId: string
   triggerMessageId?: string     // 由哪条消息触发；错误降级 run 可能没有 trigger
+  deliveryAcceptance?: DeliveryRunAcceptance // 正式交付验收和回执，见 Spec 17
 
   status: 'queued' | 'running' | 'complete' | 'failed' | 'aborted'
   error?: string

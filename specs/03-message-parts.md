@@ -1,6 +1,6 @@
 # Spec 03 — MessagePart 类型
 
-> Message 是「容器」，真正内容在 `parts: MessagePart[]`。本 spec 定义 10 种 part 类型与对应的渲染、增量协议、新增步骤。**修改 part 类型需先讨论。**
+> Message 是「容器」，真正内容在 `parts: MessagePart[]`。本 spec 定义 part 类型与对应的渲染、增量协议、新增步骤。**修改 part 类型需先讨论。**
 
 源文件：`src/shared/types.ts:7-27`、`src/components/message-parts.tsx`
 
@@ -27,6 +27,7 @@ type MessagePart =
   | { type: 'artifact_ref'; artifactId: string }
   | { type: 'deploy_status'; deployment: DeployStatusRecord }
   | { type: 'deploy_candidates'; candidates: DeployCandidateRecord[] }
+  | { type: 'delivery_acceptance'; acceptance: DeliveryRunAcceptance }
   | { type: 'image_attachment';
       attachmentId: string; fileName: string; size: number; mimeType: string }
   | { type: 'file_attachment';
@@ -37,7 +38,9 @@ type MessagePart =
 
 ---
 
-## 10 种 part 详解
+## Part 详解
+
+正式交付的 `delivery_acceptance` 是 Hub 写入的系统消息 part。内容包含规则版本、验收状态、可选回执 ID、检查细节或未验证原因。前端在对话内展示，通过普通消息快照恢复。该 part 为一次性结果，见 Spec 17。
 
 ### 1. `text`
 
