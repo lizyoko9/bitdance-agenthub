@@ -1724,14 +1724,18 @@ async function consumeStream(
   const flusher = createMessagePartsFlusher(partsBuffer, (messageId, parts) => {
     db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, messageId)).run()
   })
+  // Snapshot reads can flush buffered parts, so publish the cursor before yielding.
+  const persistAndPublish = (event: StreamEvent) => {
+    persistEvent(event, partsBuffer, flusher, runId, agentId, outputMessageIds, artifactIds)
+    publish(event)
+  }
 
   try {
     for await (const event of stream) {
       if (event.type === 'message.start') currentMessageId = event.messageId
       if (event.type === 'tool.call') toolNameByCallId.set(event.callId, event.toolName)
 
-      await persistEvent(event, partsBuffer, flusher, runId, agentId, outputMessageIds, artifactIds)
-      publish(event)
+      persistAndPublish(event)
 
       if (event.type === 'artifact.create') {
         const outputKey = outputKeyByArtifactId.get(event.artifact.id)
@@ -1741,41 +1745,24 @@ async function consumeStream(
       // 工具产出的 artifact 自动作为 artifact_ref part 挂到当前 message 末尾，
       // 让用户在聊天流里看到产物卡片而不仅是 tool_result。
       if (event.type === 'artifact.create' && currentMessageId) {
-        const parts = partsBuffer.get(currentMessageId) ?? []
-        const partIndex = parts.length
-        const refPart: MessagePart = { type: 'artifact_ref', artifactId: event.artifact.id }
-        parts.push(refPart)
-        partsBuffer.set(currentMessageId, parts)
-        await db
-          .update(schema.messages)
-          .set({ parts })
-          .where(eq(schema.messages.id, currentMessageId))
-
-        publish({
+        persistAndPublish({
           type: 'part.start',
           conversationId: event.conversationId,
           timestamp: Date.now(),
           messageId: currentMessageId,
-          partIndex,
-          part: refPart,
+          partIndex: partsBuffer.get(currentMessageId)?.length ?? 0,
+          part: { type: 'artifact_ref', artifactId: event.artifact.id },
         })
       }
 
       if (event.type === 'deploy.status') {
-        const parts = partsBuffer.get(event.messageId) ?? []
-        const partIndex = parts.length
-        const deployPart: MessagePart = { type: 'deploy_status', deployment: event.deployment }
-        parts.push(deployPart)
-        partsBuffer.set(event.messageId, parts)
-        await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
-
-        publish({
+        persistAndPublish({
           type: 'part.start',
           conversationId: event.conversationId,
           timestamp: Date.now(),
           messageId: event.messageId,
-          partIndex,
-          part: deployPart,
+          partIndex: partsBuffer.get(event.messageId)?.length ?? 0,
+          part: { type: 'deploy_status', deployment: event.deployment },
         })
       }
 
@@ -1802,8 +1789,7 @@ async function consumeStream(
               result: control.result,
               isError: control.isError ?? false,
             }
-            await persistEvent(resultEvent, partsBuffer, flusher, runId, agentId, outputMessageIds, artifactIds)
-            publish(resultEvent)
+            persistAndPublish(resultEvent)
           }
 
           const endEvent: StreamEvent = {
@@ -1812,8 +1798,7 @@ async function consumeStream(
             timestamp: Date.now(),
             messageId: event.messageId,
           }
-          await persistEvent(endEvent, partsBuffer, flusher, runId, agentId, outputMessageIds, artifactIds)
-          publish(endEvent)
+          persistAndPublish(endEvent)
           currentMessageId = null
           break
         }
@@ -1835,7 +1820,7 @@ function readArtifactHandoffResult(result: unknown): { artifactId: string; outpu
   return { artifactId: value.artifactId, outputKey: value.outputKey }
 }
 
-async function persistEvent(
+function persistEvent(
   event: StreamEvent,
   partsBuffer: Map<string, MessagePart[]>,
   flusher: MessagePartsFlusher,
@@ -1843,29 +1828,31 @@ async function persistEvent(
   agentId: string,
   outputMessageIds: string[],
   artifactIds: string[],
-): Promise<void> {
+): void {
   switch (event.type) {
     case 'run.usage': {
       // adapter 报告本次 run 的 token 用量；落到 agent_runs.usage（同 runId）。
       // 多次 emit 时取最新（adapter 应该只 emit 一次，但 race 保护）。
-      await db
+      db
         .update(schema.agentRuns)
         .set({ usage: event.usage })
         .where(eq(schema.agentRuns.id, event.runId))
+        .run()
       return
     }
     case 'message.usage': {
       // 单条 message 的 usage —— 用于消息卡片上小角标 hover 显示
-      await db
+      db
         .update(schema.messages)
         .set({ usage: event.usage })
         .where(eq(schema.messages.id, event.messageId))
+        .run()
       return
     }
     case 'message.start': {
       partsBuffer.set(event.messageId, [])
       outputMessageIds.push(event.messageId)
-      await db.insert(schema.messages).values({
+      db.insert(schema.messages).values({
         id: event.messageId,
         conversationId: event.conversationId,
         role: 'agent',
@@ -1875,14 +1862,14 @@ async function persistEvent(
         mentionedAgentIds: [],
         runId,
         createdAt: event.timestamp,
-      })
+      }).run()
       return
     }
     case 'part.start': {
       const parts = partsBuffer.get(event.messageId) ?? []
       parts[event.partIndex] = event.part
       partsBuffer.set(event.messageId, parts)
-      await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
+      db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId)).run()
       return
     }
     case 'part.delta': {
@@ -1907,7 +1894,7 @@ async function persistEvent(
         args: event.args,
       })
       partsBuffer.set(event.messageId, parts)
-      await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
+      db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId)).run()
       return
     }
     case 'tool.result': {
@@ -1919,16 +1906,17 @@ async function persistEvent(
         isError: event.isError,
       })
       partsBuffer.set(event.messageId, parts)
-      await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
+      db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId)).run()
       return
     }
     case 'message.end': {
       const parts = partsBuffer.get(event.messageId)
       flusher.clear(event.messageId)
-      await db
+      db
         .update(schema.messages)
         .set(parts ? { parts, status: 'complete' } : { status: 'complete' })
         .where(eq(schema.messages.id, event.messageId))
+        .run()
       partsBuffer.delete(event.messageId)
       return
     }
@@ -1969,7 +1957,7 @@ async function finalize(
   const finishedAt = Date.now()
 
   if (status === 'failed' || status === 'aborted') {
-    await persistUnresolvedToolFailures(runId, args.conversationId, status, error, finishedAt)
+    persistUnresolvedToolFailures(runId, args.conversationId, status, error, finishedAt)
   }
 
   let deliveryAcceptance: DeliveryRunAcceptance | undefined
@@ -1987,24 +1975,27 @@ async function finalize(
       message: terminal.message,
     })
   } else {
-    await db.update(schema.agentRuns)
+    db.update(schema.agentRuns)
       .set({ status, finishedAt, error: error ?? null })
       .where(eq(schema.agentRuns.id, runId))
-    await db.update(schema.messages)
+      .run()
+    db.update(schema.messages)
       .set({ status: status === 'complete' ? 'complete' : status === 'aborted' ? 'aborted' : 'error' })
       .where(and(eq(schema.messages.runId, runId), eq(schema.messages.status, 'streaming')))
+      .run()
   }
 
   // 失败 / 中止时把错误信息暴露给用户：如果该 run 已有 streaming message，把
   // 错误作为新 text part 追加；否则新建一条 system message 显示错误。
   if (showFailureInChat && (status === 'failed' || status === 'aborted')) {
-    await emitErrorVisualisation(runId, args, status, error, result.outputMessageIds)
+    emitErrorVisualisation(runId, args, status, error, result.outputMessageIds)
   }
 
   if (!revisionId) {
-    await db.update(schema.conversations)
+    db.update(schema.conversations)
       .set({ updatedAt: finishedAt })
       .where(eq(schema.conversations.id, args.conversationId))
+      .run()
   }
 
   publish({
@@ -2118,25 +2109,25 @@ function persistBoundDelivery(
   })
 }
 
-async function emitErrorVisualisation(
+function emitErrorVisualisation(
   runId: string,
   args: RunArgs,
   status: 'failed' | 'aborted',
   error: string | undefined,
   outputMessageIds: string[],
-): Promise<void> {
+): void {
   const errorText = status === 'aborted' ? '[已中止]' : `[失败] ${error ?? '未知错误'}`
   const now = Date.now()
 
   // 优先：把错误追加到该 run 最近的 agent message（如果存在）
   const lastMessageId = outputMessageIds[outputMessageIds.length - 1]
   if (lastMessageId) {
-    const msg = await db.query.messages.findFirst({
+    const msg = db.query.messages.findFirst({
       where: eq(schema.messages.id, lastMessageId),
-    })
+    }).sync()
     if (msg) {
       const parts: MessagePart[] = [...msg.parts, { type: 'text', content: errorText }]
-      await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, lastMessageId))
+      db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, lastMessageId)).run()
       publish({
         type: 'part.start',
         conversationId: args.conversationId,
@@ -2151,7 +2142,7 @@ async function emitErrorVisualisation(
 
   // 否则：新建一条 error message
   const errorMessageId = `msg_err_${runId}`
-  await db.insert(schema.messages).values({
+  db.insert(schema.messages).values({
     id: errorMessageId,
     conversationId: args.conversationId,
     role: 'agent',
@@ -2161,7 +2152,7 @@ async function emitErrorVisualisation(
     mentionedAgentIds: [],
     runId,
     createdAt: now,
-  })
+  }).run()
   publish({
     type: 'message.start',
     conversationId: args.conversationId,
@@ -2186,16 +2177,16 @@ async function emitErrorVisualisation(
   })
 }
 
-async function persistUnresolvedToolFailures(
+function persistUnresolvedToolFailures(
   runId: string,
   conversationId: string,
   status: 'failed' | 'aborted',
   error: string | undefined,
   timestamp: number,
-): Promise<void> {
-  const messages = await db.query.messages.findMany({
+): void {
+  const messages = db.query.messages.findMany({
     where: eq(schema.messages.runId, runId),
-  })
+  }).sync()
   const result = buildUnresolvedToolFailureResult(status, error)
 
   for (const message of messages) {
@@ -2220,10 +2211,11 @@ async function persistUnresolvedToolFailures(
 
     if (missingCallIds.length === 0) continue
 
-    await db
+    db
       .update(schema.messages)
       .set({ parts: nextParts })
       .where(eq(schema.messages.id, message.id))
+      .run()
     for (const callId of missingCallIds) {
       publish({
         type: 'tool.result',
