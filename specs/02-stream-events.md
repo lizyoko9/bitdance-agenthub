@@ -285,7 +285,9 @@ data: {"type":"part.delta","conversationId":"conv_abc","timestamp":1715000000000
 
 ## 断线恢复
 
-EventBus 给每个事件分配单调 seq，SSE 帧带 `id: <bootId>-<seq>`（`bootId` 为进程启动时生成，区分重启后 seq 归零），并保留最近 `REPLAY_BUFFER_SIZE`（5000）条事件。
+EventBus 给每个事件分配单调 seq，SSE 帧带 `id: <bootId>-<seq>`（`bootId` 为进程启动时生成，区分重启后 seq 归零）。所有会话共享一个回放窗口。超过 10,000 条时裁回最近 5,000 条（`REPLAY_BUFFER_SIZE`），同时按事件发布时的 JSON UTF-8 字节计量，超过 32 MiB 时从最旧的事件开始淘汰，直到剩余载荷满足上限。SSE 帧头和连接队列各有独立开销。回放使用发布时的快照，后续对原始对象的修改不会影响回放。
+
+单条事件超过字节预算时，在线订阅者仍可收到该事件。跨过该事件的断线缺口走现有 `resync`，游标已包含该事件的客户端仍可补发后续事件。
 
 ```
 id: mvr44n2u-34
@@ -297,8 +299,9 @@ data: {"type":"run.end",...}\n\n
 1. 浏览器自动重连时带 `Last-Event-ID` 头；客户端手动重建 EventSource（readyState=CLOSED 时退避重试）时改带 `?lastEventId=` query，头优先
 2. 服务端在同一同步块内「补发缺口 + 订阅新事件」，不漏不重
 3. 补不上（bootId 不同 = 进程重启、seq 早于缓冲最旧一条、id 非法）时推控制消息 `{"type":"resync"}`
-4. 客户端收到 `resync`：`resetForStreamResync()` 丢弃非当前会话的消息缓存、Skill 安装审批缓存与「运行中」run；重拉会话列表、当前会话消息快照与各类 pending（文件写入、bash、提问、计划、Skill 安装）；期间到达的事件排队
-5. `GET /api/conversations/[id]/messages` 返回 `{ messages, eventId }`，`eventId` 为快照对应的事件游标；快照落地后，排队事件中 seq ≤ 游标的**消息模型事件**（`message.*` / `part.*` / `tool.*`）丢弃，其余按序应用（`src/lib/stream-resync.ts`）
+4. Web 客户端收到 `resync` 后读取会话列表、当前会话的最新历史页和待处理审批（文件写入、Bash、提问、计划、Skill 安装）。单轮最多等 10 秒，期间待处理事件最多 1,000 条或 4 MiB UTF-8 JSON 正文。切换会话、断开连接或卸载会取消当前请求。
+5. 读取成功后，客户端清理旧的后台会话缓存与「运行中」标记，再更新会话、最新历史页和审批。仅当前会话中 seq ≤ 页游标的消息模型事件由快照覆盖，其余按序应用（`src/lib/stream-resync.ts`）。
+6. 读取失败、超时或排队超限时废弃本轮队列，保留可见聊天状态，并用新快照重新开始。自动恢复最多 3 次，重试间隔为 1 秒和 2 秒。耗尽后提示手动重试。
 
 已知边界：`consumeStream` 先 `await persistEvent` 再 `publish`，两者之间隔一个微任务；若快照读恰好落在这个间隙，该事件会被重复应用一次（仅影响前端显示，DB 正确，刷新即恢复）。
 
