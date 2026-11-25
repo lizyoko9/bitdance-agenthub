@@ -292,7 +292,11 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
 
   // 引用回复目标
   const replyTargetId = useAppStore((s) => s.replyTargetByConv[conversationId])
-  const replyMessage = useAppStore((s) => (replyTargetId ? s.messages[replyTargetId] : null))
+  const replyMessage = useAppStore((s) => {
+    if (!replyTargetId) return null
+    const preview = s.replyMessagePreviewByConv[conversationId]
+    return s.messages[replyTargetId] ?? (preview?.id === replyTargetId ? preview : null)
+  })
   const setReplyTarget = useAppStore((s) => s.setReplyTarget)
   const pendingQuote = useAppStore((s) => s.pendingQuoteForInput)
   const setPendingQuote = useAppStore((s) => s.setPendingQuote)

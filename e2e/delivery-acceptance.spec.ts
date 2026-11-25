@@ -57,6 +57,17 @@ test('对话发送时固定验收版本，系统结果在实时消息与刷新�
     })
     completedStream = true
   })
+  await page.route('**/api/conversations/*/messages/history', async (route) => {
+    if (verdict) hydratedVerdicts++
+    await route.fulfill({ json: {
+      messages: verdict ? [verdict] : [],
+      eventId: '1',
+      olderCursor: null,
+      newerCursor: null,
+      latestUserMessageId: null,
+      latestAgentMessageId: null,
+    } })
+  })
   await page.route('**/api/conversations/*/messages', async (route) => {
     const req = route.request()
     if (req.method() === 'GET') {

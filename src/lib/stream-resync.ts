@@ -12,6 +12,7 @@ const MESSAGE_MODEL_EVENT_TYPES = new Set<StreamEvent['type']>([
   'message.end',
   'message.added',
   'message.removed',
+  'message.usage',
   'part.start',
   'part.delta',
   'part.end',
@@ -21,23 +22,36 @@ const MESSAGE_MODEL_EVENT_TYPES = new Set<StreamEvent['type']>([
 
 function parseEventId(id: string): { bootId: string; seq: number } | null {
   const sep = id.lastIndexOf('-')
-  if (sep <= 0) return null
-  const seq = Number(id.slice(sep + 1))
-  return Number.isInteger(seq) ? { bootId: id.slice(0, sep), seq } : null
+  const suffix = id.slice(sep + 1)
+  if (sep <= 0 || !/^\d+$/.test(suffix)) return null
+  const seq = Number(suffix)
+  return Number.isSafeInteger(seq) ? { bootId: id.slice(0, sep), seq } : null
+}
+
+export function compareStreamEventIds(a: string, b: string): number | null {
+  const first = parseEventId(a)
+  const second = parseEventId(b)
+  return first && second && first.bootId === second.bootId ? first.seq - second.seq : null
 }
 
 /** resync 期间排队的事件里，挑出快照之后仍需应用的那些。 */
+export function selectQueuedEventsAfterSnapshot(
+  queued: QueuedStreamEvent[],
+  snapshotEventId: string,
+  conversationId?: string,
+): QueuedStreamEvent[] {
+  return queued.filter(({ id, event }) => {
+    if (!MESSAGE_MODEL_EVENT_TYPES.has(event.type)) return true
+    if (conversationId !== undefined && event.conversationId !== conversationId) return true
+    const order = compareStreamEventIds(id, snapshotEventId)
+    return order === null || order > 0
+  })
+}
+
 export function selectEventsAfterSnapshot(
   queued: QueuedStreamEvent[],
   snapshotEventId: string,
+  conversationId?: string,
 ): StreamEvent[] {
-  const snapshot = parseEventId(snapshotEventId)
-  return queued
-    .filter(({ id, event }) => {
-      if (!MESSAGE_MODEL_EVENT_TYPES.has(event.type)) return true
-      const parsed = parseEventId(id)
-      if (!snapshot || !parsed || parsed.bootId !== snapshot.bootId) return true
-      return parsed.seq > snapshot.seq
-    })
-    .map((q) => q.event)
+  return selectQueuedEventsAfterSnapshot(queued, snapshotEventId, conversationId).map(({ event }) => event)
 }

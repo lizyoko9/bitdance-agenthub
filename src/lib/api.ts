@@ -242,9 +242,9 @@ export async function deleteAgent(agentId: string): Promise<void> {
 }
 
 // ─── Conversations ──────────────────────────────
-export async function fetchConversations(): Promise<ConversationWithMeta[]> {
+export async function fetchConversations(signal?: AbortSignal): Promise<ConversationWithMeta[]> {
   const { conversations } = await json<{ conversations: ConversationWithMeta[] }>(
-    fetch('/api/conversations'),
+    fetch('/api/conversations', { signal }),
   )
   return conversations
 }
@@ -340,9 +340,9 @@ export async function setFsWriteApprovalMode(
 }
 
 // ─── Pending writes (fs_write review mode) ─────
-export async function fetchPendingWrites(conversationId: string): Promise<PendingWrite[]> {
+export async function fetchPendingWrites(conversationId: string, signal?: AbortSignal): Promise<PendingWrite[]> {
   const { pendingWrites } = await json<{ pendingWrites: PendingWrite[] }>(
-    fetch(`/api/conversations/${conversationId}/pending-writes`),
+    fetch(`/api/conversations/${conversationId}/pending-writes`, { signal }),
   )
   return pendingWrites
 }
@@ -376,9 +376,10 @@ export async function rejectPendingWrite(
 // ─── Pending skill installs (install_skill 审批) ─────
 export async function fetchPendingSkillInstalls(
   conversationId: string,
+  signal?: AbortSignal,
 ): Promise<PendingSkillInstall[]> {
   const { pendingSkillInstalls } = await json<{ pendingSkillInstalls: PendingSkillInstall[] }>(
-    fetch(`/api/conversations/${conversationId}/pending-skill-installs`),
+    fetch(`/api/conversations/${conversationId}/pending-skill-installs`, { signal }),
   )
   return pendingSkillInstalls
 }
@@ -412,9 +413,10 @@ export async function rejectPendingSkillInstall(
 // ─── Pending bash commands ─────
 export async function fetchPendingBashCommands(
   conversationId: string,
+  signal?: AbortSignal,
 ): Promise<PendingBashCommand[]> {
   const { pendingCommands } = await json<{ pendingCommands: PendingBashCommand[] }>(
-    fetch(`/api/conversations/${conversationId}/pending-bash-commands`),
+    fetch(`/api/conversations/${conversationId}/pending-bash-commands`, { signal }),
   )
   return pendingCommands
 }
@@ -446,9 +448,9 @@ export async function rejectPendingBashCommand(
 }
 
 // ─── Pending questions (ask_user) ───────────────
-export async function fetchPendingQuestions(conversationId: string): Promise<PendingQuestion[]> {
+export async function fetchPendingQuestions(conversationId: string, signal?: AbortSignal): Promise<PendingQuestion[]> {
   const { pendingQuestions } = await json<{ pendingQuestions: PendingQuestion[] }>(
-    fetch(`/api/conversations/${conversationId}/pending-questions`),
+    fetch(`/api/conversations/${conversationId}/pending-questions`, { signal }),
   )
   return pendingQuestions
 }
@@ -471,9 +473,10 @@ export async function submitQuestionAnswers(
 // ─── Pending dispatch plans (Orchestrator plan review) ───
 export async function fetchPendingDispatchPlans(
   conversationId: string,
+  signal?: AbortSignal,
 ): Promise<PendingDispatchPlan[]> {
   const { pendingDispatchPlans } = await json<{ pendingDispatchPlans: PendingDispatchPlan[] }>(
-    fetch(`/api/conversations/${conversationId}/pending-dispatch-plans`),
+    fetch(`/api/conversations/${conversationId}/pending-dispatch-plans`, { signal }),
   )
   return pendingDispatchPlans
 }

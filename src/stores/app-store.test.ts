@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { MessageRow } from '@/db/schema'
+import { encodeMessageHistoryCursor, type MessageHistoryPage } from '@/shared/message-history'
 import type { DispatchPlanItem } from '@/shared/types'
 
 import { selectDispatchForMessage, useAppStore } from './app-store'
@@ -20,6 +21,10 @@ function resetStore(): void {
     messages: {},
     artifacts: {},
     messageIdsByConv: {},
+    messageHistoryByConv: {},
+    messageHistoryRecency: [],
+    messageHistoryLiveIdsByConv: {},
+    messageHistoryMutationsByConv: {},
     runsByConv: {},
     dispatchesByRunId: {},
     activeConversationId: null,
@@ -28,6 +33,7 @@ function resetStore(): void {
     openFilesByConv: {},
     activeTabByConv: {},
     replyTargetByConv: {},
+    replyMessagePreviewByConv: {},
     pendingQuoteForInput: null,
     pendingAttachmentsByConv: {},
     pendingWritesByConv: {},
@@ -55,6 +61,120 @@ function agentMessage(id: string, runId: string, createdAt: number): MessageRow 
     createdAt,
   }
 }
+
+function historyPage(messages: MessageRow[], fields: Partial<MessageHistoryPage> = {}): MessageHistoryPage {
+  return {
+    messages, eventId: 'boot-10', olderCursor: null, newerCursor: null, latestUserMessageId: null,
+    latestAgentMessageId: messages.at(-1)?.id ?? null, ...fields,
+  }
+}
+
+describe('bounded message history', () => {
+  beforeEach(resetStore)
+
+  it('evicts settled rows and metadata for the least recent inactive room while preserving local and live work', () => {
+    const store = useAppStore.getState()
+    for (const [index, conversationId] of ['conv_1', 'conv_2', 'conv_3', 'conv_4'].entries()) {
+      store.setActiveConversation(conversationId)
+      const message = { ...agentMessage(`msg_${index}`, 'settled', index), conversationId }
+      store.setMessageHistoryPage(conversationId, historyPage([message]))
+      if (index === 0) {
+        store.upsertMessage({ ...message, id: 'msg_live', status: 'streaming' })
+        store.addLocalUserMessage({ tempId: 'temp_1', conversationId, content: 'pending', mentionedAgentIds: [] })
+        store.setReplyTarget(conversationId, 'msg_0')
+      }
+    }
+    const state = useAppStore.getState()
+    expect(state.messageHistoryRecency).toEqual(['conv_4', 'conv_3', 'conv_2'])
+    expect(state.messageHistoryByConv.conv_1).toBeUndefined()
+    expect(state.messageIdsByConv.conv_1).toBeUndefined()
+    expect(state.messages.msg_0).toBeUndefined()
+    expect(state.messages.msg_live?.status).toBe('streaming')
+    expect(state.messages.temp_1).toBeDefined()
+    expect(state.replyTargetByConv.conv_1).toBe('msg_0')
+    expect(state.replyMessagePreviewByConv.conv_1?.id).toBe('msg_0')
+    store.setMessageHistoryPage('conv_1', historyPage([agentMessage('stale_response', 'stale', 99)]))
+    expect(useAppStore.getState().messages.stale_response).toBeUndefined()
+    store.applyEvent({ type: 'message.end', timestamp: 100, conversationId: 'conv_1', messageId: 'msg_live' })
+    expect(useAppStore.getState().messages.msg_live).toBeUndefined()
+  })
+
+  it('retains a contiguous older window, does not append across a live gap, and returns to latest', () => {
+    const store = useAppStore.getState()
+    const rows = Array.from({ length: 251 }, (_, index) => agentMessage(`msg_${index}`, 'run', index))
+    store.setActiveConversation('conv_1')
+    store.setMessageHistoryPage('conv_1', historyPage(rows.slice(100, 230), {
+      olderCursor: encodeMessageHistoryCursor(rows[100]),
+    }))
+    store.setMessageHistoryPage('conv_1', historyPage(rows.slice(0, 101), {
+      newerCursor: encodeMessageHistoryCursor(rows[100]), latestAgentMessageId: 'msg_229',
+    }), 'older')
+    expect(useAppStore.getState().messageIdsByConv.conv_1).toEqual(rows.slice(0, 200).map(row => row.id))
+    expect(useAppStore.getState().messageHistoryByConv.conv_1?.newerCursor).toBe(encodeMessageHistoryCursor(rows[199]))
+    expect(useAppStore.getState().messages.msg_229).toBeUndefined()
+
+    store.applyEvent({ type: 'message.start', timestamp: 250, conversationId: 'conv_1',
+      messageId: 'msg_250', agentId: 'agent', runId: 'latest_run' })
+    expect(useAppStore.getState().messageIdsByConv.conv_1).not.toContain('msg_250')
+    expect(useAppStore.getState().messageHistoryByConv.conv_1?.latestAgentMessageId).toBe('msg_250')
+    expect(useAppStore.getState().messages.msg_250?.status).toBe('streaming')
+    store.setMessageHistoryPage('conv_1', historyPage(rows.slice(199, 250)), 'newer')
+    expect(useAppStore.getState().messageIdsByConv.conv_1).toEqual(rows.slice(50).map(row => row.id))
+    expect(useAppStore.getState().messageHistoryByConv.conv_1?.newerCursor).toBeNull()
+    expect(useAppStore.getState().messageHistoryByConv.conv_1?.latestAgentMessageId).toBe('msg_250')
+    expect(useAppStore.getState().messages.msg_0).toBeUndefined()
+  })
+
+  it('reconciles latest action eligibility after regenerate removes a response and then starts its replacement', () => {
+    const store = useAppStore.getState()
+    const first = agentMessage('msg_first', 'run_first', 1)
+    const old = agentMessage('msg_old', 'run_old', 2)
+    store.setActiveConversation('conv_1')
+    store.setMessageHistoryPage('conv_1', historyPage([first, old]))
+    store.applyEvent({ type: 'message.removed', conversationId: 'conv_1', messageIds: [old.id], artifactIds: [], timestamp: 3 })
+    expect(useAppStore.getState().messageHistoryByConv.conv_1?.latestAgentMessageId).toBe(first.id)
+    store.applyEvent({ type: 'message.start', conversationId: 'conv_1', timestamp: 4,
+      messageId: 'msg_replacement', agentId: 'agent', runId: 'run_replacement' })
+    expect(useAppStore.getState().messageHistoryByConv.conv_1?.latestAgentMessageId).toBe('msg_replacement')
+  })
+
+  it('rebases a delayed latest snapshot without overwriting newer deltas or resurrecting deleted rows', () => {
+    const store = useAppStore.getState()
+    const streaming: MessageRow = { ...agentMessage('msg_stream', 'run_stream', 33), status: 'streaming',
+      parts: [{ type: 'text', content: 'prefix' }] }
+    const removed = agentMessage('msg_removed', 'run_removed', 34)
+    const stalePage = historyPage([streaming, removed], { eventId: 'boot-20' })
+    store.setActiveConversation('conv_1')
+    store.setMessageHistoryPage('conv_1', stalePage)
+    store.applyEvent({ type: 'part.delta', messageId: streaming.id, conversationId: 'conv_1', timestamp: 35,
+      partIndex: 0, delta: { type: 'text.append', text: ' + delta' } }, 'boot-21')
+    store.applyEvent({ type: 'message.end', messageId: streaming.id, conversationId: 'conv_1', timestamp: 36 }, 'boot-22')
+    store.applyEvent({ type: 'message.removed', messageIds: [removed.id], artifactIds: [],
+      conversationId: 'conv_1', timestamp: 37 }, 'boot-23')
+    expect(store.setMessageHistoryPage('conv_1', stalePage)).toBe(true)
+    expect(useAppStore.getState().messages.msg_stream).toMatchObject({
+      status: 'complete', parts: [{ type: 'text', content: 'prefix + delta' }],
+    })
+    expect(useAppStore.getState().messages.msg_removed).toBeUndefined()
+    expect(useAppStore.getState().messageIdsByConv.conv_1).toEqual([streaming.id])
+    expect(useAppStore.getState().messageHistoryByConv.conv_1?.latestAgentMessageId).toBe(streaming.id)
+  })
+
+  it('rejects pages older than the accepted recovery snapshot, even across server boots', () => {
+    const store = useAppStore.getState()
+    store.setActiveConversation('conv_1')
+    const before = agentMessage('msg_previous', 'run', 101)
+    const after = agentMessage('msg_restored', 'run', 102)
+    const previous = historyPage([before], { eventId: 'oldboot-42' })
+    const authoritative = historyPage([after], { eventId: 'newboot-5' })
+    store.setMessageHistoryPage('conv_1', previous)
+    store.resetForStreamResync()
+    expect(store.setMessageHistoryPage('conv_1', authoritative)).toBe(true)
+    expect(store.setMessageHistoryPage('conv_1', previous)).toBe(false)
+    expect(store.setMessageHistoryPage('conv_1', { ...previous, eventId: 'newboot-3' })).toBe(false)
+    expect(useAppStore.getState().messageIdsByConv.conv_1).toEqual([after.id])
+  })
+})
 
 describe('app-store dispatch plan binding', () => {
   beforeEach(() => {

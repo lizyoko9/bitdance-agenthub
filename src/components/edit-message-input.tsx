@@ -1,32 +1,29 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-/**
- * 用户消息 inline 编辑器：textarea + 保存 / 取消按钮。
- * 用 key={messageId} 重置，避免 useEffect 里 setState 触发 react-hooks/set-state-in-effect。
- */
 export function EditMessageInput({
-  initial,
+  draft,
   submitting,
+  onChange,
   onCommit,
   onCancel,
 }: {
-  initial: string
+  draft: string
   submitting: boolean
+  onChange: (draft: string) => void
   onCommit: (next: string) => void
   onCancel: () => void
 }) {
-  const [draft, setDraft] = useState(initial)
   const ref = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    el.focus()
+    el.focus({ preventScroll: true })
     // 把光标放到末尾
     el.setSelectionRange(el.value.length, el.value.length)
   }, [])
@@ -42,7 +39,7 @@ export function EditMessageInput({
       <textarea
         ref={ref}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()

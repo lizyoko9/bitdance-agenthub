@@ -5,6 +5,11 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 
 import type { AgentRunRow, AgentRow, ArtifactRow, AttachmentRow, ConversationWithMeta, MessageRow } from '@/db/schema'
+import { compareStreamEventIds } from '@/lib/stream-resync'
+import {
+  compareMessageHistoryPositions, encodeMessageHistoryCursor, messageHistoryReference,
+  type ConversationUsageTotal, type MessageHistoryPage,
+} from '@/shared/message-history'
 import { getPromptTokenTotal, getTokenTotal } from '@/shared/token-usage'
 import type {
   DispatchPlanItem,
@@ -20,6 +25,8 @@ import type {
 
 enableMapSet()
 
+export type { ConversationUsageTotal } from '@/shared/message-history'
+
 export interface DispatchState {
   runId: string                                    // Orchestrator 的 runId
   messageId: string                                // 触发 plan 的 Orchestrator message id
@@ -28,6 +35,21 @@ export interface DispatchState {
   childRunIds: Record<string, string>              // taskId → childRunId
   reviewStatus?: 'pending' | 'approved' | 'rejected'
   pendingPlanId?: string
+}
+
+type MessageHistoryMode = 'replace' | 'older' | 'newer'
+type MessageHistoryWindow = Omit<MessageHistoryPage, 'messages' | 'references'> & {
+  references: Record<string, MessageRow>
+}
+const MAX_SETTLED_HISTORY_MESSAGES = 200
+const MAX_INACTIVE_HISTORIES = 2
+const MAX_HISTORY_REFERENCES = 100
+const MAX_HISTORY_MUTATIONS = 512
+type HistoryMutation = { eventId: string; removed: boolean }
+type HistoryMutations = {
+  changes: Map<string, HistoryMutation>
+  floor: string | null
+  last: string
 }
 
 interface AppState {
@@ -39,6 +61,10 @@ interface AppState {
 
   // ─── 关系（按 conversationId 分桶）───────────────
   messageIdsByConv: Record<string, string[]>
+  messageHistoryByConv: Partial<Record<string, MessageHistoryWindow>>
+  messageHistoryRecency: string[]
+  messageHistoryLiveIdsByConv: Partial<Record<string, string[]>>
+  messageHistoryMutationsByConv: Partial<Record<string, HistoryMutations>>
   runsByConv: Record<string, Record<string, AgentRunRow>>
 
   // Orchestrator 的调度状态，按 Orchestrator runId 索引
@@ -60,6 +86,7 @@ interface AppState {
 
   // ─── 引用回复目标（按 conversationId 分桶）───────
   replyTargetByConv: Record<string, string | null>
+  replyMessagePreviewByConv: Partial<Record<string, MessageRow>>
 
   // ─── 选区改写：等待注入到 MessageInput 的引用块（全局，不分会话） ─
   pendingQuoteForInput: {
@@ -111,6 +138,7 @@ interface AppState {
   removeAgent(agentId: string): void
 
   setMessagesForConversation(conversationId: string, list: MessageRow[]): void
+  setMessageHistoryPage(conversationId: string, page: MessageHistoryPage, mode?: MessageHistoryMode): boolean
   /** 单条 message upsert（编辑后重发场景：服务端写完 user message，前端要自己塞进 store）。 */
   upsertMessage(message: MessageRow): void
   setActiveConversation(id: string | null): void
@@ -173,7 +201,7 @@ interface AppState {
   }): void
   replaceLocalMessageId(tempId: string, realId: string): void
 
-  applyEvent(event: StreamEvent): void
+  applyEvent(event: StreamEvent, eventId?: string): void
 }
 
 export const useAppStore = create<AppState>()(
@@ -183,6 +211,10 @@ export const useAppStore = create<AppState>()(
     messages: {},
     artifacts: {},
     messageIdsByConv: {},
+    messageHistoryByConv: {},
+    messageHistoryRecency: [],
+    messageHistoryLiveIdsByConv: {},
+    messageHistoryMutationsByConv: {},
     runsByConv: {},
     dispatchesByRunId: {},
     activeConversationId: null,
@@ -191,6 +223,7 @@ export const useAppStore = create<AppState>()(
     openFilesByConv: {},
     activeTabByConv: {},
     replyTargetByConv: {},
+    replyMessagePreviewByConv: {},
     pendingAttachmentsByConv: {},
     pendingWritesByConv: {},
     pendingSkillInstallsByConv: {},
@@ -209,11 +242,13 @@ export const useAppStore = create<AppState>()(
 
     resetForStreamResync: () =>
       set((s) => {
+        s.messageHistoryMutationsByConv = {}
+        // The immediately following recovery snapshot may originate from a new server boot.
+        if (s.activeConversationId) delete s.messageHistoryByConv[s.activeConversationId]
         // 非当前会话直接丢缓存，打开时按快照重新加载；当前会话由 StreamProvider 立即重拉
         for (const convId of Object.keys(s.messageIdsByConv)) {
           if (convId === s.activeConversationId) continue
-          for (const mid of s.messageIdsByConv[convId]) delete s.messages[mid]
-          delete s.messageIdsByConv[convId]
+          evictMessageHistory(s, convId, true)
           delete s.pendingWritesByConv[convId]
           delete s.pendingBashCommandsByConv[convId]
           delete s.pendingQuestionsByConv[convId]
@@ -243,10 +278,10 @@ export const useAppStore = create<AppState>()(
       set((s) => {
         delete s.conversations[id]
         // 清理该会话所有消息
-        const msgIds = s.messageIdsByConv[id] ?? []
-        for (const mid of msgIds) delete s.messages[mid]
-        delete s.messageIdsByConv[id]
+        evictMessageHistory(s, id)
         delete s.runsByConv[id]
+        delete s.replyTargetByConv[id]
+        delete s.replyMessagePreviewByConv[id]
         delete s.pendingWritesByConv[id]
         delete s.pendingSkillInstallsByConv[id]
         delete s.pendingBashCommandsByConv[id]
@@ -284,17 +319,115 @@ export const useAppStore = create<AppState>()(
         }
       }),
 
+    setMessageHistoryPage: (conversationId, page, mode = 'replace') => {
+      let accepted = false
+      set((s) => {
+        const current = s.messageHistoryByConv[conversationId]
+        if (s.activeConversationId && s.activeConversationId !== conversationId && !current) return
+        if (current && page.eventId !== current.eventId
+          && (compareStreamEventIds(page.eventId, current.eventId) ?? -1) < 0) return
+        const mutations = s.messageHistoryMutationsByConv[conversationId]
+        if (mutations && (compareStreamEventIds(page.eventId, mutations.last) === null
+          || (mutations.floor && (compareStreamEventIds(page.eventId, mutations.floor) ?? -1) < 0))) return
+        const changeAfterSnapshot = (id: string) => {
+          const change = mutations?.changes.get(id)
+          return change && (compareStreamEventIds(change.eventId, page.eventId) ?? 0) > 0 ? change : undefined
+        }
+        const { references, ...metadata } = page
+        const messages = page.messages.filter((row) => !changeAfterSnapshot(row.id)?.removed)
+        // A mutation for a row that was not resident cannot be merged into an older snapshot.
+        if (messages.some((row) => changeAfterSnapshot(row.id) && !s.messages[row.id])) return
+        const incoming = new Set(messages.map((message) => message.id))
+        const resident = s.messageIdsByConv[conversationId] ?? []
+        const newerCursor = mode === 'older' && current ? current.newerCursor : page.newerCursor
+        const olderCursor = mode === 'newer' && current ? current.olderCursor : page.olderCursor
+        const last = messages[messages.length - 1]
+        const first = messages[0]
+        const keptRows = mode === 'replace'
+          ? resident.filter((id) => {
+            const row = s.messages[id]
+            return !incoming.has(id) && newerCursor === null && row
+              && (id.startsWith('temp_')
+                || (changeAfterSnapshot(id) && (!first || compareMessageHistoryPositions(row, first) >= 0)))
+          })
+          : resident
+
+        const nextReferences = mode === 'replace' ? {} : { ...current?.references }
+        for (const row of references ?? []) {
+          if (changeAfterSnapshot(row.id)?.removed) continue
+          delete nextReferences[row.id]
+          nextReferences[row.id] = row
+        }
+        const referenceIds = Object.keys(nextReferences)
+        for (const id of referenceIds.slice(0, Math.max(referenceIds.length - MAX_HISTORY_REFERENCES, 0))) {
+          delete nextReferences[id]
+        }
+        const window = s.messageHistoryByConv[conversationId] = {
+          ...metadata, olderCursor, newerCursor, references: nextReferences,
+          usageTotals: page.usageTotals ?? current?.usageTotals,
+        }
+
+        const residentSet = new Set(resident)
+        for (const message of messages) {
+          if ((mode === 'replace' || !residentSet.has(message.id)) && !changeAfterSnapshot(message.id)) {
+            s.messages[message.id] = message
+          }
+          attachDispatchToMessageForRun(s.dispatchesByRunId, message.runId, message.id)
+        }
+        const nextIds = new Set([...keptRows, ...incoming])
+        const hidden = s.messageHistoryLiveIdsByConv[conversationId] ?? []
+        if (newerCursor === null) {
+          for (const id of hidden) {
+            const row = s.messages[id]
+            if (row && (!last || compareMessageHistoryPositions(row, last) > 0)) nextIds.add(id)
+          }
+        }
+        for (const id of [...resident, ...hidden]) {
+          if (nextIds.has(id)) continue
+          releaseHistoryRow(s, conversationId, id)
+        }
+        setLiveHistoryIds(s, conversationId, (s.messageHistoryLiveIdsByConv[conversationId] ?? [])
+          .filter((id) => !nextIds.has(id)))
+        if (newerCursor === null && current) {
+          for (const field of ['latestUserMessageId', 'latestAgentMessageId'] as const) {
+            const liveId = current[field]
+            const live = liveId ? s.messages[liveId] : undefined
+            const persistedId = window[field]
+            const persisted = persistedId ? s.messages[persistedId] : undefined
+            if (live && liveId && nextIds.has(liveId)
+              && (live.id.startsWith('temp_') || (persisted && compareMessageHistoryPositions(live, persisted) > 0))) {
+              window[field] = liveId
+            }
+          }
+        }
+        for (const field of ['latestUserMessageId', 'latestAgentMessageId'] as const) {
+          const persistedId = window[field]
+          if (!persistedId || !changeAfterSnapshot(persistedId)?.removed) continue
+          const role = field === 'latestUserMessageId' ? 'user' : 'agent'
+          window[field] = newerCursor === null
+            ? [...nextIds].filter(id => s.messages[id]?.role === role)
+              .sort((a, b) => compareMessageHistoryPositions(s.messages[b], s.messages[a]))[0] ?? null
+            : null
+        }
+        s.messageIdsByConv[conversationId] = [...nextIds]
+          .sort((a, b) => compareMessageHistoryPositions(s.messages[a], s.messages[b]))
+        trimMessageHistory(s, conversationId, mode === 'older' ? 'older' : 'newer')
+        rememberMessageHistory(s, conversationId)
+        accepted = true
+      })
+      return accepted
+    },
+
     upsertMessage: (message) =>
       set((s) => {
-        s.messages[message.id] = message
-        const bucket = (s.messageIdsByConv[message.conversationId] ??= [])
-        if (!bucket.includes(message.id)) bucket.push(message.id)
+        addLiveMessage(s, message)
         attachDispatchToMessageForRun(s.dispatchesByRunId, message.runId, message.id)
       }),
 
     setActiveConversation: (id) =>
       set((s) => {
         s.activeConversationId = id
+        if (id) rememberMessageHistory(s, id)
         // 切到该会话即视为已读
         if (id) delete s.unreadByConv[id]
         // 切会话时自动收起移动 sidebar
@@ -386,18 +519,22 @@ export const useAppStore = create<AppState>()(
         if (bucket) {
           s.messageIdsByConv[conversationId] = bucket.filter((id) => !toRemove.has(id))
         }
+        clearDeletedHistoryMetadata(s, conversationId, toRemove)
 
         // 清理可能指向被删消息的 replyTarget
         const replyId = s.replyTargetByConv[conversationId]
         if (replyId && toRemove.has(replyId)) {
           delete s.replyTargetByConv[conversationId]
+          delete s.replyMessagePreviewByConv[conversationId]
         }
       }),
 
     clearConversationHistory: (conversationId, conversation) =>
       set((s) => {
-        const messageIds = new Set(s.messageIdsByConv[conversationId] ?? [])
-        for (const id of messageIds) delete s.messages[id]
+        const messageIds = new Set([
+          ...(s.messageIdsByConv[conversationId] ?? []), ...(s.messageHistoryLiveIdsByConv[conversationId] ?? []),
+        ])
+        evictMessageHistory(s, conversationId)
         s.messageIdsByConv[conversationId] = []
 
         const runIds = new Set(Object.keys(s.runsByConv[conversationId] ?? {}))
@@ -410,6 +547,7 @@ export const useAppStore = create<AppState>()(
 
         delete s.runsByConv[conversationId]
         delete s.replyTargetByConv[conversationId]
+        delete s.replyMessagePreviewByConv[conversationId]
         delete s.pendingWritesByConv[conversationId]
         delete s.pendingSkillInstallsByConv[conversationId]
         delete s.pendingBashCommandsByConv[conversationId]
@@ -423,8 +561,15 @@ export const useAppStore = create<AppState>()(
 
     setReplyTarget: (conversationId, messageId) =>
       set((s) => {
-        if (messageId) s.replyTargetByConv[conversationId] = messageId
-        else delete s.replyTargetByConv[conversationId]
+        if (messageId) {
+          const message = s.messages[messageId] ?? s.messageHistoryByConv[conversationId]?.references[messageId]
+          s.replyTargetByConv[conversationId] = messageId
+          if (message) s.replyMessagePreviewByConv[conversationId] = messageHistoryReference(message)
+          else if (s.replyMessagePreviewByConv[conversationId]?.id !== messageId) delete s.replyMessagePreviewByConv[conversationId]
+        } else {
+          delete s.replyTargetByConv[conversationId]
+          delete s.replyMessagePreviewByConv[conversationId]
+        }
       }),
 
     setBookmarkedMessageIds: (conversationId, ids) =>
@@ -543,7 +688,7 @@ export const useAppStore = create<AppState>()(
                 },
           )
         }
-        s.messages[tempId] = {
+        addLiveMessage(s, {
           id: tempId,
           conversationId,
           role: 'user',
@@ -555,9 +700,7 @@ export const useAppStore = create<AppState>()(
           runId: null,
           usage: null,
           createdAt: Date.now(),
-        }
-        s.messageIdsByConv[conversationId] ??= []
-        s.messageIdsByConv[conversationId].push(tempId)
+        })
       }),
 
     replaceLocalMessageId: (tempId, realId) =>
@@ -567,6 +710,15 @@ export const useAppStore = create<AppState>()(
         // realId 可能已被 message.added（SSE 早于 POST 返回）抢先插入：别覆盖权威行，也别在桶里留重复
         if (!s.messages[realId]) s.messages[realId] = { ...msg, id: realId }
         delete s.messages[tempId]
+        const history = s.messageHistoryByConv[msg.conversationId]
+        if (history?.latestUserMessageId === tempId) history.latestUserMessageId = realId
+        const hidden = s.messageHistoryLiveIdsByConv[msg.conversationId]
+        const hiddenIndex = hidden?.indexOf(tempId) ?? -1
+        if (hidden && hiddenIndex >= 0) {
+          hidden.splice(hiddenIndex, 1)
+          if (!s.messageIdsByConv[msg.conversationId]?.includes(realId)) delete s.messages[realId]
+          if (hidden.length === 0) delete s.messageHistoryLiveIdsByConv[msg.conversationId]
+        }
         for (const convId in s.messageIdsByConv) {
           const arr = s.messageIdsByConv[convId]
           const idx = arr.indexOf(tempId)
@@ -576,8 +728,9 @@ export const useAppStore = create<AppState>()(
         }
       }),
 
-    applyEvent: (event) =>
+    applyEvent: (event, eventId) =>
       set((s) => {
+        if (eventId) recordHistoryMutations(s, event, eventId)
         switch (event.type) {
           case 'heartbeat':
             return
@@ -621,6 +774,7 @@ export const useAppStore = create<AppState>()(
                 event.error,
               )
             }
+            releaseFinishedHistoryMessages(s, event.conversationId)
             return
           }
 
@@ -638,7 +792,7 @@ export const useAppStore = create<AppState>()(
 
           case 'message.start': {
             // 新 agent 消息（DB 端也插入了同 id 的行，前端再次接到是 idempotent）
-            s.messages[event.messageId] = {
+            addLiveMessage(s, {
               id: event.messageId,
               conversationId: event.conversationId,
               role: 'agent',
@@ -650,11 +804,7 @@ export const useAppStore = create<AppState>()(
               runId: event.runId,
               usage: null,
               createdAt: event.timestamp,
-            }
-            s.messageIdsByConv[event.conversationId] ??= []
-            if (!s.messageIdsByConv[event.conversationId].includes(event.messageId)) {
-              s.messageIdsByConv[event.conversationId].push(event.messageId)
-            }
+            })
             attachDispatchToMessageForRun(s.dispatchesByRunId, event.runId, event.messageId)
             // 未读 +1 不在 message.start 触发：claude-code-adapter 整个 run 只发一次 message.start
             // 且发生时用户通常仍在该会话（被 activeConversationId === conv 抑制），导致后续切走再也不计未读。
@@ -665,6 +815,7 @@ export const useAppStore = create<AppState>()(
           case 'message.end': {
             const msg = s.messages[event.messageId]
             if (msg) msg.status = 'complete'
+            releaseFinishedHistoryMessages(s, event.conversationId)
             // agent 消息完成时 +1 未读；用户当前在该会话则不计入。
             if (s.activeConversationId !== event.conversationId) {
               s.unreadByConv[event.conversationId] =
@@ -676,11 +827,7 @@ export const useAppStore = create<AppState>()(
           case 'message.added': {
             // 其它客户端创建的用户消息（如手机端发、桌面端在看）。按 id 幂等 upsert：
             // 发送方自己已对账过同 id，这里无副作用；第二个客户端靠这条插入。
-            s.messages[event.message.id] = event.message
-            s.messageIdsByConv[event.message.conversationId] ??= []
-            if (!s.messageIdsByConv[event.message.conversationId].includes(event.message.id)) {
-              s.messageIdsByConv[event.message.conversationId].push(event.message.id)
-            }
+            addLiveMessage(s, event.message)
             return
           }
 
@@ -692,8 +839,12 @@ export const useAppStore = create<AppState>()(
             if (bucket) {
               s.messageIdsByConv[event.conversationId] = bucket.filter((id) => !toRemove.has(id))
             }
+            clearDeletedHistoryMetadata(s, event.conversationId, toRemove)
             const replyId = s.replyTargetByConv[event.conversationId]
-            if (replyId && toRemove.has(replyId)) delete s.replyTargetByConv[event.conversationId]
+            if (replyId && toRemove.has(replyId)) {
+              delete s.replyTargetByConv[event.conversationId]
+              delete s.replyMessagePreviewByConv[event.conversationId]
+            }
             for (const id of event.artifactIds) {
               delete s.artifacts[id]
               if (s.previewArtifactId === id) s.previewArtifactId = null
@@ -923,6 +1074,181 @@ export const useAppStore = create<AppState>()(
 // ─── 派生 hooks ──────────────────────────────────────
 // 用 useShallow 防止派生数组每次新引用导致无限渲染（Zustand 5 标准做法）。
 import { useShallow } from 'zustand/react/shallow'
+function isProtectedHistoryRow(message: MessageRow | undefined): boolean {
+  return Boolean(message && (message.status === 'streaming' || message.id.startsWith('temp_')))
+}
+
+function recordHistoryMutations(state: AppState, event: StreamEvent, eventId: string): void {
+  const conversationId = event.type === 'message.added' ? event.message.conversationId : event.conversationId
+  if (state.activeConversationId !== conversationId && !state.messageHistoryRecency.includes(conversationId)) return
+  let ids: string[]
+  switch (event.type) {
+    case 'message.added':
+      ids = [event.message.id]
+      break
+    case 'message.removed':
+      ids = event.messageIds
+      break
+    case 'message.start':
+    case 'message.end':
+    case 'message.usage':
+    case 'part.start':
+    case 'part.delta':
+    case 'part.end':
+    case 'tool.call':
+    case 'tool.result':
+      ids = [event.messageId]
+      break
+    case 'run.end':
+      if (event.status === 'complete') return
+      ids = [...(state.messageIdsByConv[conversationId] ?? []), ...(state.messageHistoryLiveIdsByConv[conversationId] ?? [])]
+        .filter(id => state.messages[id]?.runId === event.runId)
+      break
+    default:
+      return
+  }
+  if (ids.length === 0) return
+  let mutations = state.messageHistoryMutationsByConv[conversationId]
+  if (!mutations || compareStreamEventIds(eventId, mutations.last) === null) {
+    mutations = { changes: new Map(), floor: null, last: eventId }
+    state.messageHistoryMutationsByConv[conversationId] = mutations
+  }
+  mutations.last = eventId
+  for (const id of ids) {
+    mutations.changes.delete(id)
+    mutations.changes.set(id, { eventId, removed: event.type === 'message.removed' })
+    if (mutations.changes.size <= MAX_HISTORY_MUTATIONS) continue
+    const oldest = mutations.changes.entries().next()
+    if (!oldest.done) {
+      mutations.floor = oldest.value[1].eventId
+      mutations.changes.delete(oldest.value[0])
+    }
+  }
+}
+
+function setLiveHistoryIds(state: AppState, conversationId: string, ids: string[]): void {
+  if (ids.length > 0) state.messageHistoryLiveIdsByConv[conversationId] = ids
+  else delete state.messageHistoryLiveIdsByConv[conversationId]
+}
+
+function releaseFinishedHistoryMessages(state: AppState, conversationId: string): void {
+  const hidden = state.messageHistoryLiveIdsByConv[conversationId]
+  if (hidden) {
+    setLiveHistoryIds(state, conversationId, hidden.filter((id) => {
+      if (isProtectedHistoryRow(state.messages[id])) return true
+      delete state.messages[id]
+      return false
+    }))
+  }
+  trimMessageHistory(state, conversationId, state.messageHistoryByConv[conversationId]?.newerCursor ? 'older' : 'newer')
+}
+
+function releaseHistoryRow(state: AppState, conversationId: string, id: string): void {
+  if (isProtectedHistoryRow(state.messages[id])) {
+    const hidden = state.messageHistoryLiveIdsByConv[conversationId] ??= []
+    if (!hidden.includes(id)) hidden.push(id)
+  } else {
+    delete state.messages[id]
+  }
+}
+
+function evictMessageHistory(state: AppState, conversationId: string, keepLive = false): void {
+  for (const id of state.messageIdsByConv[conversationId] ?? []) {
+    if (keepLive) releaseHistoryRow(state, conversationId, id)
+    else delete state.messages[id]
+  }
+  if (!keepLive) {
+    for (const id of state.messageHistoryLiveIdsByConv[conversationId] ?? []) delete state.messages[id]
+    delete state.messageHistoryLiveIdsByConv[conversationId]
+  }
+  delete state.messageIdsByConv[conversationId]
+  delete state.messageHistoryByConv[conversationId]
+  delete state.messageHistoryMutationsByConv[conversationId]
+  state.messageHistoryRecency = state.messageHistoryRecency.filter(id => id !== conversationId)
+}
+
+function rememberMessageHistory(state: AppState, conversationId: string): void {
+  if (state.messageHistoryRecency[0] !== conversationId) {
+    state.messageHistoryRecency = [conversationId, ...state.messageHistoryRecency.filter(id => id !== conversationId)]
+  }
+  const inactive = state.messageHistoryRecency.filter(id => id !== state.activeConversationId)
+  for (const id of inactive.slice(MAX_INACTIVE_HISTORIES)) evictMessageHistory(state, id, true)
+}
+
+function trimMessageHistory(state: AppState, conversationId: string, retain: 'older' | 'newer'): void {
+  const ids = state.messageIdsByConv[conversationId]
+  if (!ids || ids.length <= MAX_SETTLED_HISTORY_MESSAGES) return
+  const history = state.messageHistoryByConv[conversationId]
+  let settled = 0
+  const keepOlder = retain === 'older'
+  for (let offset = 0; offset < ids.length; offset++) {
+    const index = keepOlder ? offset : ids.length - offset - 1
+    const row = state.messages[ids[index]]
+    if (isProtectedHistoryRow(row) || ++settled <= MAX_SETTLED_HISTORY_MESSAGES) continue
+    const retained = keepOlder ? ids.slice(0, index) : ids.slice(index + 1)
+    for (const id of keepOlder ? ids.slice(index) : ids.slice(0, index + 1)) {
+      releaseHistoryRow(state, conversationId, id)
+    }
+    state.messageIdsByConv[conversationId] = retained
+    if (history) {
+      const anchorId = keepOlder ? retained.findLast(id => !id.startsWith('temp_')) : retained.find(id => !id.startsWith('temp_'))
+      if (anchorId) {
+        if (keepOlder) history.newerCursor = encodeMessageHistoryCursor(state.messages[anchorId])
+        else history.olderCursor = encodeMessageHistoryCursor(state.messages[anchorId])
+      }
+    }
+    return
+  }
+}
+
+function addLiveMessage(state: AppState, message: MessageRow): void {
+  const { id, conversationId, role } = message
+  const history = state.messageHistoryByConv[conversationId]
+  if (history && role !== 'system') {
+    const field = role === 'user' ? 'latestUserMessageId' : 'latestAgentMessageId'
+    const latest = history[field] ? state.messages[history[field]] : undefined
+    if (!latest || compareMessageHistoryPositions(message, latest) >= 0) history[field] = id
+  }
+  const resident = state.messageIdsByConv[conversationId]
+  if (history?.newerCursor && !resident?.includes(id)) {
+    if (isProtectedHistoryRow(message)) {
+      state.messages[id] = message
+      releaseHistoryRow(state, conversationId, id)
+    }
+    return
+  }
+  if (state.activeConversationId && state.activeConversationId !== conversationId
+    && !state.messageHistoryRecency.includes(conversationId)) {
+    if (isProtectedHistoryRow(message)) {
+      state.messages[id] = message
+      releaseHistoryRow(state, conversationId, id)
+    }
+    return
+  }
+  state.messages[id] = message
+  const ids = state.messageIdsByConv[conversationId] ??= []
+  if (!ids.includes(id)) {
+    ids.push(id)
+    if (history) ids.sort((a, b) => compareMessageHistoryPositions(state.messages[a], state.messages[b]))
+  }
+  if (!state.messageHistoryRecency.includes(conversationId)) rememberMessageHistory(state, conversationId)
+  trimMessageHistory(state, conversationId, history?.newerCursor ? 'older' : 'newer')
+}
+
+function clearDeletedHistoryMetadata(state: AppState, conversationId: string, deleted: Set<string>): void {
+  const hidden = state.messageHistoryLiveIdsByConv[conversationId]
+  if (hidden) setLiveHistoryIds(state, conversationId, hidden.filter(id => !deleted.has(id)))
+  const history = state.messageHistoryByConv[conversationId]
+  if (!history) return
+  for (const id of deleted) delete history.references[id]
+  for (const role of ['user', 'agent'] as const) {
+    const field = role === 'user' ? 'latestUserMessageId' : 'latestAgentMessageId'
+    if (!history[field] || !deleted.has(history[field])) continue
+    const ids = state.messageIdsByConv[conversationId] ?? []
+    history[field] = history.newerCursor ? null : ids.findLast(id => state.messages[id]?.role === role) ?? null
+  }
+}
+
 function findLatestAgentMessageIdForRun(
   messages: Record<string, MessageRow>,
   runId: string,
@@ -1113,7 +1439,8 @@ export const usePinnedMessagesForConversation = (conversationId: string) =>
   useAppStore(
     useShallow((s) => {
       const ids = s.conversations[conversationId]?.pinnedMessageIds ?? []
-      return ids.map((id) => s.messages[id]).filter(Boolean)
+      const references = s.messageHistoryByConv[conversationId]?.references
+      return ids.map((id) => s.messages[id] ?? references?.[id]).filter(Boolean)
     }),
   )
 
@@ -1181,6 +1508,8 @@ export const useDispatchForMessage = (messageId: string) =>
 /** 返回该会话最后一条 user 消息的 id（用于撤回 / 编辑入口判断）。 */
 export const useLatestUserMessageId = (conversationId: string): string | null =>
   useAppStore((s) => {
+    const history = s.messageHistoryByConv[conversationId]
+    if (history) return history.latestUserMessageId
     const ids = s.messageIdsByConv[conversationId]
     if (!ids) return null
     for (let i = ids.length - 1; i >= 0; i--) {
@@ -1193,6 +1522,8 @@ export const useLatestUserMessageId = (conversationId: string): string | null =>
 /** 返回该会话最后一条 agent 消息的 id（用于「重新生成」入口判断）。 */
 export const useLatestAgentMessageId = (conversationId: string): string | null =>
   useAppStore((s) => {
+    const history = s.messageHistoryByConv[conversationId]
+    if (history) return history.latestAgentMessageId
     const ids = s.messageIdsByConv[conversationId]
     if (!ids) return null
     for (let i = ids.length - 1; i >= 0; i--) {
@@ -1243,23 +1574,6 @@ export const useUnreadCount = (conversationId: string): number =>
   useAppStore((s) => s.unreadByConv[conversationId] ?? 0)
 
 /** 累计该会话所有 run 的 token 用量 + 上次 run 的 input prompt 长度（用于 ctx 仪表）+ per-agent 拆分。 */
-export interface ConversationUsageTotal {
-  /** 已按每条记录的语义归一化、包含缓存明细的总输入 */
-  inputTokens: number
-  outputTokens: number
-  cacheCreationTokens: number
-  cacheReadTokens: number
-  totalTokens: number
-  /** 最近一次有 usage 的 run 的 input prompt token 数（context window 仪表用） */
-  lastInputTokens: number
-  /** key = agentId，value = 该 agent 的累计总 prompt+output tokens */
-  byAgent: Record<string, number>
-  /** key = modelId，value = 累计总 prompt+output tokens */
-  byModel: Record<string, number>
-  /** 累计了多少个有 usage 的 run（用于显示 "N 次响应"） */
-  runCount: number
-}
-
 export const useConversationUsageTotal = (conversationId: string | null): ConversationUsageTotal => {
   // 三个数据源：
   //   runs map —— streaming 时实时填，含 lastInputTokens / model / agentId（最准）
@@ -1267,6 +1581,7 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
   //   agents map —— 取 model 兜底（messages 不存 model）
   // 用 useMemo 派生统计，避免在 store selector 里返回新对象引用导致 useShallow 死循环。
   const runs = useAppStore((s) => (conversationId ? s.runsByConv[conversationId] : undefined))
+  const historyUsage = useAppStore((s) => conversationId ? s.messageHistoryByConv[conversationId]?.usageTotals : undefined)
   const messageIds = useAppStore((s) =>
     conversationId ? s.messageIdsByConv[conversationId] : undefined,
   )
@@ -1307,6 +1622,8 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
       }
     }
 
+    if (!hasRunUsage && historyUsage) return historyUsage
+
     if (!hasRunUsage && messageIds) {
       // 走 messages 兜底：按 run_id 去重统计 runCount；按 message 累加 token；
       // model 通过 agent.modelId 推断（messages 不存 model，跑过的模型若已切换无法准确还原）
@@ -1338,5 +1655,5 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
 
     result.totalTokens = result.inputTokens + result.outputTokens
     return result
-  }, [runs, messageIds, messages, agents])
+  }, [runs, historyUsage, messageIds, messages, agents])
 }

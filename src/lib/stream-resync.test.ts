@@ -34,6 +34,13 @@ describe('selectEventsAfterSnapshot', () => {
     expect(selectEventsAfterSnapshot(queued, 'boot-5')).toEqual([queued[0].event])
   })
 
+  it('only drops events from the conversation actually covered by the snapshot', () => {
+    const active = delta('boot-4', 'already present')
+    const other = delta('boot-4', 'background conversation')
+    other.event.conversationId = 'conv_2'
+    expect(selectEventsAfterSnapshot([active, other], 'boot-5', 'conv_1')).toEqual([other.event])
+  })
+
   it('keeps everything when the server restarted between snapshot and events', () => {
     const queued = [delta('boot2-1', 'a')]
     expect(selectEventsAfterSnapshot(queued, 'boot1-99')).toEqual([queued[0].event])

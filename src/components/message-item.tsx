@@ -30,13 +30,22 @@ import {
   useLatestAgentMessageId,
   useLatestUserMessageId,
 } from '@/stores/app-store'
+import { requestMessageJump } from '@/stores/message-jump-store'
 
-function MessageItemImpl({ message }: { message: MessageRow }) {
+export type InlineMessageEdit = { draft: string; submitting: boolean }
+type EditUpdater = (current: InlineMessageEdit | null) => InlineMessageEdit | null
+
+function MessageItemImpl({
+  message, edit, onEditChange,
+}: {
+  message: MessageRow
+  edit: InlineMessageEdit | null
+  onEditChange: (messageId: string, update: EditUpdater) => void
+}) {
   const agentsMap = useAppStore((s) => s.agents)
   const agent = message.agentId ? agentsMap[message.agentId] : null
   const dispatch = useDispatchForMessage(message.id)
   const setReplyTarget = useAppStore((s) => s.setReplyTarget)
-  const highlightMessage = useAppStore((s) => s.highlightMessage)
   const isHighlighted = useAppStore((s) => s.highlightedMessageId === message.id)
   const isBookmarked = useAppStore((s) =>
     s.conversations[message.conversationId]?.bookmarkedMessageIds?.includes(message.id) ?? false,
@@ -49,7 +58,9 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
   )
   const setPinnedMessageIds = useAppStore((s) => s.setPinnedMessageIds)
   const parentMessage = useAppStore((s) =>
-    message.parentMessageId ? s.messages[message.parentMessageId] : null,
+    message.parentMessageId
+      ? s.messages[message.parentMessageId] ?? s.messageHistoryByConv[message.conversationId]?.references[message.parentMessageId]
+      : null,
   )
   const latestUserId = useLatestUserMessageId(message.conversationId)
   const latestAgentId = useLatestAgentMessageId(message.conversationId)
@@ -62,7 +73,7 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
   const isLatestUser = isUser && latestUserId === message.id
   const isLatestAgent = !isUser && latestAgentId === message.id
 
-  const [editing, setEditing] = useState(false)
+  const editing = edit !== null
   const [busy, setBusy] = useState(false)
   const [confirmWithdraw, setConfirmWithdraw] = useState(false)
 
@@ -79,12 +90,7 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
     .filter(Boolean)
 
   const jumpToParent = () => {
-    if (!parentMessage) return
-    const el = document.getElementById(`message-${parentMessage.id}`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
-    highlightMessage(parentMessage.id)
+    if (message.parentMessageId) requestMessageJump(message.conversationId, message.parentMessageId)
   }
 
   const handleWithdraw = async () => {
@@ -106,8 +112,8 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
   }
 
   const handleEditCommit = async (next: string) => {
-    if (busy) return
-    setBusy(true)
+    if (!edit || edit.submitting || busy) return
+    onEditChange(message.id, (current) => current && { ...current, submitting: true })
     try {
       const result = await editAndResendMessage(
         message.id,
@@ -118,11 +124,11 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
       removeMessages(message.conversationId, result.deletedMessageIds)
       if (result.deletedArtifactIds.length > 0) removeArtifacts(result.deletedArtifactIds)
       upsertMessage(result.newMessage)
-      setEditing(false)
+      onEditChange(message.id, () => null)
     } catch (err) {
       console.error('[MessageItem] edit failed', err)
     } finally {
-      setBusy(false)
+      onEditChange(message.id, (current) => current && { ...current, submitting: false })
     }
   }
 
@@ -230,13 +236,13 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
           )}
         >
           {/* 编辑模式：textarea 取代 parts */}
-          {editing ? (
+          {edit ? (
             <EditMessageInput
-              key={message.id}
-              initial={initialText}
-              submitting={busy}
+              draft={edit.draft}
+              submitting={edit.submitting}
+              onChange={(draft) => onEditChange(message.id, (current) => current && { ...current, draft })}
               onCommit={(next) => void handleEditCommit(next)}
-              onCancel={() => setEditing(false)}
+              onCancel={() => onEditChange(message.id, () => null)}
             />
           ) : (
             <>
@@ -317,7 +323,7 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
               <>
                 <button
                   type="button"
-                  onClick={() => setEditing(true)}
+                  onClick={() => onEditChange(message.id, () => ({ draft: initialText, submitting: false }))}
                   disabled={busy}
                   className="transition hover:text-foreground disabled:opacity-30"
                   title="编辑文字并重发（@ 和附件保持不变）"

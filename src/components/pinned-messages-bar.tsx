@@ -8,7 +8,9 @@ import { extractMessageSummary } from '@/components/quoted-message'
 import type { MessageRow } from '@/db/schema'
 import { toggleMessagePin } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { useAppStore, usePinnedMessagesForConversation } from '@/stores/app-store'
+import { useAppStore } from '@/stores/app-store'
+import { requestMessageJump } from '@/stores/message-jump-store'
+import { useShallow } from 'zustand/react/shallow'
 
 /**
  * 「已 pin 消息」横幅。挂在 ChatPanel 的 chat tab 视图顶部，MessageList 之上。
@@ -21,7 +23,11 @@ import { useAppStore, usePinnedMessagesForConversation } from '@/stores/app-stor
  * （agent-runner 在拼 system prompt 时会注入 <pinned_messages> 块）。
  */
 export function PinnedMessagesBar({ conversationId }: { conversationId: string }) {
-  const pinned = usePinnedMessagesForConversation(conversationId)
+  const pinned = useAppStore(useShallow((s) =>
+    (s.conversations[conversationId]?.pinnedMessageIds ?? [])
+      .map((id) => s.messages[id] ?? s.messageHistoryByConv[conversationId]?.references[id])
+      .filter(Boolean),
+  ))
   const [expanded, setExpanded] = useState(false)
 
   if (pinned.length === 0) return null
@@ -68,18 +74,11 @@ function PinnedRow({
 }) {
   const agentsMap = useAppStore((s) => s.agents)
   const setPinnedMessageIds = useAppStore((s) => s.setPinnedMessageIds)
-  const highlightMessage = useAppStore((s) => s.highlightMessage)
   const [busy, setBusy] = useState(false)
 
   const agent = message.agentId ? agentsMap[message.agentId] : null
   const speakerName = message.role === 'user' ? '用户' : agent?.name ?? 'Unknown'
   const summary = extractMessageSummary(message.parts)
-
-  const jumpTo = () => {
-    const el = document.getElementById(`message-${message.id}`)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    highlightMessage(message.id)
-  }
 
   const handleUnpin = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -101,7 +100,7 @@ function PinnedRow({
         'group flex items-center gap-2 rounded px-1 py-1 text-xs transition hover:bg-primary/10',
         'cursor-pointer',
       )}
-      onClick={jumpTo}
+      onClick={() => requestMessageJump(conversationId, message.id)}
     >
       <Pin className="size-3 shrink-0 fill-primary text-primary" />
       {agent ? (

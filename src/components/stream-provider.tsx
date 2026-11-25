@@ -1,17 +1,17 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 
 import {
   fetchConversations,
-  fetchMessagesSnapshot,
   fetchPendingBashCommands,
   fetchPendingDispatchPlans,
   fetchPendingQuestions,
   fetchPendingSkillInstalls,
   fetchPendingWrites,
 } from '@/lib/api'
-import { selectEventsAfterSnapshot, type QueuedStreamEvent } from '@/lib/stream-resync'
+import { fetchMessageHistory } from '@/lib/message-history'
+import { compareStreamEventIds, selectQueuedEventsAfterSnapshot, type QueuedStreamEvent } from '@/lib/stream-resync'
 import type { StreamEvent } from '@/shared/types'
 import { useAppStore } from '@/stores/app-store'
 
@@ -28,82 +28,169 @@ import { useAppStore } from '@/stores/app-store'
 
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 10_000
+const RECOVERY_TIMEOUT_MS = 10_000
+const RECOVERY_MAX_ATTEMPTS = 3
+const RECOVERY_MAX_EVENTS = 1000
+const RECOVERY_MAX_BYTES = 4 * 1024 * 1024
+const encoder = new TextEncoder()
+
+type RecoveryAttempt = {
+  controller: AbortController
+  queue: QueuedStreamEvent[]
+  bytes: number
+  timeout: ReturnType<typeof setTimeout> | null
+}
+type Recovery = {
+  attempt: RecoveryAttempt | null
+  attempts: number
+  retry: ReturnType<typeof setTimeout> | null
+}
 
 let activeSource: EventSource | null = null
 let refCount = 0
-let lastEventId: string | null = null
+let appliedEventId: string | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempt = 0
-let resyncQueue: QueuedStreamEvent[] | null = null
-let resyncGeneration = 0
+let unsubscribeConversation: (() => void) | null = null
+let recovery: Recovery | null = null
+let recoveryFailed = false
+const recoveryListeners = new Set<() => void>()
 
-export async function resyncFromSnapshot(): Promise<void> {
-  const generation = ++resyncGeneration
-  resyncQueue = []
-  const store = useAppStore.getState()
-  store.resetForStreamResync()
-  const convId = store.activeConversationId
-
-  let snapshotEventId: string | null = null
-  try {
-    const [conversations, snapshot] = await Promise.all([
-      fetchConversations(),
-      convId ? fetchMessagesSnapshot(convId) : Promise.resolve(null),
-      convId ? refreshPendingFor(convId, generation) : Promise.resolve(),
-    ])
-    if (generation !== resyncGeneration) return
-    const s = useAppStore.getState()
-    s.setConversations(conversations)
-    if (convId && snapshot) {
-      s.setMessagesForConversation(convId, snapshot.messages)
-      snapshotEventId = snapshot.eventId
-    }
-  } catch (err) {
-    console.error('[StreamProvider] resync snapshot fetch failed', err)
-  }
-  if (generation !== resyncGeneration) return
-
-  const queued = resyncQueue ?? []
-  resyncQueue = null
-  const { applyEvent } = useAppStore.getState()
-  const events = snapshotEventId
-    ? selectEventsAfterSnapshot(queued, snapshotEventId)
-    : queued.map((q) => q.event)
-  for (const event of events) applyEvent(event)
+function subscribeRecovery(listener: () => void): () => void {
+  recoveryListeners.add(listener)
+  return () => { recoveryListeners.delete(listener) }
 }
 
-async function refreshPendingFor(conversationId: string, generation: number): Promise<void> {
-  const [writes, bashCommands, questions, plans, skillInstalls] = await Promise.all([
-    fetchPendingWrites(conversationId),
-    fetchPendingBashCommands(conversationId),
-    fetchPendingQuestions(conversationId),
-    fetchPendingDispatchPlans(conversationId),
-    fetchPendingSkillInstalls(conversationId),
+function signalRecoveryFailure(failed: boolean): void {
+  if (failed === recoveryFailed) return
+  recoveryFailed = failed
+  for (const listener of recoveryListeners) listener()
+}
+
+function cancelRecoveryWork(state: Recovery): void {
+  const attempt = state.attempt
+  state.attempt = null
+  if (attempt) {
+    if (attempt.timeout !== null) clearTimeout(attempt.timeout)
+    attempt.queue.length = 0
+    attempt.controller.abort()
+  }
+  if (state.retry !== null) clearTimeout(state.retry)
+  state.retry = null
+}
+
+function isCurrentAttempt(state: Recovery, attempt: RecoveryAttempt): boolean {
+  return recovery === state && state.attempt === attempt
+}
+
+function rejectRecoveryAttempt(state: Recovery, attempt: RecoveryAttempt): void {
+  if (!isCurrentAttempt(state, attempt)) return
+  cancelRecoveryWork(state)
+  if (state.attempts >= RECOVERY_MAX_ATTEMPTS) {
+    signalRecoveryFailure(true)
+    return
+  }
+  state.retry = setTimeout(() => {
+    state.retry = null
+    void runRecoveryAttempt(state)
+  }, RECONNECT_BASE_DELAY_MS * 2 ** (state.attempts - 1))
+}
+
+function fetchPending(conversationId: string, signal: AbortSignal) {
+  return Promise.all([
+    fetchPendingWrites(conversationId, signal),
+    fetchPendingBashCommands(conversationId, signal),
+    fetchPendingQuestions(conversationId, signal),
+    fetchPendingDispatchPlans(conversationId, signal),
+    fetchPendingSkillInstalls(conversationId, signal),
   ])
-  if (generation !== resyncGeneration) return
-  const s = useAppStore.getState()
-  s.setPendingWritesForConversation(conversationId, writes)
-  s.setPendingBashCommandsForConversation(conversationId, bashCommands)
-  s.setPendingQuestionsForConversation(conversationId, questions)
-  s.setPendingDispatchPlansForConversation(conversationId, plans)
-  s.setPendingSkillInstallsForConversation(conversationId, skillInstalls)
+}
+
+async function runRecoveryAttempt(state: Recovery): Promise<void> {
+  if (recovery !== state || (activeSource && activeSource.readyState !== EventSource.OPEN)) return
+  const conversationId = useAppStore.getState().activeConversationId
+  const attempt: RecoveryAttempt = {
+    controller: new AbortController(), queue: [], bytes: 0, timeout: null,
+  }
+  state.attempt = attempt
+  state.attempts++
+  attempt.timeout = setTimeout(() => rejectRecoveryAttempt(state, attempt), RECOVERY_TIMEOUT_MS)
+  const { signal } = attempt.controller
+  try {
+    const [conversations, page, pending] = await Promise.all([
+      fetchConversations(signal),
+      conversationId ? fetchMessageHistory(conversationId, { signal }) : null,
+      conversationId ? fetchPending(conversationId, signal) : null,
+    ])
+    if (!isCurrentAttempt(state, attempt)) return
+    if (conversationId !== useAppStore.getState().activeConversationId) {
+      void resyncFromSnapshot()
+      return
+    }
+    const lastQueuedId = attempt.queue.at(-1)?.id
+    const snapshotEventId = page?.eventId
+    if (conversationId && (typeof snapshotEventId !== 'string'
+      || compareStreamEventIds(snapshotEventId, snapshotEventId) === null
+      || attempt.queue.some(({ id }) => id && compareStreamEventIds(id, snapshotEventId) === null))) {
+      rejectRecoveryAttempt(state, attempt)
+      return
+    }
+    const events = snapshotEventId && conversationId
+      ? selectQueuedEventsAfterSnapshot(attempt.queue, snapshotEventId, conversationId)
+      : attempt.queue
+
+    const store = useAppStore.getState()
+    store.resetForStreamResync()
+    store.setConversations(conversations)
+    if (conversationId && page && pending) {
+      const [writes, bashCommands, questions, plans, skillInstalls] = pending
+      store.setMessageHistoryPage(conversationId, page, 'replace')
+      store.setPendingWritesForConversation(conversationId, writes)
+      store.setPendingBashCommandsForConversation(conversationId, bashCommands)
+      store.setPendingQuestionsForConversation(conversationId, questions)
+      store.setPendingDispatchPlansForConversation(conversationId, plans)
+      store.setPendingSkillInstallsForConversation(conversationId, skillInstalls)
+    }
+    for (const { event, id } of events) store.applyEvent(event, id || undefined)
+    if (snapshotEventId) appliedEventId = snapshotEventId
+    if (lastQueuedId && (!snapshotEventId || (compareStreamEventIds(lastQueuedId, snapshotEventId) ?? 0) > 0)) {
+      appliedEventId = lastQueuedId
+    }
+    cancelRecoveryWork(state)
+    recovery = null
+    signalRecoveryFailure(false)
+  } catch {
+    rejectRecoveryAttempt(state, attempt)
+  }
+}
+
+export async function resyncFromSnapshot(): Promise<void> {
+  if (recovery) cancelRecoveryWork(recovery)
+  const state: Recovery = { attempts: 0, attempt: null, retry: null }
+  recovery = state
+  signalRecoveryFailure(false)
+  await runRecoveryAttempt(state)
 }
 
 function connect(): void {
   // 新建的 EventSource 不会带 Last-Event-ID 头，游标改走 query（服务端头优先）
-  const url = lastEventId ? `/api/stream?lastEventId=${encodeURIComponent(lastEventId)}` : '/api/stream'
+  const url = appliedEventId ? `/api/stream?lastEventId=${encodeURIComponent(appliedEventId)}` : '/api/stream'
   const source = new EventSource(url)
   activeSource = source
 
   source.onopen = () => {
+    if (activeSource !== source) return
     reconnectAttempt = 0
     useAppStore.getState().setStreamConnected(true)
+    if (recovery && !recovery.attempt && recovery.retry === null) void resyncFromSnapshot()
   }
 
   source.onerror = () => {
+    if (activeSource !== source) return
+    if (recovery) cancelRecoveryWork(recovery)
     useAppStore.getState().setStreamConnected(false)
     // 网络错误浏览器会自动重连；但服务端重启期间返回非 200 时 EventSource 会永久放弃（CLOSED），需要自己重建
-    if (source.readyState !== EventSource.CLOSED || activeSource !== source) return
+    if (source.readyState !== EventSource.CLOSED || reconnectTimer !== null) return
     const delay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempt++)
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
@@ -112,6 +199,7 @@ function connect(): void {
   }
 
   source.onmessage = (e) => {
+    if (activeSource !== source) return
     let parsed: unknown
     try {
       parsed = JSON.parse(e.data)
@@ -119,8 +207,6 @@ function connect(): void {
       return
     }
     if (!parsed || typeof parsed !== 'object') return
-    if (e.lastEventId) lastEventId = e.lastEventId
-
     const obj = parsed as { type?: string }
     if (obj.type === 'connected') {
       useAppStore.getState().setStreamConnected(true)
@@ -130,19 +216,35 @@ function connect(): void {
       void resyncFromSnapshot()
       return
     }
+    if (obj.type === 'heartbeat') return
 
-    if (resyncQueue) {
-      resyncQueue.push({ id: e.lastEventId, event: parsed as StreamEvent })
+    if (recovery) {
+      const attempt = recovery.attempt
+      if (!attempt) return
+      const bytes = encoder.encode(e.data).byteLength
+      if (attempt.queue.length >= RECOVERY_MAX_EVENTS || attempt.bytes + bytes > RECOVERY_MAX_BYTES) {
+        rejectRecoveryAttempt(recovery, attempt)
+        return
+      }
+      attempt.queue.push({ id: e.lastEventId, event: parsed as StreamEvent })
+      attempt.bytes += bytes
       return
     }
-    useAppStore.getState().applyEvent(parsed as StreamEvent)
+    useAppStore.getState().applyEvent(parsed as StreamEvent, e.lastEventId || undefined)
+    if (e.lastEventId) appliedEventId = e.lastEventId
   }
 }
 
 export function StreamProvider({ children }: { children: React.ReactNode }) {
+  const failed = useSyncExternalStore(subscribeRecovery, () => recoveryFailed, () => false)
   useEffect(() => {
     refCount++
-    if (!activeSource) connect()
+    if (!activeSource) {
+      unsubscribeConversation = useAppStore.subscribe((state, previous) => {
+        if (recovery && state.activeConversationId !== previous.activeConversationId) void resyncFromSnapshot()
+      })
+      connect()
+    }
 
     return () => {
       refCount--
@@ -150,6 +252,11 @@ export function StreamProvider({ children }: { children: React.ReactNode }) {
       if (refCount <= 0) {
         if (reconnectTimer) clearTimeout(reconnectTimer)
         reconnectTimer = null
+        if (recovery) cancelRecoveryWork(recovery)
+        recovery = null
+        signalRecoveryFailure(false)
+        unsubscribeConversation?.()
+        unsubscribeConversation = null
         activeSource?.close()
         activeSource = null
         refCount = 0
@@ -158,5 +265,15 @@ export function StreamProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  return <>{children}</>
+  return (
+    <>
+      {children}
+      {failed && (
+        <div role="alert" className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-md border bg-popover px-4 py-2 text-sm text-popover-foreground shadow-md">
+          会话同步失败
+          <button type="button" className="font-medium underline" onClick={() => void resyncFromSnapshot()}>重试</button>
+        </div>
+      )}
+    </>
+  )
 }
